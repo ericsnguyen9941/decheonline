@@ -1,0 +1,20 @@
+{
+  "name": "@aoe/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aoe/protocol": "*",
+    "@aoe/sim": "*",
+    "pixi.js": "^8.23.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  }
+}

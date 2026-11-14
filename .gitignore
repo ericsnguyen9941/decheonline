@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
+.DS_Store
+
+# Original game files and everything derived from them stay out of git.
+assets-local/
