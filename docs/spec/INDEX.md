@@ -87,6 +87,8 @@ Spec: `economy.md` (gather, hunt/wood, drop-off, construction, production queue,
 
 ## Combat, projectiles, line of sight
 
+Spec: `combat.md`.
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/act_atak.cpp` | 9/0/2/2 | `RGE_Action_Attack::update` :263 [L], `ready_to_attack` [L], `do_attack` [M]; two constructors [N] | R2 |
