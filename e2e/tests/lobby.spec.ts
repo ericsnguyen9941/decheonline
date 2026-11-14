@@ -3,9 +3,9 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 // speed=20 runs the lockstep clock 20x faster so 50 turns take a few seconds.
 const URL = '/?debug=net&speed=20';
 
-async function open(browser: Browser): Promise<Page> {
+async function open(browser: Browser, url = URL): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
-  await page.goto(URL);
+  await page.goto(url);
   return page;
 }
 
@@ -24,9 +24,9 @@ async function joinGame(page: Page, code: string, name: string): Promise<void> {
 }
 
 /** Host creates, guest joins by code, both ready, host starts. */
-async function startGame(browser: Browser): Promise<[Page, Page]> {
-  const host = await open(browser);
-  const guest = await open(browser);
+async function startGame(browser: Browser, url = URL): Promise<[Page, Page]> {
+  const host = await open(browser, url);
+  const guest = await open(browser, url);
   const code = await createGame(host, 'Alice');
   await joinGame(guest, code, 'Bob');
   await expect(host.getByTestId('player-1')).toContainText('Bob');
@@ -37,8 +37,7 @@ async function startGame(browser: Browser): Promise<[Page, Page]> {
   await expect(host.getByTestId('start')).toBeEnabled();
   await expect(guest.getByTestId('start')).toHaveCount(0);
   await host.getByTestId('start').click();
-  await expect(host.getByTestId('net-debug')).toBeVisible();
-  await expect(guest.getByTestId('net-debug')).toBeVisible();
+  await expect(host.getByTestId('game-canvas')).toBeVisible();
   return [host, guest];
 }
 
@@ -102,4 +101,14 @@ test('both players see the same map, and it is part of the synced hash', async (
   const hashes = await Promise.all([host, guest].map((p) => p.evaluate(() => window.__game!.hash(10))));
   expect(hashes[0]).toBeDefined();
   expect(hashes[0]).toBe(hashes[1]);
+});
+
+test('the test button and turn/hash text exist only with ?debug=net', async ({ browser }) => {
+  const [on] = await startGame(browser);
+  await expect(on.getByTestId('send-test')).toBeVisible();
+  await expect(on.getByTestId('net-status')).toContainText('hash');
+  const [off] = await startGame(browser, '/?speed=20');
+  await expect(off.getByTestId('net-debug')).toHaveCount(0);
+  await expect(off.getByTestId('send-test')).toHaveCount(0);
+  await expect(off.getByTestId('net-status')).toHaveCount(0);
 });

@@ -168,11 +168,11 @@ button.primary {
   text-align: center;
 }
 
-/* Debug panel (?debug=net): a strip over the canvas. */
+/* Debug panel (?debug=net): a strip at the top right, below the HUD's top strip and clear of the bottom panels. */
 [data-testid='net-debug'] {
   position: fixed;
-  left: 0;
-  bottom: 0;
+  right: 0;
+  top: 24px;
   z-index: 10;
   padding: 0.3rem 0.6rem;
   font: 0.8rem monospace;
