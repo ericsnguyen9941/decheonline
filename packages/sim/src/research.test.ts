@@ -128,6 +128,23 @@ describe('techs.md §7.1 vector R1: research timing in 90 ms steps', () => {
     expect(world.researchDone[1]![BARRACKS_BUILT]).toBe(2.070000410079956);
   });
 
+  test('the other rows: Leather Armor - Soldiers 334 steps, Bronze Age 1556, Iron Age 1778 (state 1 and resources set by the test)', () => {
+    const rows: [tech: number, steps: number, sum: number][] = [
+      [40, 334, 30.060041427612305],
+      [102, 1556, 140.03700256347656],
+      [IRON_AGE, 1778, 160.0161895751953],
+    ];
+    for (const [tech, steps, sum] of rows) {
+      const { world, tc } = toolAgeReady();
+      world.techs[1]![tech] = TECH_AVAILABLE;
+      world.attributes[1]![ATTR_FOOD] = 2000;
+      world.attributes[1]![ATTR_GOLD] = 2000;
+      orderResearch(world.gameContext(), tc, tech);
+      expect(world.techs[1]![tech]).toBe(TECH_RESEARCHING);
+      expect([tech, stepResearch(world, tc, 90), world.researchDone[1]![tech]]).toEqual([tech, steps, sum]);
+    }
+  });
+
   test('through the command: paid on its own step, which adds the first work; done when the 90 ms sum reaches 120', () => {
     const { world, tc } = toolAgeReady();
     world.attributes[1]![ATTR_FOOD] = 600;

@@ -536,7 +536,8 @@ The command's step counts as step 1 (§6): a Tool Age ordered by a command
 that runs on step N is done during the update of step N + 1333, its 500
 food paid in step N before any work. `research_done` keeps the sum after
 completion. Tests: `packages/sim/src/research.test.ts` "techs.md §7.1
-vector R1" (the 90 ms, 100 ms and 2-second rows, and the command path).
+vector R1" (every row above, the 100 ms Tool Age row, and the command
+path).
 
 ### 7.2 Cost and refund
 
