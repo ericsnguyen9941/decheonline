@@ -1,3 +1,4 @@
+import './style.css';
 import { Application } from 'pixi.js';
 import { createAssetProvider } from './assets';
 import { renderAssetsDebug, type DebugViewReport } from './assets/debug-view';
@@ -17,12 +18,16 @@ async function main(): Promise<void> {
   if (!host) throw new Error('missing #game element');
 
   const app = new Application();
-  await app.init({ width: 800, height: 450, background: '#2d3b1f' });
+  // Black outside the map, as in the original; the canvas follows the window size.
+  await app.init({ resizeTo: window, background: '#000000' });
   app.canvas.dataset.testid = 'game-canvas';
   host.append(app.canvas);
   document.title = GAME_TITLE;
 
   const params = new URLSearchParams(location.search);
+  // The canvas stays hidden behind the lobby until a game starts; the debug views have no lobby.
+  const setGameVisible = (visible: boolean) => (host.hidden = !visible);
+  setGameVisible(params.get('debug') === 'assets' || params.get('debug') === 'map');
   if (params.get('debug') === 'assets') {
     // Unit 83 is the villager in the shipped dat; terrain 0 is Grass.
     const view = await renderAssetsDebug(app, await createAssetProvider(), {
@@ -46,7 +51,7 @@ async function main(): Promise<void> {
 
   const lobbyHost = document.getElementById('multiplayer');
   if (!lobbyHost) throw new Error('missing #multiplayer element');
-  await startMultiplayer(lobbyHost, app, { debug: params.get('debug') === 'net', speed: Number(params.get('speed') ?? 1) || 1 });
+  await startMultiplayer(lobbyHost, app, { debug: params.get('debug') === 'net', speed: Number(params.get('speed') ?? 1) || 1, setGameVisible });
 }
 
 void main();

@@ -8,6 +8,9 @@ async function open(page: Page, url = URL): Promise<void> {
   await page.waitForFunction(() => window.__map !== undefined && window.__map.drawnTiles() > 0);
 }
 
+// The canvas fills the window, so the pixel positions below assume this window size.
+test.use({ viewport: { width: 800, height: 450 } });
+
 const camera = (page: Page) => page.evaluate(() => window.__map!.camera());
 
 test('the fixed test map renders to the baseline screenshot', async ({ page }) => {

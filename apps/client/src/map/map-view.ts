@@ -22,6 +22,11 @@ export class MapView {
   private readonly active = new Map<number, Sprite>();
   private readonly spare: Sprite[] = [];
   private readonly tick: (ticker: Ticker) => void;
+  private readonly onResize = (width: number, height: number) => {
+    this.camera.resize(width, height);
+    this.drawnAt = null;
+    this.refresh();
+  };
   private drawnAt: { x: number; y: number } | null = null;
 
   private constructor(
@@ -39,6 +44,7 @@ export class MapView {
       this.refresh();
     };
     app.ticker.add(this.tick);
+    app.renderer.on('resize', this.onResize);
     const size = mapPixelSize(map.width, map.height);
     this.camera.centerOn(size.w / 2, size.h / 2);
     this.refresh();
@@ -119,6 +125,7 @@ export class MapView {
 
   destroy(): void {
     this.app.ticker.remove(this.tick);
+    this.app.renderer.off('resize', this.onResize);
     this.controls.destroy();
     this.app.stage.removeChild(this.layer);
     this.layer.destroy({ children: true });

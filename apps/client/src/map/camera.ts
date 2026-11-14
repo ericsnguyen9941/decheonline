@@ -16,9 +16,18 @@ export class Camera {
   constructor(
     private readonly mapWidth: number,
     private readonly mapHeight: number,
-    readonly viewW: number,
-    readonly viewH: number,
+    public viewW: number,
+    public viewH: number,
   ) {}
+
+  /** The viewport changed size; keeps the view centre where it was, then clamps. */
+  resize(viewW: number, viewH: number): void {
+    const cx = this.x + this.viewW / 2;
+    const cy = this.y + this.viewH / 2;
+    this.viewW = viewW;
+    this.viewH = viewH;
+    this.centerOn(cx, cy);
+  }
 
   /** Move so the viewport's top-left is `(x, y)`, clamped; returns whether the camera moved. */
   moveTo(x: number, y: number): boolean {

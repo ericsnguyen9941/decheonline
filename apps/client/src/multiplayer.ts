@@ -55,10 +55,12 @@ export interface MultiplayerOptions {
   debug: boolean;
   /** Lockstep pace multiplier; 1 is the original's speed. */
   speed: number;
+  /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
+  setGameVisible(visible: boolean): void;
 }
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -79,6 +81,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     mapView = undefined;
     window.__game = undefined;
     window.__map = undefined;
+    setGameVisible(false);
     session.finish();
     showEndDialog(kind, detail, () => undefined);
   };
@@ -91,6 +94,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       start: { seed: start.seed, turnMs: start.turnMs, commandDelay: start.commandDelay, playerCount: start.players.length },
     });
     lockstep = game;
+    setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
     game.onEnded = () => end('peer-left', 'Your opponent left the game.');
     if (debug) panel = debugPanel(host, game, player, () => units);

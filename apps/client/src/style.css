@@ -1,0 +1,196 @@
+/* Page shell and lobby, in the look of the original's menus: dark stone, parchment panels, gold lettering. */
+:root {
+  --stone: #4a4640;
+  --stone-dark: #2b2824;
+  --stone-light: #8a8478;
+  --parchment: #d8c59a;
+  --parchment-dark: #b79d68;
+  --ink: #2c1a0a;
+  --gold: #e8c766;
+  --blood: #8a1c14;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--parchment);
+  font-family: Georgia, 'Palatino Linotype', Palatino, serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  background: radial-gradient(ellipse at center, #5a5248 0%, var(--stone-dark) 70%, #12100d 100%);
+}
+
+/* The canvas fills the window and sits over the lobby while a game runs. */
+#game {
+  position: fixed;
+  inset: 0;
+  background: #000;
+}
+#game[hidden] {
+  display: none;
+}
+#game canvas {
+  display: block;
+}
+body:has(#game:not([hidden])) header {
+  display: none;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 3rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+  text-shadow: 0 2px 0 #000, 0 0 18px rgba(232, 199, 102, 0.35);
+}
+
+#lobby .panel {
+  box-sizing: border-box;
+  width: min(26rem, 90vw);
+  padding: 1.5rem 2rem 2rem;
+  color: var(--ink);
+  background: linear-gradient(180deg, #e2d1a6 0%, var(--parchment) 40%, var(--parchment-dark) 100%);
+  border: 6px solid var(--stone);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+  box-shadow: 0 0 0 2px #000, 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+#lobby h2 {
+  margin: 0 0 1rem;
+  text-align: center;
+  font-size: 1.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#lobby label {
+  display: block;
+  font-weight: bold;
+}
+#lobby .row {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.8rem 0 0;
+}
+#lobby .row > * {
+  flex: 1;
+}
+#lobby .or {
+  margin: 1.1rem 0 0;
+  text-align: center;
+  font-style: italic;
+}
+
+#lobby input {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  color: var(--ink);
+  background: #f1e6c6;
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-dark) var(--stone-light) var(--stone-light) var(--stone-dark);
+}
+#lobby .row input {
+  margin-top: 0;
+  min-width: 0;
+  text-transform: uppercase;
+}
+
+button,
+#lobby button {
+  padding: 0.55rem 1rem;
+  font: bold 1rem Georgia, 'Palatino Linotype', Palatino, serif;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+  cursor: pointer;
+  background: linear-gradient(180deg, #6b665c 0%, var(--stone) 50%, var(--stone-dark) 100%);
+  border: 3px solid var(--stone-dark);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+  box-shadow: 0 0 0 1px #000;
+  text-shadow: 0 1px 0 #000;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+button:active:not(:disabled) {
+  border-color: var(--stone-dark) var(--stone-light) var(--stone-light) var(--stone-dark);
+}
+button:disabled {
+  cursor: not-allowed;
+  color: #8f8a7e;
+  filter: grayscale(1) brightness(0.8);
+}
+button.primary {
+  color: #fff3c4;
+}
+
+#lobby .invite {
+  margin: 0 0 1rem;
+  text-align: center;
+}
+#lobby .invite strong {
+  display: block;
+  margin-top: 0.2rem;
+  font: bold 2rem 'Courier New', monospace;
+  letter-spacing: 0.3em;
+  color: var(--blood);
+}
+#lobby .players {
+  margin: 0;
+  padding: 0.6rem 1rem;
+  list-style: none;
+  background: rgba(255, 248, 220, 0.45);
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-dark) var(--stone-light) var(--stone-light) var(--stone-dark);
+}
+#lobby .players li {
+  padding: 0.2rem 0;
+}
+#lobby .error {
+  margin: 1rem 0 0;
+  font-weight: bold;
+  text-align: center;
+  color: var(--blood);
+}
+#lobby .note {
+  margin: 1rem 0 0;
+  font-style: italic;
+  text-align: center;
+}
+
+/* Debug panel (?debug=net): a strip over the canvas. */
+[data-testid='net-debug'] {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  z-index: 10;
+  padding: 0.3rem 0.6rem;
+  font: 0.8rem monospace;
+  color: var(--parchment);
+  background: rgba(0, 0, 0, 0.6);
+}
+
+dialog {
+  padding: 1.5rem 2rem;
+  color: var(--ink);
+  background: linear-gradient(180deg, #e2d1a6 0%, var(--parchment-dark) 100%);
+  border: 6px solid var(--stone);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+  font-family: Georgia, 'Palatino Linotype', Palatino, serif;
+}
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+dialog h2 {
+  margin-top: 0;
+}
