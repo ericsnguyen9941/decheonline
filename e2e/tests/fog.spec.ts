@@ -84,9 +84,10 @@ test('each player sees only its own area; the other player units show once in si
   await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids as number[], x as number, y as number), [mine.map((u) => u.id), target.x - 2, target.y]);
   await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x0f, [target.col, target.row], { timeout: 60_000 });
   await expect.poll(() => drawnAt(host, target)).not.toBeNull();
-  const walker = (await units(guest)).find((u) => u.id === mine[0]!.id)!;
-  await guest.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x0f, [walker.col, walker.row]);
-  await expect.poll(async () => drawnAt(guest, (await units(guest)).find((u) => u.id === mine[0]!.id)!)).not.toBeNull();
+  // The walker keeps moving: read its current tile on every poll.
+  const walker = async () => (await units(guest)).find((u) => u.id === mine[0]!.id)!;
+  await expect.poll(async () => { const w = await walker(); return visibility(guest, w.col, w.row); }, { timeout: 30_000 }).toBe(VISIBLE);
+  await expect.poll(async () => drawnAt(guest, await walker()), { timeout: 30_000 }).not.toBeNull();
 
   // Walking home again leaves the guest's tile fogged for the host, and its villager no longer drawn there.
   await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids as number[], x as number, y as number), [mine.map((u) => u.id), mine[0]!.x, mine[0]!.y]);

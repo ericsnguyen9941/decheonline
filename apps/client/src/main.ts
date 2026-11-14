@@ -59,10 +59,12 @@ async function main(): Promise<void> {
   const lobbyHost = document.getElementById('multiplayer');
   if (!lobbyHost) throw new Error('missing #multiplayer element');
   const resources = params.has('resources') ? Number(params.get('resources')) : undefined;
+  const bowmen = Number(params.get('bowmen') ?? 0);
   await startMultiplayer(lobbyHost, app, {
     debug: params.get('debug') === 'net',
     speed: Number(params.get('speed') ?? 1) || 1,
     resources: resources !== undefined && Number.isFinite(resources) ? resources : undefined,
+    bowmen: Number.isInteger(bowmen) && bowmen > 0 ? bowmen : undefined,
     setGameVisible,
   });
 }

@@ -151,15 +151,24 @@ export interface MultiplayerOptions {
    * for the same N, or their games differ from the first turn.
    */
   resources?: number;
+  /**
+   * Debug only (`?debug=net&bowmen=N`): every player starts with N Bowmen in a row above its Villagers, for a ranged
+   * attack (and its flare) without building an Archery Range first. Both clients must ask for the same N.
+   */
+  bowmen?: number;
   /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
   setGameVisible(visible: boolean): void;
 }
+
+// Master ids (empires.dat): Villager, Bowman.
+const VILLAGER = 83;
+const BOWMAN = 4;
 
 /** `PLAYER_ATTRIBUTE_CURRENT_AGE`. */
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -204,6 +213,12 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     // Before the first turn runs: the relay releases turns asynchronously.
     if (debug && resources !== undefined) {
       for (const a of game.world.attributes.slice(1)) for (const r of [ATTR_FOOD, ATTR_WOOD, ATTR_GOLD, ATTR_STONE]) a[r] = resources;
+    }
+    if (debug && bowmen) {
+      for (let p = 1; p < game.world.players; p++) {
+        const villager = [...game.world.entities.ofPlayer(p)].find((e) => e.type === VILLAGER)!;
+        for (let i = 0; i < bowmen; i++) game.world.createUnit({ owner: p, type: BOWMAN, x: villager.x + i, y: villager.y - 1 });
+      }
     }
     setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
