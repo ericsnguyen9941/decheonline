@@ -67,7 +67,7 @@ Spec: [movement.md](movement.md).
 | `src/pathsys.cpp` | 16/1/2/1 | `PathingSystem::findTilePath` :210 [L], `passable` [L], `checksum` :1172 [M], `decrementObstruction` [N] | R2 |
 | `src/Path.cpp` | 30/0/0/0 | `Path` waypoint container | R2 |
 | `src/zone_map.cpp` | 21/1/0/0 | `RGE_Zone_Map::do_zone_map` :109 [M] (connectivity zones) | R2 |
-| `src/act_move.cpp` | 8/1/0/0 | `RGE_Action_Move_To::update` :120 [M] | R2 |
+| `src/act_move.cpp` | 8/1/0/0 | `RGE_Action_Move_To::update` :120 [D] | R2 |
 | `src/m_mo_obj.cpp` | 14/0/0/0 | master (type) data for moving units | R2 |
 
 ## Gather, build, train
