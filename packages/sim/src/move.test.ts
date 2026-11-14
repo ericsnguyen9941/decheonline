@@ -150,10 +150,10 @@ describe('move orders on the test map', () => {
   });
 });
 
-describe('fuzz: random move, work, build, queue, attack and cancel orders', () => {
+describe('fuzz: random move, work, build, queue and cancel orders', () => {
   for (const seed of [1, 2, 3, 4]) {
-    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained, units killed`, () => {
-      const log = sampleReplay(240, seed);
+    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained`, () => {
+      const log = sampleReplay(240, seed, false);
       const first = runReplay(log);
       expect(runReplay(log)).toEqual(first);
 
@@ -195,8 +195,22 @@ describe('fuzz: random move, work, build, queue, attack and cancel orders', () =
       expect(deposits).toBeGreaterThan(0);
       expect(built.size).toBeGreaterThan(0);
       expect(trained.size).toBeGreaterThan(0);
-      // Kills (player attribute 20) only count combat deaths of a player's objects, not cancels.
-      expect(world.attributes[1]![20]! + world.attributes[2]![20]!).toBeGreaterThan(0);
+    });
+  }
+});
+
+describe('fuzz: the same orders plus a mid-map skirmish and attack orders', () => {
+  for (const seed of [1, 2, 3, 4]) {
+    test(`seed ${seed}: replaying twice gives the same hashes; both sides' units get killed`, () => {
+      const log = sampleReplay(240, seed);
+      const first = runReplay(log);
+      expect(runReplay(log)).toEqual(first);
+      const world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units });
+      runReplay(log, world);
+      expect(world.hash()).toBe(first.at(-1));
+      // Kills (player attribute 20) only count combat deaths of another player's objects, not cancels.
+      expect(world.attributes[1]![20]!).toBeGreaterThan(0);
+      expect(world.attributes[2]![20]!).toBeGreaterThan(0);
     });
   }
 });
