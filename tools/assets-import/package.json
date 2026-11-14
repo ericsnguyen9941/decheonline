@@ -1,0 +1,22 @@
+{
+  "name": "@aoe/assets-import",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./manifest": "./src/manifest.ts"
+  },
+  "scripts": {
+    "import": "tsx src/cli.ts",
+    "typecheck": "tsc -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aoe/data": "*",
+    "@aoe/formats": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

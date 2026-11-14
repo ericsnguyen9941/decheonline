@@ -1,20 +1,30 @@
 import { createServer, type Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { decodeClientMessage, encode } from '@aoe/protocol';
+import { DEFAULT_ASSETS_DIR, serveAsset } from './assets';
 import { RoomRegistry, type Peer } from './rooms';
 
 const MAX_FRAME_BYTES = 64 * 1024;
 
 export interface AppOptions {
   rooms?: RoomRegistry;
+  /** Folder served at `/assets/` (the pack from `npm run assets:import`). */
+  assetsDir?: string;
 }
 
-/** HTTP server with `/health` and the game relay on WebSocket path `/ws`. */
-export function createApp({ rooms = new RoomRegistry() }: AppOptions = {}): Server {
+/** HTTP server with `/health`, `/assets/*` and the game relay on WebSocket path `/ws`. */
+export function createApp({
+  rooms = new RoomRegistry(),
+  assetsDir = process.env.ASSETS_DIR ?? DEFAULT_ASSETS_DIR,
+}: AppOptions = {}): Server {
   const server = createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+    if (req.method === 'GET' && req.url?.startsWith('/assets/')) {
+      void serveAsset(req.url, assetsDir, res);
       return;
     }
     res.writeHead(404, { 'content-type': 'text/plain' });

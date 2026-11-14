@@ -8,7 +8,7 @@ Browser remake of Age of Empires 1 (target: AoE1 + Rise of Rome 1.0a), determini
 - `packages/protocol` client/server messages (`messages.ts` types, `codec.ts` validation).
 - `packages/formats` DRS / SLP / palette decoders.
 - `apps/client` Vite + PixiJS. `apps/server` Node + `ws` (`/health`; relay on WebSocket `/ws`, rooms in `src/rooms.ts`).
-- `tools/` repo scripts (`check-tracked-files.mjs`). `docs/spec/` reverse-engineering specs. `e2e/` Playwright. `assets-local/` gitignored game files.
+- `tools/` repo scripts (`check-tracked-files.mjs`); `tools/assets-import` (`@aoe/assets-import`) turns an install into the pack in `assets-local/pack/` (format: `src/manifest.ts`; PNG atlas per SLP, one per player owner when it has player colour; `empires.dat` copied). Server serves it at `/assets/*` (env `ASSETS_DIR`), client `src/assets/` loads it (`?debug=assets`). `docs/spec/` reverse-engineering specs. `e2e/` Playwright. `assets-local/` gitignored game files.
 
 Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there is no per-package build step. The client is built by Vite, the server bundled by esbuild into `apps/server/dist/`.
 
@@ -19,6 +19,7 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 - `npm run check`: tracked-file guard, ESLint, typecheck, unit tests. Run before every commit.
 - `npm test`: unit tests (Vitest) in every workspace; one workspace: `npm test -w @aoe/sim`.
 - `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`.
+- `AOE1_DIR=<install> npm run assets:import`: build the pack (~8 s, ~100 MB). Then `AOE1_DIR=<install> npm run test:e2e:real -w @aoe/e2e` (local-only screenshot to `assets-local/screenshots/`).
 - `AOE1_DIR=<install> npm run test:golden`: tests against real game files (skipped without `AOE1_DIR`); `@aoe/data` parses `data2/empires.dat` to its last byte.
 
 ## Standing rules

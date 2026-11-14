@@ -1,0 +1,164 @@
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { parseDat, type DatFile } from '@aoe/data';
+import { DrsArchive, parsePalette, parseSlp, slpFrameToRgba, SlpPixelKind, type Palette } from '@aoe/formats';
+import { blit, packShelves } from './atlas';
+import {
+  PACK_VERSION,
+  PLAYER_OWNERS,
+  slpImagePath,
+  slpKey,
+  type PackFrame,
+  type PackManifest,
+  type PackSlp,
+  type SlpSource,
+} from './manifest';
+import { encodePng } from './png';
+
+const PALETTE_ID = 50500;
+
+export interface ImportOptions {
+  /** AoE1 + Rise of Rome install folder; only read. */
+  installDir: string;
+  /** Pack folder; replaced entirely. */
+  outDir: string;
+  log?: (line: string) => void;
+}
+
+export interface ImportResult {
+  manifest: PackManifest;
+  slpCount: number;
+  imageCount: number;
+}
+
+/** Path lookup that ignores case, as on a Windows install; null when absent. */
+async function find(root: string, rel: string): Promise<string | null> {
+  let current = root;
+  for (const part of rel.split('/')) {
+    const names = await readdir(current).catch(() => [] as string[]);
+    const hit = names.find((name) => name.toLowerCase() === part.toLowerCase());
+    if (!hit) return null;
+    current = join(current, hit);
+  }
+  return current;
+}
+
+async function require(root: string, rel: string): Promise<string> {
+  const path = await find(root, rel);
+  if (!path) throw new Error(`assets:import: ${rel} not found in ${root}`);
+  return path;
+}
+
+async function openDrs(root: string, rel: string, required: boolean): Promise<DrsArchive | null> {
+  const path = required ? await require(root, rel) : await find(root, rel);
+  return path ? DrsArchive.parse(await readFile(path)) : null;
+}
+
+/** Reads the install and writes the pack. Throws on a missing required file, before touching outDir. */
+export async function importAssets({ installDir, outDir, log = () => {} }: ImportOptions): Promise<ImportResult> {
+  const datPath = await require(installDir, 'data2/empires.dat');
+  const interfac = (await openDrs(installDir, 'data/Interfac.drs', true)) as DrsArchive;
+  const sources: Record<SlpSource, DrsArchive[]> = {
+    graphics: [
+      (await openDrs(installDir, 'data/graphics.drs', true)) as DrsArchive,
+      ...[await openDrs(installDir, 'data2/graphics.drs', false)].filter((d) => d !== null),
+    ],
+    terrain: [(await openDrs(installDir, 'data/Terrain.drs', true)) as DrsArchive],
+    border: [...[await openDrs(installDir, 'data/Border.drs', false)].filter((d) => d !== null)],
+  };
+
+  const paletteBytes = interfac.read('bina', PALETTE_ID);
+  if (!paletteBytes) throw new Error(`assets:import: palette ${PALETTE_ID} missing from Interfac.drs`);
+  const palette = parsePalette(paletteBytes);
+  const dat = parseDat(await readFile(datPath));
+
+  await rm(outDir, { recursive: true, force: true });
+  await mkdir(join(outDir, 'sprites'), { recursive: true });
+  await copyFile(datPath, join(outDir, 'empires.dat'));
+  await writeFile(join(outDir, 'palette.json'), JSON.stringify({ rgb: [...palette] }));
+
+  const slps: Record<string, PackSlp> = {};
+  let imageCount = 0;
+  for (const source of Object.keys(sources) as SlpSource[]) {
+    // Later archives (data2, Rise of Rome) override earlier ones.
+    const bytesById = new Map<number, Uint8Array>();
+    for (const drs of sources[source]) {
+      for (const entry of drs.list('slp')) bytesById.set(entry.id, drs.read('slp', entry.id) as Uint8Array);
+    }
+    await mkdir(join(outDir, 'sprites', source), { recursive: true });
+    for (const [id, bytes] of bytesById) {
+      const result = await writeSlp(outDir, source, id, bytes, palette);
+      slps[slpKey(source, id)] = result.slp;
+      imageCount += result.images;
+    }
+    log(`${source}: ${bytesById.size} slp`);
+  }
+
+  const manifest = buildManifest(dat, slps);
+  await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
+  return { manifest, slpCount: Object.keys(slps).length, imageCount };
+}
+
+async function writeSlp(
+  outDir: string,
+  source: SlpSource,
+  id: number,
+  bytes: Uint8Array,
+  palette: Palette,
+): Promise<{ slp: PackSlp; images: number }> {
+  const file = parseSlp(bytes);
+  const decoded = Array.from({ length: file.frameCount }, (_, i) => file.decodeFrame(i));
+  const layout = packShelves(decoded.map((f) => ({ w: f.width, h: f.height })));
+  const frames: PackFrame[] = decoded.map((f, i) => ({
+    ...(layout.placements[i] as { x: number; y: number }),
+    w: f.width,
+    h: f.height,
+    hotspotX: f.hotspotX,
+    hotspotY: f.hotspotY,
+  }));
+  const playerColour = decoded.some((f) => f.kinds.includes(SlpPixelKind.PlayerColour));
+  const slp: PackSlp = { source, id, atlasWidth: layout.width, atlasHeight: layout.height, frames, playerColour };
+
+  const owners = playerColour ? PLAYER_OWNERS : [1];
+  for (const owner of owners) {
+    const atlas = new Uint8Array(layout.width * layout.height * 4);
+    decoded.forEach((frame, i) => blit(atlas, layout.width, frames[i] as PackFrame, slpFrameToRgba(frame, palette, { owner })));
+    await writeFile(join(outDir, slpImagePath(slp, owner)), encodePng(layout.width, layout.height, atlas));
+  }
+  return { slp, images: owners.length };
+}
+
+function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifest {
+  const graphicSlp = (slp: number): string | null => {
+    const key = slpKey('graphics', slp);
+    return slp >= 0 && slps[key] ? key : null;
+  };
+  const manifest: PackManifest = {
+    version: PACK_VERSION,
+    palette: 'palette.json',
+    dat: 'empires.dat',
+    slps,
+    graphics: {},
+    terrains: {},
+    units: {},
+  };
+  dat.graphics.forEach((g, id) => {
+    if (!g) return;
+    manifest.graphics[id] = {
+      name: g.name,
+      slp: graphicSlp(g.slp),
+      frameCount: g.frameCount,
+      angleCount: g.angleCount,
+      mirroringMode: g.mirroringMode,
+      frameDuration: g.frameDuration,
+    };
+  });
+  dat.terrainBlock.terrains.slice(0, dat.terrainsUsed).forEach((t, id) => {
+    const key = slpKey('terrain', t.slp);
+    manifest.terrains[id] = { name: t.name, slp: t.slp >= 0 && slps[key] ? key : null };
+  });
+  dat.civs[1]?.units.forEach((u, id) => {
+    if (u) manifest.units[id] = { name: u.name, standingGraphic: u.standingGraphic };
+  });
+  return manifest;
+}

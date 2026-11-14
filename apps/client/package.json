@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aoe/assets-import": "*",
     "@aoe/protocol": "*",
     "@aoe/sim": "*",
     "pixi.js": "^8.23.0"

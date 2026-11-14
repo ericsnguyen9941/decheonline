@@ -1,0 +1,59 @@
+// A tiny fake install folder (DRS archives, palette, dat) for tests that must not need the
+// Microsoft files. Everything here is invented, so it can live in git as code.
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { buildSyntheticDat, writeDat } from '@aoe/data';
+import { buildDrs, buildSlp, syntheticPalette } from '@aoe/formats/fixtures';
+
+/** What the synthetic install contains, for assertions on the imported pack. */
+export const SYNTHETIC = {
+  /** Unit with a stand graphic in the synthetic dat (the real game's villager is unit 83). */
+  unitId: 4,
+  standingGraphic: 0,
+  /** Graphic 0: 2 frames of 8x8, left half palette index 100, right half player colour value 2. */
+  graphicSlp: 1000,
+  frameSize: 8,
+  hotspot: [4, 7],
+  normalIndex: 100,
+  playerValue: 2,
+  /** Graphic 2 has no SLP in the install. */
+  missingGraphic: 2,
+  /** Terrain 0 and 1: 2 frames of 16x8, one palette index each. */
+  terrains: [
+    { slp: 15000, index: 60 },
+    { slp: 15001, index: 90 },
+  ],
+  terrainFrame: [16, 8],
+} as const;
+
+const fillRow = (...commands: number[]) => ({ left: 0, right: 0, commands: [...commands, 0x0f] });
+
+export async function writeSyntheticInstall(dir: string): Promise<void> {
+  const eight = (...commands: number[]) => Array.from({ length: 8 }, () => fillRow(...commands));
+  const graphics = buildDrs([
+    {
+      type: 'slp',
+      id: SYNTHETIC.graphicSlp,
+      data: buildSlp([
+        { width: 8, hotspotX: 4, hotspotY: 7, rows: eight(0x47, SYNTHETIC.normalIndex, 0x4a, SYNTHETIC.playerValue) },
+        { width: 8, rows: eight(0x07, 8, 200) },
+      ]),
+    },
+  ]);
+  const terrainRow = (index: number) => Array.from({ length: 8 }, () => fillRow(0x07, 16, index));
+  const terrain = buildDrs(
+    SYNTHETIC.terrains.map(({ slp, index }) => ({
+      type: 'slp',
+      id: slp,
+      data: buildSlp([{ width: 16, rows: terrainRow(index) }, { width: 16, rows: terrainRow(index + 1) }]),
+    })),
+  );
+  const interfac = buildDrs([{ type: 'bina', id: 50500, data: syntheticPalette() }]);
+
+  await mkdir(join(dir, 'data'), { recursive: true });
+  await mkdir(join(dir, 'data2'), { recursive: true });
+  await writeFile(join(dir, 'data', 'graphics.drs'), graphics);
+  await writeFile(join(dir, 'data', 'Terrain.drs'), terrain);
+  await writeFile(join(dir, 'data', 'Interfac.drs'), interfac);
+  await writeFile(join(dir, 'data2', 'empires.dat'), writeDat(buildSyntheticDat()));
+}

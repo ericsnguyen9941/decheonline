@@ -1,0 +1,10 @@
+import { DebugProvider } from './debug-provider';
+import { loadPackProvider } from './pack-provider';
+import type { AssetProvider } from './provider';
+
+export type { AssetProvider, SpriteFrame } from './provider';
+
+/** The pack from the server when it has one, otherwise debug shapes. */
+export async function createAssetProvider(): Promise<AssetProvider> {
+  return (await loadPackProvider()) ?? new DebugProvider();
+}

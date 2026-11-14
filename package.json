@@ -5,6 +5,7 @@
   "workspaces": [
     "packages/*",
     "apps/*",
+    "tools/assets-import",
     "e2e"
   ],
   "engines": {
@@ -16,6 +17,7 @@
     "check": "npm run guard && npm run lint && npm run typecheck && npm test",
     "guard": "node tools/check-tracked-files.mjs",
     "assets:verify": "node tools/install-check.mjs",
+    "assets:import": "npm run import -w @aoe/assets-import",
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
