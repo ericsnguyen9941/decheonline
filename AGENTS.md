@@ -32,3 +32,4 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 ## Traps
 - Playwright's Firefox (159, v1572) does not start on macOS 27 ("Could not find profile folder"). Run the e2e suite in the matching Linux image: `docker run --rm --name aoe1online-<worktree>-pw -v "$PWD":/src:ro mcr.microsoft.com/playwright:v1.65.1-noble bash -c 'mkdir /work && tar -C /src --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && npm ci && npm run test:e2e -- determinism'`.
 - TypeScript is pinned to 6.0.x: typescript-eslint 8.x does not accept TypeScript 7 yet.
+- `window.__game.applied()` lists a batch when it is received; `World.addBatch` runs it `COMMAND_DELAY_TURNS` (2) turns later. An e2e that waits on `applied()` must also wait 2 more turns before reading unit state (`e2e/tests/move.spec.ts` `settle`).
