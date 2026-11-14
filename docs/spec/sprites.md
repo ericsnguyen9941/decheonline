@@ -467,3 +467,14 @@ Refs: `src/stat_obj.cpp:1189-1192`, `src/ani_obj.cpp:47-69`,
   three heroes do (§6).
 - `combat.md` §3.3 / example 2: the 31-step swing period is the reload
   cadence; actual melee hits follow §5.3 (examples 1–2).
+
+## 11. Which facet a still object draws (read for the client, `apps/client/src/units/unit-layer.ts`)
+
+- A moving object draws its heading (`facet`, movement.md). A building draws `building_facet` (dat
+  `building.graphicsAngle`, 0 for the Town Center; `src/t_b_obj.cpp:156,256`), and while unbuilt a facet that
+  grows with build points (`t_b_obj.cpp:336-342`). Every other still object starts at facet 0
+  (`src/stat_obj.cpp:141,246`) and only gets another from scenario or map data (`make_scenario_obj`,
+  `src/tplayer.cpp:311`): the mines' pile variants, for one. The sim keeps no facet for still objects, so the client
+  draws mines with `id % angles` until the map generator places them with a facet.
+- Play-once sprites (death animations, `flags & 8`) hold the last frame once the sim's `animate_flag` is 0; the client
+  animates by wall clock between turns and only trusts the sim for that stop and for the start frame (§4).
