@@ -105,12 +105,14 @@ async function build(pages: Page[], unit: number): Promise<number> {
 async function finished(pages: Page[], id: number): Promise<void> {
   for (const p of pages) {
     await p.waitForFunction(([b, active]) => window.__game!.buildings().find((x) => x.id === b)?.state === active, [id, ACTIVE] as const, {
-      timeout: 60_000,
+      timeout: 120_000,
     });
   }
 }
 
-test.setTimeout(180_000);
+// The lockstep paces steps to the clients' frame times (turn-timing.md §8.1), so a loaded machine runs the game slower
+// than 20x: the waits are generous.
+test.setTimeout(360_000);
 
 test('one player researches the Tool Age, builds an Archery Range and trains a Bowman; both clients agree on hashes', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
@@ -150,7 +152,7 @@ test('one player researches the Tool Age, builds an Archery Range and trains a B
   await expect(host.getByTestId('object-item')).toHaveText(/^\d+%$/);
 
   // The Tool Age: the host's top bar says so, the guest's (still Stone Age) does not.
-  for (const page of both) await page.waitForFunction(([t, s]) => window.__game!.techState(t, 1) === s, [TOOL_AGE, DONE] as const, { timeout: 60_000 });
+  for (const page of both) await page.waitForFunction(([t, s]) => window.__game!.techState(t, 1) === s, [TOOL_AGE, DONE] as const, { timeout: 150_000 });
   await expect(host.getByTestId('age')).toHaveText('Tool Age');
   await expect(guest.getByTestId('age')).toHaveText('Stone Age');
   expect(await guest.evaluate(() => [window.__game!.age(1), window.__game!.age(2)])).toEqual([2, 1]);
@@ -165,7 +167,7 @@ test('one player researches the Tool Age, builds an Archery Range and trains a B
   await bowman.click();
   await expect(slot(host, 'stop')).toHaveCount(1);
   for (const page of both) {
-    await page.waitForFunction((b) => window.__game!.units().some((u) => u.owner === 1 && u.type === b), BOWMAN, { timeout: 60_000 });
+    await page.waitForFunction((b) => window.__game!.units().some((u) => u.owner === 1 && u.type === b), BOWMAN, { timeout: 120_000 });
   }
 
   // Both clients end with the same buildings, ages and stockpiles, and agree on the hash of a turn both have run.
