@@ -16,6 +16,8 @@ export interface GraphicInfo {
   mirroringMode: number;
   /** Seconds per frame. */
   frameDuration: number;
+  /** `draw_level` (the dat's layer): at 10 or below the graphic draws at the object's shadow point, on the ground. */
+  layer: number;
   /** Parts drawn instead of the graphic's own frames (`RGE_Sprite::draw_list`); empty for a plain graphic. */
   deltas: GraphicDelta[];
 }
@@ -58,6 +60,8 @@ export interface UnitInfo {
   level: number;
   /** `orig_weapon`, `orig_armor`, `orig_pierce_armor`, `orig_weapon_range`: the object panel's base values. */
   displayed: [number, number, number, number];
+  /** `select_level` (the dat's interaction mode): a left click selects from 2 up, a selection box takes 4 (units). */
+  selectLevel: number;
 }
 
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */

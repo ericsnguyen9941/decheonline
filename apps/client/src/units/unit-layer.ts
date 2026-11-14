@@ -5,9 +5,10 @@ import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
 import { canBuild } from '../hud/commands';
 import { frameCursor } from '../hud/frame-image';
 import { SLP } from '../hud/layout';
+import { attackRollover } from '../hud/text';
 import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
-import { composeGraphic } from './composite';
+import { composeGraphic, GROUND_LAYER, splitsShadow, type PartSet } from './composite';
 import { facingFrame } from './facing';
 import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
 import { alignBuilding } from './placement';
@@ -19,6 +20,19 @@ const SELECTION_COLOUR = 0xffffff;
 const BAR_WIDTH = 24;
 const BAR_FILLED = 0x00ff00;
 const BAR_EMPTY = 0xff0101;
+/** `display_object_selection(target, 1500, 2, 2)`: an ordered target's outline flashes green (palette 0x4a) this long. */
+const FLASH_MS = 1500;
+/** `update_display_selected_objects`: the flash is on while bit 8 of the elapsed milliseconds is clear. */
+const FLASH_BIT = 0x100;
+/** `sel_list` holds 25 objects (`select_one_object`). */
+const MAX_SELECTED = 25;
+/** `select_object` brings in the rest of a group from this id up (the Group button's groups; 1-10 are hotkey groups). */
+const FIRST_GROUP = 11;
+/** `select_level`s: a left click picks from 2 up, a selection box picks 4 (`pick_multi(4, ...)`). */
+const SELECT_CLICK = 2;
+const SELECT_BOX = 4;
+/** Object group 11: missiles, dead units, the Flare. Without a pack nothing of it can be selected. */
+const GROUP_NONE = 11;
 /**
  * The building being placed is drawn see-through (`fog_next_shape` 5 where it fits); where it does not, also shaded
  * with a red that pulses (palette 0x24-0x28, stepping every 128 ms of world time).
@@ -47,6 +61,8 @@ interface Track {
   animStart: number;
   startFrame: number;
   pack: boolean;
+  /** The parts of a flying object's graphic drawn on the ground under it (its shadow), when it has any. */
+  shadow: Sprite | null;
 }
 
 /**
@@ -85,6 +101,8 @@ export interface UnitLayerOptions {
   turnMs: (turn: number) => number;
   /** Placing a building started (its master id) or ended (null). */
   onPlacement?: (unit: number | null) => void;
+  /** The rollover text for the object under the pointer (the attack cursor's), or null when it goes. */
+  onRollover?: (text: string | null) => void;
 }
 
 /** The building following the pointer while placing: the aligned map point and whether it fits there. */
@@ -103,13 +121,24 @@ const Z_PIXELS = 16;
 /**
  * Draws every sim object on the map layer (units, buildings, trees, mines, animals, carcasses) with its real sprite
  * as the sim reports it (owner colour, facing, task animation) and handles the original's mouse scheme: left click or
- * drag a box to select own units, or click an own building, right click to order the selected units to attack the
+ * drag a box to select own units, or click any object to see it, right click to order the selected units to attack the
  * enemy object under the pointer (an `attack` command), to work on any other object there (a `work` command) or, over
  * bare ground, to move there. While a building is being placed its
  * ghost follows the pointer; a left click issues `build`, a right click stops placing.
  */
 export class UnitLayer {
   readonly selected = new Set<number>();
+  /** `selected_obj`: the object the panel shows. */
+  private primaryId: number | null = null;
+  /** `selected_group` of own objects put in a group, by id; the client's own, as in the original. */
+  private readonly groups = new Map<number, number>();
+  private nextGroup = FIRST_GROUP;
+  /** Ordered targets flashing (`DispSel_List`, select type 2): when each started. */
+  private readonly flashes = new Map<number, number>();
+  /** The canvas point of the last click that selected something, to pick the next object under it on a second click. */
+  private lastClick: { x: number; y: number } | null = null;
+  /** The object whose rollover text shows, or null. */
+  private rolloverId: number | null = null;
   private readonly tracks = new Map<number, Track>();
   private readonly art = new Map<string, Art | null>();
   private readonly highlight = new Graphics();
@@ -143,6 +172,35 @@ export class UnitLayer {
     this.draw();
     const sword = o.provider.interfaceFrame(SLP.cursors, ATTACK_CURSOR_FRAME);
     if (sword) void frameCursor(sword, 'crosshair').then((c) => (this.attackCursor = c)).catch(() => undefined);
+  }
+
+  /** `selected_obj`: the last object selected, or after it left the selection the first one left; null for none. */
+  get primary(): number | null {
+    if (this.primaryId !== null && this.selected.has(this.primaryId)) return this.primaryId;
+    this.primaryId = this.selected.values().next().value ?? null;
+    return this.primaryId;
+  }
+
+  /** `unselect_object`. */
+  unselect(): void {
+    this.selected.clear();
+    this.primaryId = null;
+  }
+
+  /** Is object `id` in a group? */
+  isGrouped(id: number): boolean {
+    return this.groups.has(id);
+  }
+
+  /** `group_objects(-1)`: the selected own objects form a new group, which a click on any of them selects whole. */
+  group(): void {
+    const group = this.nextGroup++;
+    for (const id of this.selected) if (this.o.world.entities.get(id)?.owner === this.o.player) this.groups.set(id, group);
+  }
+
+  /** `ungroup_objects`: the selected objects leave their groups. */
+  ungroup(): void {
+    for (const id of this.selected) this.groups.delete(id);
   }
 
   /** Own units, for centring the view at the start. */
@@ -218,16 +276,16 @@ export class UnitLayer {
     this.box.destroy();
   }
 
-  private loadArt(graphic: number, owner: number): Art | null {
+  private loadArt(graphic: number, owner: number, parts: PartSet = 'all'): Art | null {
     // Gaia's objects have no player colour; any owner image will do.
     if (owner === 0) owner = 1;
-    const key = `${graphic}:${owner}`;
+    const key = `${graphic}:${owner}:${parts}`;
     if (this.art.has(key)) return this.art.get(key)!;
     this.art.set(key, null);
     const { provider, app } = this.o;
     const info = provider.graphicInfo(graphic);
     const composite = info !== null && info.deltas.length > 0;
-    const frames = composite ? composeGraphic(provider, app.renderer, graphic, info, owner) : provider.graphicFrames(graphic, owner);
+    const frames = composite ? composeGraphic(provider, app.renderer, graphic, info, owner, parts) : provider.graphicFrames(graphic, owner);
     void frames.then(async (frames) => {
       if (frames.length > 0) this.art.set(key, { frames, info: composite ? { ...info, mirroringMode: 0 } : info, pack: true });
       else this.art.set(key, { frames: await this.fallback.graphicFrames(graphic, owner), info: null, pack: false });
@@ -254,7 +312,7 @@ export class UnitLayer {
       alive.add(e.id);
       let t = this.tracks.get(e.id);
       if (!t) {
-        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, pack: false };
+        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, pack: false, shadow: null };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
       } else if (newTurn) {
@@ -271,11 +329,17 @@ export class UnitLayer {
         t.animStart = now;
         t.startFrame = slide ? 0 : e.sprite.frame;
       }
-      const art = this.loadArt(graphic, e.owner);
       const at = this.drawnAt(t, now);
       const pos = tileCoordsToPixel(at.x, at.y, width);
-      // Missiles fly above the ground: `world_z` raises the sprite (the map is flat, so others stay at 0).
-      const lift = Math.round(e.z * Z_PIXELS);
+      // Missiles fly above the ground: `world_z` raises the sprite (the map is flat, so others stay at 0). The parts of
+      // the graphic at `draw_level` 10 or less stay at the shadow point on the ground (`RGE_Sprite::draw`).
+      const graphicInfo = this.o.provider.graphicInfo(graphic);
+      let lift = Math.round(e.z * Z_PIXELS);
+      if (graphicInfo && graphicInfo.deltas.length === 0 && graphicInfo.layer <= GROUND_LAYER) lift = 0;
+      const split = lift !== 0 && graphicInfo !== null && splitsShadow(this.o.provider, graphicInfo);
+      const art = this.loadArt(graphic, e.owner, split ? 'air' : 'all');
+      const shadow = split ? this.loadArt(graphic, e.owner, 'ground') : null;
+      if (t.shadow) t.shadow.visible = false;
       t.sprite.visible = art !== null;
       if (!art) continue;
       t.pack = art.pack;
@@ -297,12 +361,23 @@ export class UnitLayer {
       t.sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - lift - frame.hotspotY);
       // Above every terrain tile; nearer the bottom of the screen draws later.
       t.sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
+      if (shadow) {
+        const s = (t.shadow ??= view.layer.addChild(new Sprite()));
+        const f = shadow.frames[pick.index] ?? shadow.frames[0]!;
+        s.texture = f.texture;
+        s.position.set(pos.x - f.hotspotX, pos.y - f.hotspotY);
+        s.zIndex = t.sprite.zIndex - 1;
+        s.visible = true;
+      }
     }
     for (const [id, t] of this.tracks) {
       if (alive.has(id)) continue;
       t.sprite.destroy();
+      t.shadow?.destroy();
       this.tracks.delete(id);
       this.selected.delete(id);
+      this.groups.delete(id);
+      this.flashes.delete(id);
     }
     this.drawHighlight();
     this.drawGhost();
@@ -363,12 +438,19 @@ export class UnitLayer {
    * The selection marker of the original's default outline (`outline_type` 2, RGE_Static_Object::capture_frame_3d_square):
    * a white diamond on the ground, the unit's outline radii wide, and a 24x2 hit point bar (green, red where hurt) over
    * its top corner while it has hit points left. Only selected objects show the bar (`selected & 1`, outline type 2).
+   * An ordered target flashes its diamond green (`selected & 2`) for 1.5 s, on and off every 256 ms.
    */
   private drawHighlight(): void {
     const g = this.highlight.clear();
     const { world, provider } = this.o;
     const now = performance.now();
-    for (const id of this.selected) {
+    const flashing = new Set<number>();
+    for (const [id, start] of this.flashes) {
+      const elapsed = Math.trunc(now - start);
+      if (elapsed > FLASH_MS) this.flashes.delete(id);
+      else if ((elapsed & FLASH_BIT) === 0) flashing.add(id);
+    }
+    for (const id of new Set([...this.selected, ...flashing])) {
       const t = this.tracks.get(id);
       const e = world.entities.get(id);
       if (!t?.sprite.visible || !e) continue;
@@ -379,7 +461,8 @@ export class UnitLayer {
       // RGE_Map::get_point: a tile offset (x, y, z) lands at ((y + x) * 32, (y - x - z) * 16) from the object.
       const point = (x: number, y: number, z: number) => ({ x: Math.round(o.x + (y + x) * 32), y: Math.round(o.y + (y - x - z) * 16) });
       const corners = [point(rx, -ry, 0), point(rx, ry, 0), point(-rx, ry, 0), point(-rx, -ry, 0)];
-      g.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: SELECTION_COLOUR });
+      g.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: flashing.has(id) ? BAR_FILLED : SELECTION_COLOUR });
+      if (!this.selected.has(id)) continue;
       const hp = Math.floor(e.hp);
       if (type.hitPoints <= 0 || hp <= 0) continue;
       const bar = point(rx, -ry, rz);
@@ -401,7 +484,10 @@ export class UnitLayer {
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
     on('contextmenu', (e) => e.preventDefault());
-    on('pointerleave', () => (this.pointer = null));
+    on('pointerleave', () => {
+      this.pointer = null;
+      this.rollover(undefined);
+    });
     on('pointerdown', (e) => {
       const p = local(e);
       this.pointer = p;
@@ -421,7 +507,9 @@ export class UnitLayer {
       this.pointer = p;
       if (this.placing !== null) return;
       if (!this.press) {
-        canvas.style.cursor = this.attackTarget(p.x, p.y) ? this.attackCursor : this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
+        const enemy = this.attackTarget(p.x, p.y);
+        canvas.style.cursor = enemy ? this.attackCursor : this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
+        this.rollover(enemy);
         return;
       }
       if (!this.press.boxing && Math.hypot(p.x - this.press.x, p.y - this.press.y) < BOX_THRESHOLD) return;
@@ -432,44 +520,97 @@ export class UnitLayer {
     on('pointerup', (e) => {
       if (e.button !== 0 || !this.press) return;
       const p = local(e);
-      const additive = e.shiftKey;
-      if (!additive) this.selected.clear();
-      if (this.press.boxing) this.selectBox(this.press.x, this.press.y, p.x, p.y);
-      else this.selectAt(p.x, p.y);
+      if (this.press.boxing) {
+        if (!e.shiftKey) this.unselect();
+        this.selectBox(this.press.x, this.press.y, p.x, p.y);
+      } else this.clickAt(p.x, p.y, e.shiftKey || e.ctrlKey);
       this.press = null;
       this.box.clear();
     });
   }
 
-  private ownTracks(): [Entity, Track][] {
-    const out: [Entity, Track][] = [];
-    for (const e of this.ownUnits()) {
-      const t = this.tracks.get(e.id);
-      if (t?.sprite.visible) out.push([e, t]);
-    }
-    return out;
+  /** `select_level` of an object's master (the dat's interaction mode); without a pack, guessed from the sim's table. */
+  private selectLevel(e: Entity): number {
+    const known = this.o.provider.unitInfo(e.type)?.selectLevel;
+    if (known !== undefined) return known;
+    const t = unitType(e.type);
+    return t.group === GROUP_NONE ? 0 : isUnit(e) ? SELECT_BOX : SELECT_CLICK;
   }
 
-  /** Topmost own unit whose sprite covers the canvas pixel, or own building whose drawn pixels do. */
-  private selectAt(x: number, y: number): void {
-    const hits: [Entity, Track][] = this.ownTracks().filter(([, t]) => t.sprite.getBounds().containsPoint(x, y));
-    for (const e of this.o.world.entities.ofPlayer(this.o.player)) {
-      const t = this.tracks.get(e.id);
-      if (!isBuildingObject(e) || !t?.sprite.visible) continue;
-      if (t.sprite.getBounds().containsPoint(x, y) && this.opaque(t.sprite, x, y)) hits.push([e, t]);
-    }
-    hits.sort((a, b) => b[1].sprite.zIndex - a[1].sprite.zIndex);
-    if (hits[0]) this.selected.add(hits[0][0].id);
+  /** `select_one_object`: adds `id` while the selection has room, and makes it the panel's object. */
+  private selectOne(id: number): void {
+    if (this.selected.size >= MAX_SELECTED) return;
+    this.selected.add(id);
+    this.primaryId = id;
   }
 
-  /** Own units whose map position lies inside the box. */
+  /** `select_object`: selects `e`, and with it the rest of its group (Group button groups only). */
+  private selectObject(e: Entity): void {
+    this.selectOne(e.id);
+    const group = this.groups.get(e.id);
+    if (group !== undefined && group >= FIRST_GROUP) {
+      for (const [id, g] of this.groups) if (g === group && id !== e.id && this.selected.size < MAX_SELECTED) this.selected.add(id);
+    }
+    this.primaryId = e.id;
+  }
+
+  /**
+   * A left click on the map with the two-button mouse (`RGE_Main_View::mouse_left_up_action`, `interface_style` 2,
+   * src/vw_main.cpp:470-530): the topmost object of `select_level` 2 or more under the pointer, whoever owns it.
+   * - A plain click selects it alone (with its group); on an object already selected among others, it alone; on nothing,
+   *   it unselects. A second click on the same spot picks past the panel's object to the next one under it.
+   * - Shift or Ctrl takes the object out of the selection, or adds it; it first clears the selection when the panel's
+   *   object is another player's or the selection's lowest `select_level` differs from the object's.
+   */
+  private clickAt(x: number, y: number, toggle: boolean): void {
+    const again = this.lastClick !== null && this.lastClick.x === x && this.lastClick.y === y;
+    const exclude = again && !toggle ? this.primary : null;
+    const hit = this.topmostAt(x, y, (e) => e.id !== exclude && this.selectLevel(e) >= SELECT_CLICK, false);
+    this.lastClick = null;
+    if (toggle) {
+      if (!hit) return;
+      if (this.selected.has(hit.id)) {
+        this.selected.delete(hit.id);
+        return;
+      }
+      const primary = this.primary === null ? undefined : this.o.world.entities.get(this.primary);
+      const levels = [...this.selected].flatMap((id) => {
+        const s = this.o.world.entities.get(id);
+        return s ? [this.selectLevel(s)] : [];
+      });
+      if (primary && (primary.owner !== this.o.player || Math.min(...levels) !== this.selectLevel(hit))) this.unselect();
+      this.selectObject(hit);
+      return;
+    }
+    if (!hit) return this.unselect();
+    if (this.selected.has(hit.id)) {
+      if (this.selected.size < 2) return;
+      this.unselect();
+      this.selectOne(hit.id);
+    } else {
+      this.unselect();
+      this.selectObject(hit);
+    }
+    this.lastClick = { x, y };
+  }
+
+  /** `pick_multi(4, ...)`: own units (`select_level` 4) whose map position lies inside the box, up to 25. */
   private selectBox(x0: number, y0: number, x1: number, y1: number): void {
     const [left, right] = [Math.min(x0, x1), Math.max(x0, x1)];
     const [top, bottom] = [Math.min(y0, y1), Math.max(y0, y1)];
-    for (const [e] of this.ownTracks()) {
+    for (const e of this.o.world.entities.ofPlayer(this.o.player)) {
+      if (!this.tracks.get(e.id)?.sprite.visible || this.selectLevel(e) !== SELECT_BOX) continue;
       const p = this.screenPos(e.id)!;
-      if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) this.selected.add(e.id);
+      if (p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) this.selectOne(e.id);
     }
+  }
+
+  /** Shows the attack rollover text of `enemy` (`get_mouse_pointer_action_vars` facet 4), or takes it away. */
+  private rollover(enemy: Entity | undefined): void {
+    const id = enemy?.id ?? null;
+    if (id === this.rolloverId) return;
+    this.rolloverId = id;
+    this.o.onRollover?.(enemy ? attackRollover(this.o.provider, unitType(enemy.type).group) || null : null);
   }
 
   /** Is the pixel of `sprite`'s texture under canvas point (x, y) opaque? Reads and caches the texture's pixels. */
@@ -502,13 +643,17 @@ export class UnitLayer {
     return this.topmostAt(x, y, (e) => e.owner > 0 && e.owner !== player && e.state <= ObjectState.Active && isAttackable(unitType(e.type)));
   }
 
-  /** Topmost drawn object passing `test` whose pixels cover canvas point (x, y). */
-  private topmostAt(x: number, y: number, test: (e: Entity) => boolean): Entity | undefined {
+  /**
+   * Topmost drawn object passing `test` under canvas point (x, y): a unit where its sprite's box covers the point, any
+   * other object where its drawn pixels do. Order targets skip the player's own selected objects.
+   */
+  private topmostAt(x: number, y: number, test: (e: Entity) => boolean, skipOwnSelected = true): Entity | undefined {
     const hits: [Entity, Track][] = [];
     for (const [id, t] of this.tracks) {
       const e = this.o.world.entities.get(id);
-      if (!e || !t.sprite.visible || this.selected.has(id) || !test(e)) continue;
-      if (t.sprite.getBounds().containsPoint(x, y) && this.opaque(t.sprite, x, y)) hits.push([e, t]);
+      if (!e || !t.sprite.visible || !test(e)) continue;
+      if (skipOwnSelected && this.selected.has(id) && e.owner === this.o.player) continue;
+      if (t.sprite.getBounds().containsPoint(x, y) && (isUnit(e) || this.opaque(t.sprite, x, y))) hits.push([e, t]);
     }
     hits.sort((a, b) => b[1].sprite.zIndex - a[1].sprite.zIndex);
     return hits[0]?.[0];
@@ -539,9 +684,13 @@ export class UnitLayer {
     const { col, row } = pixelToTileCoords(x + camera.x, y + camera.y, this.o.world.map.width);
     const { width, height } = this.o.world.map;
     if (col < 0 || row < 0 || col >= width || row >= height) return;
+    // `command_make_do`: an order on an object flashes it (`display_object_selection(id, 1500, 2, 2)`, which ends the
+    // other flashes); a move ends them (`reset_display_object_selection(2)`).
+    this.flashes.clear();
     const enemy = this.attackTarget(x, y);
+    const target = enemy ?? this.workTarget(x, y);
+    if (target) this.flashes.set(target.id, performance.now());
     if (enemy) return this.o.issue({ type: 'attack', units, target: enemy.id });
-    const target = this.workTarget(x, y);
     if (target) this.o.issue({ type: 'work', units, target: target.id, x: col, y: row });
     else this.o.issue({ type: 'move', units, x: col, y: row });
   }

@@ -159,6 +159,7 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
       angleCount: g.angleCount,
       mirroringMode: g.mirroringMode,
       frameDuration: g.frameDuration,
+      layer: g.layer,
       deltas: g.deltas.map((d) => [d.graphicId, d.offsetX, d.offsetY, d.displayAngle]),
     };
   });
@@ -167,8 +168,9 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
     const [rows = 1, cols = 1] = t.terrainDimensions;
     manifest.terrains[id] = { name: t.name, slp: t.slp >= 0 && slps[key] ? key : null, rows: Math.max(rows, 1), cols: Math.max(cols, 1) };
   });
-  dat.civs[1]?.units.forEach((u, id) => {
-    if (u) {
+  // Trees, mines, forage and animals exist only in Gaia's table (civ 0).
+  [dat.civs[1], dat.civs[0]].forEach((civ) => civ?.units.forEach((u, id) => {
+    if (u && !manifest.units[id]) {
       const [x = 0, y = 0, z = 0] = u.outlineSize;
       manifest.units[id] = {
         name: u.name,
@@ -183,8 +185,9 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
         displayed: u.combat
           ? [u.combat.displayedAttack, u.combat.displayedMeleeArmour, u.creatable?.displayedPierceArmour ?? 0, u.combat.displayedRange]
           : [0, 0, 0, 0],
+        selectLevel: u.interactionMode,
       };
     }
-  });
+  }));
   return manifest;
 }

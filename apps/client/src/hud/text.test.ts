@@ -1,7 +1,9 @@
 import { expect, test } from 'vitest';
 import { CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from '@aoe/sim';
 import type { AssetProvider, UnitInfo } from '../assets';
-import { civilizationName, commandMessage, objectName, statRows } from './text';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ageName, attackRollover, civilizationName, commandMessage, objectName, shortMessage, statRows, topButtonLabels } from './text';
 
 // Name and creation ids, interface kind and displayed values of these masters in data2/empires.dat (npm run dat:dump).
 const UNITS: Record<number, Pick<UnitInfo, 'nameId' | 'creationId' | 'level' | 'displayed'>> = {
@@ -21,6 +23,18 @@ const STRINGS: Record<number, string> = {
   4302: 'Wood',
   4103: 'Build (B)',
   4106: 'Unselect (ESC)',
+  4108: 'Group (G)',
+  4201: 'Stone Age',
+  4202: 'Tool Age',
+  4113: 'Chat',
+  4114: 'Diplomacy',
+  4115: 'Menu',
+  3001: 'Not enough food.',
+  3002: 'Not enough wood.',
+  3005: 'You need to build more houses.',
+  3046: 'You have reached your population limit.',
+  3701: 'Click to attack this unit.',
+  3702: 'Click to attack this building.',
 };
 
 function provider(strings: Record<number, string> = STRINGS): AssetProvider {
@@ -70,4 +84,32 @@ test('train and build messages carry the cost; commands their text', () => {
   expect(commandMessage(provider(), { kind: 'unselect', slot: 11 })).toBe('Unselect (ESC)');
   expect(commandMessage(provider({}), { kind: 'train', slot: 0, unit: VILLAGER, count: 0 })).toBe('Create Man (Food: 50)');
   expect(commandMessage(provider({}), { kind: 'cancel', slot: 11 })).toBe('Cancel');
+});
+
+test('age, top buttons, refusals and the attack rollover come from the strings, and are empty without them', () => {
+  expect([1, 2, 0, 5].map((age) => ageName(provider(), age))).toEqual(['Stone Age', 'Tool Age', '', '']);
+  expect(topButtonLabels(provider())).toEqual(['Chat', 'Diplomacy', 'Menu']);
+  expect([0, 1, 4, 32, 30, -1].map((attr) => shortMessage(provider(), attr))).toEqual([
+    'Not enough food.',
+    'Not enough wood.',
+    'You need to build more houses.',
+    'You have reached your population limit.',
+    '',
+    '',
+  ]);
+  // Object groups: 4 Villagers (3701), 3 buildings (3702).
+  expect([4, 3].map((group) => attackRollover(provider(), group))).toEqual(['Click to attack this unit.', 'Click to attack this building.']);
+  expect(ageName(provider({}), 1)).toBe('');
+  expect(topButtonLabels(provider({}))).toEqual(['', '', '']);
+  expect(shortMessage(provider({}), 0)).toBe('');
+  expect(commandMessage(provider(), { kind: 'group', slot: 6 })).toBe('Group (G)');
+});
+
+test('the HUD code holds no English text for the age, the top buttons or the refusals', () => {
+  const dir = import.meta.dirname;
+  const literals = /['"`](Stone Age|Tool Age|Bronze Age|Iron Age|Chat|Diplomacy|Menu|Not enough[^'"`]*|You cannot build[^'"`]*)['"`]/;
+  const found = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+    .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').flatMap((line, i) => (literals.test(line) ? [`${f}:${i + 1}: ${line.trim()}`] : [])));
+  expect(found).toEqual([]);
 });

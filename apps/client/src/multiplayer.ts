@@ -182,6 +182,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         issue: (c) => game.issue(c),
         turnMs: (t) => game.turnMs(t),
         onPlacement: (unit) => hud?.commands.placementChanged(unit),
+        onRollover: (text) => hud?.rollover(text),
       });
       units = layer;
       hud = new GameHud({
@@ -190,11 +191,10 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         world: game.world,
         provider,
         player,
-        selection: () => layer.selected,
+        selection: layer,
         issue: (c) => game.issue(c),
         startPlacement: (unit) => layer.startPlacement(unit),
         cancelPlacement: () => layer.cancelPlacement(),
-        unselect: () => layer.selected.clear(),
       });
       // Start looking at this player's town centre spot.
       const own = units.ownUnits()[0];

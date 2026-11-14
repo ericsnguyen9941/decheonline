@@ -1,16 +1,18 @@
-import { ATTR_FOOD, ATTR_GOLD, ATTR_STONE, ATTR_WOOD, buildingFacet, checkObjCost, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { buildingFacet, checkObjCost, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import { paintFrame } from './frame-image';
 import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, type CommandButton, type CommandMode } from './commands';
 import { SLP } from './layout';
-import { commandMessage, objectName } from './text';
+import { commandMessage, objectName, shortMessage } from './text';
 
 /** An icon fills the slot inside its 2-pixel border (`TRIBE_Panel_Button::draw`, button type 0). */
 const ICON_SIZE = 50;
 /** How long a refusal stays on screen. */
 const MESSAGE_MS = 4000;
-/** Names of the resources a cost can lack; anything else is the population or a building limit. */
-const RESOURCE_NAMES: Record<number, string> = { [ATTR_FOOD]: 'food', [ATTR_WOOD]: 'wood', [ATTR_STONE]: 'stone', [ATTR_GOLD]: 'gold' };
+/** `PLAYER_ATTRIBUTE_POPULATION`, `_POPULATION_HEADROOM` and `_POPULATION_LIMIT`. */
+const ATTR_POPULATION = 11;
+const ATTR_HEADROOM = 4;
+const ATTR_POPULATION_LIMIT = 32;
 
 export interface CommandPanelOptions {
   /** The 12 grid slots, row by row, placed by the HUD. */
@@ -29,6 +31,9 @@ export interface CommandPanelOptions {
   cancelPlacement: () => void;
   /** Clear the selection. */
   unselect: () => void;
+  /** Make the selection a group, and take the selected objects out of their groups. */
+  group: () => void;
+  ungroup: () => void;
 }
 
 /**
@@ -41,6 +46,8 @@ export class CommandPanel {
   private page = 0;
   private buttons: (CommandButton | undefined)[] = [];
   private object: Entity | undefined;
+  private selected: readonly Entity[] = [];
+  private grouped = false;
   private shown = '';
   private pressed = -1;
   private hovered = -1;
@@ -105,8 +112,13 @@ export class CommandPanel {
     this.update(this.object);
   }
 
-  /** Rebuilds the grid for `object` (the panel's object); a different object goes back to the normal mode. */
-  update(object: Entity | undefined): void {
+  /**
+   * Rebuilds the grid for `object` (the panel's object) and the whole selection; a different object goes back to the
+   * normal mode.
+   */
+  update(object: Entity | undefined, selected: readonly Entity[] = this.selected, grouped = this.grouped): void {
+    this.selected = selected;
+    this.grouped = grouped;
     if (object?.id !== this.object?.id) {
       if (this.mode === 'place') this.o.cancelPlacement();
       this.mode = 'normal';
@@ -118,9 +130,12 @@ export class CommandPanel {
       world,
       player,
       object,
+      selected,
+      grouped,
       mode: this.mode,
       page: this.page,
       buttonOf: (unit) => provider.unitInfo(unit)?.button ?? null,
+      levelOf: (unit) => provider.unitInfo(unit)?.level ?? null,
     });
     this.buttons = bySlot(buttons);
     this.render(false);
@@ -216,22 +231,38 @@ export class CommandPanel {
         issue({ type: 'cancel', target: object.id });
         return;
       case 'cancel':
+        // `command_cancel`: leaves a mode, or in the normal mode unselects.
+        if (this.mode === 'normal') return this.o.unselect();
         if (this.mode === 'place') this.o.cancelPlacement();
         this.mode = 'normal';
         break;
       case 'unselect':
         this.o.unselect();
         return;
+      case 'group':
+        this.o.group();
+        break;
+      case 'ungroup':
+        this.o.ungroup();
+        break;
     }
     this.update(object);
   }
 
-  /** The message `command_building` shows when a cost cannot be paid: the first attribute that falls short. */
+  /**
+   * The message `command_building` shows when a cost cannot be paid: the attribute `check_obj_cost` stops at (the
+   * population limit when headroom is asked for and the population is at it, else the first cost that falls short).
+   */
   private refuse(unit: number): void {
     const a = this.o.world.attributes[this.o.player]!;
-    const short = unitType(unit).creatable?.costs.find((c) => (a[c.type] ?? 0) < c.amount);
-    const what = short && RESOURCE_NAMES[short.type];
-    this.o.message.textContent = what ? `Not enough ${what}.` : 'You cannot build that now.';
+    const costs = (unitType(unit).creatable?.costs ?? []).filter((c) => c.type >= 0);
+    let short = -1;
+    for (const c of costs) {
+      if (c.type === ATTR_HEADROOM && a[ATTR_POPULATION]! >= a[ATTR_POPULATION_LIMIT]!) short = ATTR_POPULATION_LIMIT;
+      else if ((a[c.type] ?? 0) < c.amount) short = c.type;
+      if (short >= 0) break;
+    }
+    this.o.message.textContent = shortMessage(this.o.provider, short);
     this.o.message.hidden = false;
     delete this.o.message.dataset.hover;
     clearTimeout(this.messageTimer);

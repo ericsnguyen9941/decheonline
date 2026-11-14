@@ -99,3 +99,29 @@ test('without the dat button locations the list order fills the grid', () => {
   const c = { ...context(villager.id, 'build-menu'), buttonOf: () => null };
   expect(commandButtons(c).map((b) => b.slot)).toEqual([0, 1, 2, 3, 11]);
 });
+
+test('several selected units get Group and Ungroup; one in a group Ungroup alone; mixed levels Build and Cancel', () => {
+  const { world, context } = game();
+  const villagers = [...world.entities.ofPlayer(1)].filter((e) => e.type === VILLAGER);
+  const levelOf = (unit: number) => (unit === VILLAGER ? 3 : unit === CLUBMAN ? 4 : unit === TOWN_CENTER ? 2 : null);
+  const c = { ...context(villagers[0]!.id), selected: villagers, levelOf };
+  expect(commandButtons(c)).toEqual([
+    { kind: 'build', slot: 0 },
+    { kind: 'group', slot: 6 },
+    { kind: 'ungroup', slot: 7 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+  expect(commandButtons({ ...c, selected: [villagers[0]!], grouped: true })).toEqual([
+    { kind: 'build', slot: 0 },
+    { kind: 'ungroup', slot: 6 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+  // A Villager with the Town Center: levels differ (0), so the special selection's buttons, ending in Cancel.
+  const tc = own(world, TOWN_CENTER);
+  expect(commandButtons({ ...c, selected: [villagers[0]!, tc] })).toEqual([
+    { kind: 'build', slot: 0 },
+    { kind: 'group', slot: 6 },
+    { kind: 'ungroup', slot: 7 },
+    { kind: 'cancel', slot: 11 },
+  ]);
+});

@@ -31,10 +31,14 @@ export type CommandButton =
   /** `TRIBE_UI_COMMAND_CANCEL`: back to the normal mode. */
   | { kind: 'cancel'; slot: number }
   /** `TRIBE_UI_COMMAND_UNSELECT`. */
-  | { kind: 'unselect'; slot: number };
+  | { kind: 'unselect'; slot: number }
+  /** `TRIBE_UI_COMMAND_GROUP`: the selection becomes a group (`group_objects(-1)`). */
+  | { kind: 'group'; slot: number }
+  /** `TRIBE_UI_COMMAND_UNGROUP`: the selected objects leave their groups (`ungroup_objects`). */
+  | { kind: 'ungroup'; slot: number };
 
 /** btncmd.shp (interface SLP 50721) frames the grid uses at 800x600 and up. */
-export const COMMAND_FRAME = { build: 2, 'cancel-construction': 3, cancel: 10, unselect: 10, more: 11 } as const;
+export const COMMAND_FRAME = { build: 2, 'cancel-construction': 3, group: 7, ungroup: 8, cancel: 10, unselect: 10, more: 11 } as const;
 
 /** The grid's last slot: cancel or unselect (hotkey Esc). */
 export const FINAL_SLOT = 11;
@@ -45,6 +49,12 @@ const RANGE = 87;
 const ATTR_TOWN_CENTER_ALLOWED = 48;
 const MASTER_TYPE_COMBAT = 70;
 const MASTER_TYPE_BUILDING = 80;
+/** `unit_level`s with a branch of their own in `setup_buttons`: building, villager, and the other units. */
+const LEVEL_BUILDING = 2;
+const LEVEL_VILLAGER = 3;
+const UNIT_LEVELS = new Set([4, 5, 6, 7, 9]);
+/** `is_group_selected(4)`: the object group of the Villagers, which gives a mixed selection the build button. */
+const GROUP_VILLAGER = 4;
 
 /** `calc_button_loc`: a dat `button_location` (1-5, 6-10 on the first page; 11-15, 16-20 on the second) to a grid slot. */
 export function buttonSlot(location: number): number {
@@ -88,8 +98,14 @@ export interface CommandContext {
   world: World;
   /** Sim player number of this client. */
   player: number;
-  /** The object the panel shows (the lowest selected id), if any. */
+  /** The object the panel shows (the player's `selected_obj`), if any. */
   object: Entity | undefined;
+  /** Every selected object (`sel_list`); the panel's object alone when not given. */
+  selected?: readonly Entity[];
+  /** Is the panel's object in a group (`selected_group` != 0)? */
+  grouped?: boolean;
+  /** The dat's `unit_level` of a master; null when the pack does not have it. */
+  levelOf?: (unit: number) => number | null;
   mode: CommandMode;
   /** Build menu page (`start_item`): 0 the first, 1 the second. */
   page: number;
@@ -128,21 +144,56 @@ export function commandButtons(c: CommandContext): CommandButton[] {
   }
   const unselect: CommandButton = { kind: 'unselect', slot: FINAL_SLOT };
   if (object.owner !== player) return [unselect];
+  const selected = c.selected?.length ? c.selected : [object];
+  // Group (slot 6) and Ungroup (7) for several objects, or Ungroup alone (6) for one in a group.
+  const grouping: CommandButton[] =
+    selected.length > 1 ? [{ kind: 'group', slot: 6 }, { kind: 'ungroup', slot: 7 }] : c.grouped ? [{ kind: 'ungroup', slot: 6 }] : [];
+  const level = levelSelected(selected, c.levelOf);
   const t = unitType(object.type);
-  if (t.masterType !== MASTER_TYPE_BUILDING) return canBuild(t) ? [{ kind: 'build', slot: 0 }, unselect] : [unselect];
-  if (object.state < ObjectState.Active) return [{ kind: 'cancel-construction', slot: 0 }, unselect];
-  if (object.state > ObjectState.Active) return [unselect];
-  const queue = object.queue ?? [];
-  const queueActive = queue.length > 0;
-  const out: CommandButton[] = [];
-  const ids = itemsMadeAt(world, player, object.type);
-  const locs = locations(ids, c.buttonOf);
-  ids.forEach((unit, i) => {
-    const count = queue.reduce((n, r) => (r.unit === unit ? n + r.count : n), 0);
-    if (!queueActive || count > 0) out.push({ kind: 'train', slot: buttonSlot(locs[i]!), unit, count });
-  });
-  out.push(unselect);
-  return out;
+  if (level === LEVEL_VILLAGER) return [{ kind: 'build', slot: 0 }, ...grouping, unselect];
+  if (UNIT_LEVELS.has(level)) return [...grouping, unselect];
+  if (level === LEVEL_BUILDING && t.masterType === MASTER_TYPE_BUILDING) {
+    if (object.state < ObjectState.Active) return [{ kind: 'cancel-construction', slot: 0 }, unselect];
+    if (object.state > ObjectState.Active) return [unselect];
+    const queue = object.queue ?? [];
+    const queueActive = queue.length > 0;
+    const out: CommandButton[] = [];
+    const ids = itemsMadeAt(world, player, object.type);
+    const locs = locations(ids, c.buttonOf);
+    ids.forEach((unit, i) => {
+      const count = queue.reduce((n, r) => (r.unit === unit ? n + r.count : n), 0);
+      if (!queueActive || count > 0) out.push({ kind: 'train', slot: buttonSlot(locs[i]!), unit, count });
+    });
+    // Grouping only shows on a building with nothing to make.
+    if (ids.length === 0) out.push(...grouping);
+    out.push(unselect);
+    return out;
+  }
+  // Mixed levels (0) and the rest: Build when a Villager is among them; the last button is Unselect when every one is
+  // a unit, else Cancel (which unselects in the normal mode).
+  const units = selected.length > 1 && level === 0 && selected.every((e) => isUnitLevel(levelOf(e.type, c.levelOf)));
+  const build: CommandButton[] = selected.some((e) => unitType(e.type).group === GROUP_VILLAGER) ? [{ kind: 'build', slot: 0 }] : [];
+  return [...build, ...grouping, units ? unselect : { kind: 'cancel', slot: FINAL_SLOT }];
+}
+
+/** A master's `unit_level`, from the pack or, without one, guessed from the sim's table. */
+function levelOf(unit: number, from?: (unit: number) => number | null): number {
+  const known = from?.(unit);
+  if (known !== null && known !== undefined) return known;
+  const t = unitType(unit);
+  if (t.masterType === MASTER_TYPE_BUILDING) return LEVEL_BUILDING;
+  return canBuild(t) ? LEVEL_VILLAGER : 4;
+}
+
+/** The movable units' levels (the special selection's `all_moveable_units` test). */
+function isUnitLevel(level: number): boolean {
+  return level >= 3 && level <= 9;
+}
+
+/** `unit_level_selected`: the level the selected objects share, or 0 when they differ. */
+export function levelSelected(selected: readonly Entity[], from?: (unit: number) => number | null): number {
+  const levels = new Set(selected.map((e) => levelOf(e.type, from)));
+  return levels.size === 1 ? [...levels][0]! : 0;
 }
 
 /** The grid by slot: the last button set in a slot wins, as in the original. */

@@ -1,6 +1,8 @@
 // The game's text for the HUD from the language strings (language.dll, languagex.dll over it) the pack carries:
 // object and civilization names (TRIBE_Panel_Object::draw), the object panel's stat rows (draw_item) and the command
-// buttons' messages (TRIBE_Screen_Game::set_button, calc_text_msg). Without strings the dat's names and English stand in.
+// buttons' messages (TRIBE_Screen_Game::set_button, calc_text_msg), the age, the top strip's buttons, refusals and the
+// attack rollover. Without strings the dat's names and English stand in for names and commands; the rest is left empty,
+// as `get_string` leaves it for an id it does not have.
 import { unitType, type CombatInfo, type Storage } from '@aoe/sim';
 import type { AssetProvider } from '../assets';
 import type { CommandButton } from './commands';
@@ -21,7 +23,25 @@ const STRING_COMMAND = {
   more: [4112, 'More'],
   cancel: [4111, 'Cancel'],
   unselect: [4106, 'Unselect'],
+  group: [4108, 'Group'],
+  ungroup: [4109, 'Ungroup'],
 } as const;
+/** `get_string2(RGE_STRING_TYPE_AGE, age)`: `STRING_ID_AGE_STONE` .. `_IRON` for ages 1-4 (tribegam.cpp:778). */
+const STRING_AGE_BASE = 4200;
+/** `STRING_ID_COMMAND_CHAT`, `_DIPLOMACY`, `_MENU`: the top strip's buttons (scr_game.cpp:252, tribegam.cpp:871). */
+export const STRING_TOP_BUTTONS = [4113, 4114, 4115] as const;
+/**
+ * `get_string2(RGE_STRING_TYPE_ATTRIBUTE, 1, attribute)` (tribegam.cpp:930): what `command_building` says when
+ * `check_obj_cost` names the attribute that falls short. `STRING_ID_ERROR_NOT_ENOUGH_FOOD` .. `_GOLD`, `_NEED_MORE_HOUSES`
+ * (headroom, 4) and `_POPULATION_LIMIT` (32).
+ */
+const STRING_SHORT: Record<number, number> = { 0: 3001, 1: 3002, 2: 3003, 3: 3004, 4: 3005, 32: 3046 };
+/**
+ * `enemy_text_id` of the right-click table (`Tribe1btnMouseRightClickTable`, src/game_globals.cpp:762) by object group,
+ * shown with the attack cursor: 3704 for groups 2, 20-22, 3702 for 3, 3703 for 27, else 3701.
+ */
+const STRING_ATTACK: Record<number, number> = { 2: 3704, 3: 3702, 20: 3704, 21: 3704, 22: 3704, 27: 3703 };
+const STRING_ATTACK_DEFAULT = 3701;
 /** `g_trade_display_range_threshold`: a soldier's range row shows from this range up. */
 const RANGE_THRESHOLD = 0.99;
 /** `TRIBE_Combat_Object::get_armor` / `get_pierce_armor` count the armours of these classes. */
@@ -96,6 +116,28 @@ export function statRows(provider: AssetProvider, unit: number, busy: boolean): 
   if (cur.pierceArmor > 0) row('pierceArmor', bonus(pierceArmor, cur.pierceArmor));
   if (soldier && combat.range > RANGE_THRESHOLD) row('range', bonus(Math.trunc(range), Math.trunc(combat.range)));
   return rows;
+}
+
+/** The age text of the top strip (`get_string2(RGE_STRING_TYPE_AGE, current age)`); empty outside ages 1-4. */
+export function ageName(provider: AssetProvider, age: number): string {
+  const a = Math.trunc(age);
+  return a >= 1 && a <= 4 ? (provider.string(STRING_AGE_BASE + a) ?? '') : '';
+}
+
+/** The chat, diplomacy and menu buttons' texts (`get_string2(RGE_STRING_TYPE_COMMAND, id)`). */
+export function topButtonLabels(provider: AssetProvider): string[] {
+  return STRING_TOP_BUTTONS.map((id) => provider.string(id) ?? '');
+}
+
+/** The refusal for the attribute `check_obj_cost` found short (3001 for food); empty for any other. */
+export function shortMessage(provider: AssetProvider, attribute: number): string {
+  const id = STRING_SHORT[attribute];
+  return (id !== undefined && provider.string(id)) || '';
+}
+
+/** The rollover text with the attack cursor over an enemy object of `group` (`get_mouse_pointer_action_vars`). */
+export function attackRollover(provider: AssetProvider, group: number): string {
+  return provider.string(STRING_ATTACK[group] ?? STRING_ATTACK_DEFAULT) ?? '';
 }
 
 /** `calc_text_msg`: the item's text and what it costs, "Create Villager (C) (Food: 50)". */

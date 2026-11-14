@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 5;
+export const PACK_VERSION = 6;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -38,6 +38,8 @@ export interface PackGraphic {
   angleCount: number;
   mirroringMode: number;
   frameDuration: number;
+  /** `draw_level` (the dat's layer): parts at 10 or below draw at the object's shadow point, on the ground (`RGE_Sprite::draw`). */
+  layer: number;
   /**
    * The draw list (`RGE_Sprite::draw_list`): `[graphic, offsetX, offsetY, angle]` per part, drawn in order instead of
    * the graphic's own SLP; graphic -1 is the graphic itself, angle -1 shows the part at every angle. Empty: just the SLP.
@@ -75,6 +77,8 @@ export interface PackUnit {
   level: number;
   /** `orig_weapon`, `orig_armor`, `orig_pierce_armor`, `orig_weapon_range`: the panel's base values; zeros without combat. */
   displayed: [number, number, number, number];
+  /** `select_level` (the dat's interaction mode): a click selects from 2 up, a box only 4 (units). */
+  selectLevel: number;
 }
 
 export interface PackManifest {
@@ -89,7 +93,7 @@ export interface PackManifest {
   graphics: Record<string, PackGraphic>;
   /** Keyed by the dat's terrain id. */
   terrains: Record<string, PackTerrain>;
-  /** Keyed by unit id; the first playable civ's table (the sprites are shared across civs). */
+  /** Keyed by unit id; the first playable civ's table (the sprites are shared across civs), Gaia's for the ids it lacks. */
   units: Record<string, PackUnit>;
   /** The game's text by string id: language.dll's string tables with languagex.dll's (Rise of Rome) over them. */
   strings: Record<string, string>;

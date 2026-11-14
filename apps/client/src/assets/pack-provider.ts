@@ -38,6 +38,7 @@ class PackProvider implements AssetProvider {
       angleCount: g.angleCount,
       mirroringMode: g.mirroringMode,
       frameDuration: g.frameDuration,
+      layer: g.layer,
       deltas: g.deltas.map(([graphic, offsetX, offsetY, angle]) => ({ graphic, offsetX, offsetY, angle })),
     };
   }
@@ -59,7 +60,7 @@ class PackProvider implements AssetProvider {
   unitInfo(unitId: number): UnitInfo | null {
     const u = this.manifest.units[unitId];
     return u
-      ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline, nameId: u.nameId, creationId: u.creationId, level: u.level, displayed: u.displayed }
+      ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline, nameId: u.nameId, creationId: u.creationId, level: u.level, displayed: u.displayed, selectLevel: u.selectLevel }
       : null;
   }
 
