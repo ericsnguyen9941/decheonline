@@ -1,3 +1,4 @@
+import { parseCommand } from '@aoe/sim';
 import {
   MAX_COMMANDS_PER_BATCH,
   MAX_NAME_LENGTH,
@@ -26,10 +27,16 @@ function cleanName(v: unknown): string | null {
   return name.length <= MAX_NAME_LENGTH ? name : null;
 }
 
+/** Every command must be in the sim's vocabulary; unknown fields are dropped. */
 function commands(v: unknown): Command[] | null {
   if (!Array.isArray(v) || v.length > MAX_COMMANDS_PER_BATCH) return null;
-  for (const c of v) if (!isObj(c) || typeof c['type'] !== 'string') return null;
-  return v as Command[];
+  const out: Command[] = [];
+  for (const c of v) {
+    const command = parseCommand(c);
+    if (command === null) return null;
+    out.push(command);
+  }
+  return out;
 }
 
 export function encode(message: ClientMessage | ServerMessage): string {

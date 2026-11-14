@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocket } from 'ws';
-import { CODE_LENGTH, isValidCode, type ClientMessage, type ServerMessage } from '@aoe/protocol';
+import { CODE_LENGTH, isValidCode, TURN_MS, type ClientMessage, type ServerMessage } from '@aoe/protocol';
 import { createApp } from './app';
 import { RoomRegistry } from './rooms';
 
@@ -164,7 +164,7 @@ describe('rooms', () => {
     expect((await guest.expect('error')).code).toBe('not-host');
     host.send({ t: 'start' });
     const start = await host.expect('start');
-    expect(start).toMatchObject({ seed: 1234, turnMs: 200, commandDelay: 2 });
+    expect(start).toMatchObject({ seed: 1234, turnMs: TURN_MS, commandDelay: 2 });
     await guest.expect('start');
   });
 
@@ -202,11 +202,11 @@ describe('turn relay', () => {
     await startGame(host, guest);
 
     // Guest runs ahead; nothing is released until the host submits the same turn.
-    guest.send({ t: 'turn', turn: 0, commands: [{ type: 'move', unit: 2 }] });
+    guest.send({ t: 'turn', turn: 0, commands: [{ type: 'noop' }] });
     guest.send({ t: 'turn', turn: 1, commands: [] });
     await host.expectSilence();
     host.send({ t: 'turn', turn: 0, commands: [] });
-    host.send({ t: 'turn', turn: 1, commands: [{ type: 'build', at: [3, 4] }] });
+    host.send({ t: 'turn', turn: 1, commands: [{ type: 'test', x: 3, y: 4 }] });
 
     const expected = [
       {
@@ -214,14 +214,14 @@ describe('turn relay', () => {
         turn: 0,
         batches: [
           { slot: 0, commands: [] },
-          { slot: 1, commands: [{ type: 'move', unit: 2 }] },
+          { slot: 1, commands: [{ type: 'noop' }] },
         ],
       },
       {
         t: 'turn',
         turn: 1,
         batches: [
-          { slot: 0, commands: [{ type: 'build', at: [3, 4] }] },
+          { slot: 0, commands: [{ type: 'test', x: 3, y: 4 }] },
           { slot: 1, commands: [] },
         ],
       },

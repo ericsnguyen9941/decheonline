@@ -9,5 +9,8 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "@aoe/sim": "*"
   }
 }

@@ -1,9 +1,14 @@
 /** Wire messages between client and relay server. One JSON object per WebSocket text frame, tagged by `t`. */
 
-/** Turn length the server tells clients to run at (original AoE1: about 200 ms). */
-export const TURN_MS = 200;
-/** Commands issued during turn N are scheduled for turn N + COMMAND_DELAY_TURNS (original AoE1: 2). */
-export const COMMAND_DELAY_TURNS = 2;
+import { BUFFER_FRAMES, COMMAND_DELAY_TURNS, STEP_MS, type Command } from '@aoe/sim';
+
+export { COMMAND_DELAY_TURNS, type Command };
+
+/**
+ * Base time of a full turn the server tells clients to run at: the boundary step plus the buffer frames,
+ * 11 x 90 ms (docs/spec/core.md §2.2). Early turns are one step each; the sim's `stepsInTurn` is authoritative.
+ */
+export const TURN_MS = STEP_MS * (1 + BUFFER_FRAMES);
 export const MAX_PLAYERS = 2;
 export const MAX_NAME_LENGTH = 24;
 export const MAX_COMMANDS_PER_BATCH = 256;
@@ -11,11 +16,6 @@ export const MAX_COMMANDS_PER_BATCH = 256;
 /** Invite code: 5 characters, no 0/O/1/I/L lookalikes; matched case-insensitively. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 5;
-
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-
-/** One player command. The sim owns the vocabulary of `type`; the relay never looks past it. */
-export type Command = { type: string } & { [key: string]: JsonValue };
 
 /** Player slot, 0 or 1. Slot 0 is the room host. */
 export type Slot = number;

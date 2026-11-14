@@ -10,6 +10,10 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
-    "@aoe/assets-import": "*"
+    "@aoe/assets-import": "*",
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "@aoe/sim": "*"
   }
 }

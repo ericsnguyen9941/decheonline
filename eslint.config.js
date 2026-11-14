@@ -3,12 +3,13 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 // Determinism: the sim must give identical results on every JS engine, in every
-// run. Math.sqrt included on purpose: sim code uses its own helpers (see docs/spec).
+// run. Math.sqrt is allowed: IEEE 754 requires it correctly rounded, like + - * /
+// (sim code wraps it as sqrt32, docs/spec/core.md §3).
 const transcendentalMath = [
   'random', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
   'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
   'exp', 'expm1', 'log', 'log1p', 'log2', 'log10',
-  'pow', 'sqrt', 'cbrt', 'hypot',
+  'pow', 'cbrt', 'hypot',
 ];
 
 export default tseslint.config(

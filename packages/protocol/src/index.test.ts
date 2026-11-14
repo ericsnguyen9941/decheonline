@@ -34,7 +34,7 @@ describe('client message decoding', () => {
     { t: 'join', code: 'ABCD2', name: 'Bao' },
     { t: 'ready', ready: true },
     { t: 'start' },
-    { t: 'turn', turn: 3, commands: [{ type: 'move', unit: 7, x: 10, y: 12 }] },
+    { t: 'turn', turn: 3, commands: [{ type: 'test', x: 10.5, y: 12 }, { type: 'noop' }] },
     { t: 'hash', turn: 3, hash: 0xdeadbeef },
     { t: 'leave' },
   ];
@@ -51,7 +51,9 @@ describe('client message decoding', () => {
     ['negative turn', JSON.stringify({ t: 'turn', turn: -1, commands: [] })],
     ['fractional turn', JSON.stringify({ t: 'turn', turn: 1.5, commands: [] })],
     ['command without type', JSON.stringify({ t: 'turn', turn: 0, commands: [{ x: 1 }] })],
-    ['too many commands', JSON.stringify({ t: 'turn', turn: 0, commands: Array(257).fill({ type: 'a' }) })],
+    ['unknown command type', JSON.stringify({ t: 'turn', turn: 0, commands: [{ type: 'move', unit: 2 }] })],
+    ['bad command field', JSON.stringify({ t: 'turn', turn: 0, commands: [{ type: 'test', x: '1', y: 2 }] })],
+    ['too many commands', JSON.stringify({ t: 'turn', turn: 0, commands: Array(257).fill({ type: 'noop' }) })],
     ['hash out of range', JSON.stringify({ t: 'hash', turn: 0, hash: 2 ** 32 })],
   ])('rejects %s', (_label, raw) => {
     expect(decodeClientMessage(raw).ok).toBe(false);
