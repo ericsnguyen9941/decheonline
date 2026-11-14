@@ -76,9 +76,9 @@ Spec: `economy.md` (gather, hunt/wood, drop-off, construction, production queue,
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
-| `src/act_gath.cpp` | 10/0/2/0 | `RGE_Action_Gather::update` :227 [M] | R2 |
+| `src/act_gath.cpp` | 10/0/2/0 | `RGE_Action_Gather::update` :227 [L] | R2 |
 | `src/tact_hnt.cpp` | 11/0/1/0 | `TRIBE_Action_Hunt` (9 methods) | R2 |
-| `src/tact_bld.cpp` | 8/1/0/0 | `TRIBE_Action_Build::update` :136 [M] | R2 |
+| `src/tact_bld.cpp` | 8/1/0/0 | `TRIBE_Action_Build::update` :136 [D] | R2 |
 | `src/t_b_obj.cpp` | 37/2/0/1 | `TRIBE_Building_Object::build` :700 [M], `damage`, `heal`, `explore_terrain` | R2 |
 | `src/tact_mob.cpp` | 9/0/0/1 | `TRIBE_Action_Make_Obj::update` :102 [M] (training) | R2 |
 | `src/act_make.cpp` | 5/0/0/0 | `RGE_Action_Make` | R2 |

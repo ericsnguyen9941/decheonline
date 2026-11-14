@@ -175,6 +175,9 @@ sequence must be identical on both clients.
   the queue has none for now and dispatches each through `do_command`
   (`src/Command.cpp:80`, M; tribe-specific ones in
   `TRIBE_Command::do_command`, `src/tcommand.cpp:36`, M).
+- **Each executed command draws one `rand()` first**, before its type switch,
+  and discards it (`src/tcommand.cpp:37`). So every command consumes one
+  draw of the step's stream, whatever it does afterwards (see `economy.md`).
 - `get_command` (`src/com_hand.cpp:385`, M): single player takes any queued
   item (`GetNextItemSingle`); multiplayer takes
   `GetNextItemOrdered(current_turn)`.
