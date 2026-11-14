@@ -5,6 +5,7 @@ export * from './rng';
 export * from './entities';
 export * from './map';
 export * from './trig';
+export * from './unit-record';
 export * from './units';
 export * from './pathing';
 export * from './movement';

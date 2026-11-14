@@ -33,6 +33,15 @@ const UNIT: UnitType = {
   action: null,
   combat: null,
   missile: null,
+  clearanceX: f32(0.2),
+  clearanceY: f32(0.2),
+  canBeBuiltOn: 0,
+  elevationMode: 0,
+  placementTerrain: [-1, -1],
+  placementSideTerrain: [-1, -1],
+  enabled: true,
+  creatable: null,
+  building: null,
 };
 
 function setup(waypoint: [number, number], seed = 14) {

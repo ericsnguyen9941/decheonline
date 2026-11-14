@@ -18,6 +18,7 @@
     "guard": "node tools/check-tracked-files.mjs",
     "assets:verify": "node tools/install-check.mjs",
     "dat:dump": "node --experimental-transform-types tools/dat-dump.mjs",
+    "gen:sim-tables": "node --experimental-transform-types tools/gen-sim-tables.mjs",
     "assets:import": "npm run import -w @aoe/assets-import",
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspaces --if-present",

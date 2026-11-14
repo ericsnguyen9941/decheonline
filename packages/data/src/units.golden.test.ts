@@ -1,44 +1,29 @@
-// The sim's unit table must equal the original empires.dat (AOE1_DIR). Skipped when unset.
+// The sim's generated tables (packages/sim/src/unit-data.ts) must equal what the original empires.dat (AOE1_DIR) gives.
+// The unit records are civ 1's (Egyptians), or Gaia's for units civ 1 lacks. Other civs differ in some building
+// graphics (the Greek Granary, for one); the sim has no per-civ masters yet. Skipped when unset.
 // Run: AOE1_DIR=<install> npm run test:golden
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { UNIT_TYPES } from '@aoe/sim';
+import { toUnitType, UNIT_TYPES } from '@aoe/sim';
 import { RuleSet } from './rules';
+import { renderSimTables, simTableCiv, simUnitRecord } from './sim-tables';
 
 const dir = process.env.AOE1_DIR;
 
 describe.skipIf(!dir)('golden: sim unit table vs data2/empires.dat', () => {
   let parsed: RuleSet | undefined;
   const load = (): RuleSet => (parsed ??= RuleSet.fromFile(readFileSync(join(dir ?? '', 'data2', 'empires.dat'))));
-  const sprite = (rules: RuleSet, graphic: number) => {
-    const g = rules.graphic(graphic);
-    // Sprite flags are the graphic's sequence type: 1 animated, 2 has facings, 4 random start frame.
-    const flags = g.sequenceType;
-    return { graphic, facets: g.angleCount, baseSpeed: Math.fround(g.speedMultiplier), hasFacings: (flags & 2) !== 0, randomStart: (flags & 5) === 5 };
-  };
+
+  test('unit-data.ts is what tools/gen-sim-tables.mjs writes from the dat (units, techs, effects)', () => {
+    const committed = readFileSync(join(import.meta.dirname, '..', '..', 'sim', 'src', 'unit-data.ts'), 'utf8');
+    expect(renderSimTables(load(), [...UNIT_TYPES.keys()])).toBe(committed);
+  });
 
   for (const t of UNIT_TYPES.values()) {
-    test(`unit ${t.id} (${t.name}) matches every civ's record`, () => {
+    test(`unit ${t.id} (${t.name}) matches the dat record`, () => {
       const rules = load();
-      for (let civ = 0; civ < rules.dat.civs.length; civ++) {
-        const u = rules.unit(civ, t.id);
-        const walking = u.movement!.walkingGraphic;
-        expect({
-          id: u.id,
-          name: u.name,
-          hitPoints: u.hitPoints,
-          speed: Math.fround(u.speed!),
-          radiusX: Math.fround(u.collisionSize[0]!),
-          radiusY: Math.fround(u.collisionSize[1]!),
-          radiusZ: Math.fround(u.collisionSize[2]!),
-          turnSpeed: Math.fround(u.movement!.rotationSpeed),
-          terrainRestriction: u.terrainRestriction,
-          terrainTable: rules.terrainRestriction(u.terrainRestriction).accessible.map(Math.fround),
-          standing: sprite(rules, u.standingGraphic),
-          walking: walking < 0 ? null : sprite(rules, walking),
-        }).toEqual({ ...t, terrainTable: [...t.terrainTable] });
-      }
+      expect(toUnitType(simUnitRecord(rules, simTableCiv(rules, t.id), t.id))).toEqual(t);
     });
   }
 });
