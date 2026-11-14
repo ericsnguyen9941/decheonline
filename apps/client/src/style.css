@@ -320,6 +320,78 @@ dialog h2 {
 .hud:not(.art) .hud-object {
   background: rgba(0, 0, 0, 0.35);
 }
+/* The object panel's first item row: its itemicon at (54, 30), the value at (88, 33). */
+.hud-object-item-icon {
+  left: 54px;
+  top: 30px;
+  width: 33px;
+  height: 23px;
+}
+.hud-object-item {
+  left: 88px;
+  top: 33px;
+  color: #fff;
+}
+
+/* Command buttons (src/hud/command-panel.ts): the slot border, the 50x50 icon inside it (one pixel further while
+   pressed) and the queued count in light grey at (3, 2). */
+.hud-slot {
+  background-repeat: no-repeat;
+}
+.hud-slot:not(.used) {
+  pointer-events: none;
+}
+.hud-slot > * {
+  position: absolute;
+}
+.hud-slot-icon {
+  left: 2px;
+  top: 2px;
+  width: 50px;
+  height: 50px;
+  overflow: hidden;
+  color: var(--parchment);
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: center;
+}
+.hud-slot.down .hud-slot-icon {
+  left: 3px;
+  top: 3px;
+}
+.hud-slot-count {
+  left: 3px;
+  top: 2px;
+  color: #ccc;
+}
+.hud-slot.down .hud-slot-count {
+  left: 4px;
+  top: 3px;
+}
+.hud:not(.art) .hud-slot.used {
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+  background-color: var(--stone);
+}
+.hud:not(.art) .hud-slot.used.down {
+  border-color: var(--stone-dark) var(--stone-light) var(--stone-light) var(--stone-dark);
+}
+.hud:not(.art) .hud-slot > * {
+  margin: -2px;
+}
+.hud-message {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 140px;
+  color: #fff;
+  text-align: center;
+  text-shadow: -1px 1px 0 #000;
+  pointer-events: none !important;
+}
+.hud-message[hidden] {
+  display: none;
+}
 .hud-minimap {
   /* The art's placeholder diamond is a little larger than the minimap's rectangle. */
   transform: scale(1.03);

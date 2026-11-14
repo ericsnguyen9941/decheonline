@@ -1,13 +1,15 @@
 import type { Application } from 'pixi.js';
+import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { Lockstep, showEndDialog } from './lockstep';
 import { LobbyView, Session } from './lobby';
 import { exposeMapDebug, MapView } from './map';
 import { tileCoordsToPixel } from './map/iso';
+import { constructionProgress, trainingStatus } from './hud/commands';
 import { GameHud } from './hud/game-hud';
 import { resourcesOf, type Resources } from './hud/resource-bar';
 import { connect } from './net/link';
-import { isUnit, UnitLayer } from './units/unit-layer';
+import { isBuildingObject, isUnit, UnitLayer, type Ghost } from './units/unit-layer';
 
 /** What `?debug=net` exposes as `window.__game`, for tests and manual poking. */
 export interface NetDebug {
@@ -42,6 +44,44 @@ export interface NetDebug {
   issueWork(units: number[], target: number, x: number, y: number): void;
   /** Canvas pixel at the middle of object `id`'s drawn sprite; null when it is not drawn. */
   objectScreenPos(id: number): { x: number; y: number } | null;
+  /** Population of `player` (default: this client's): units (attribute 11), the room houses give (4) and the limit (32). */
+  population(player?: number): DebugPopulation;
+  /** Every building and foundation, in id order, with its construction progress and production queue. */
+  buildings(): DebugBuilding[];
+  /** Production queue of building `id`; null when there is no such building. */
+  queue(id: number): DebugQueue | null;
+  /** The building being placed and where its ghost stands; null when not placing. */
+  ghost(): Ghost | null;
+}
+
+export interface DebugPopulation {
+  count: number;
+  headroom: number;
+  limit: number;
+}
+
+export interface DebugQueue {
+  /** Records in training order: unit type and how many are paid for. */
+  records: { unit: number; count: number }[];
+  /** The unit in training and its whole percent (0 before it starts); null with an empty queue. */
+  training: { unit: number; progress: number } | null;
+}
+
+export interface DebugBuilding {
+  id: number;
+  owner: number;
+  type: number;
+  x: number;
+  y: number;
+  /** `object_state`: 0 foundation, 2 active. */
+  state: number;
+  hp: number;
+  /** Whole percent built. */
+  progress: number;
+  /** Dat graphic of the sprite shown (the construction sprite while unbuilt) and the building's facet. */
+  graphic: number;
+  facet: number;
+  queue: DebugQueue;
 }
 
 export interface DebugObject {
@@ -133,8 +173,29 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
       mapView = view;
-      units = new UnitLayer({ app, view, world: game.world, provider, player, issue: (c) => game.issue(c), turnMs: (t) => game.turnMs(t) });
-      hud = new GameHud({ parent: app.canvas.parentElement!, app, world: game.world, provider, player, selection: () => units?.selected ?? new Set() });
+      const layer = new UnitLayer({
+        app,
+        view,
+        world: game.world,
+        provider,
+        player,
+        issue: (c) => game.issue(c),
+        turnMs: (t) => game.turnMs(t),
+        onPlacement: (unit) => hud?.commands.placementChanged(unit),
+      });
+      units = layer;
+      hud = new GameHud({
+        parent: app.canvas.parentElement!,
+        app,
+        world: game.world,
+        provider,
+        player,
+        selection: () => layer.selected,
+        issue: (c) => game.issue(c),
+        startPlacement: (unit) => layer.startPlacement(unit),
+        cancelPlacement: () => layer.cancelPlacement(),
+        unselect: () => layer.selected.clear(),
+      });
       // Start looking at this player's town centre spot.
       const own = units.ownUnits()[0];
       if (own) {
@@ -211,6 +272,32 @@ function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: ()
         })),
     issueWork: (units, target, x, y) => game.issue({ type: 'work', units, target, x, y }),
     objectScreenPos: (id) => layer()?.objectCentre(id) ?? null,
+    population: (p = player) => {
+      const a = game.world.attributes[p]!;
+      return { count: a[ATTR_POPULATION]!, headroom: a[ATTR_HEADROOM]!, limit: a[ATTR_POPULATION_LIMIT]! };
+    },
+    buildings: () =>
+      [...game.world.entities.all()].filter(isBuildingObject).map((e) => ({
+        id: e.id,
+        owner: e.owner,
+        type: e.type,
+        x: e.x,
+        y: e.y,
+        state: e.state,
+        hp: e.hp,
+        progress: constructionProgress(e),
+        graphic: e.sprite?.graphic ?? -1,
+        facet: e.facet ?? 0,
+        queue: queueOf(game.world, e.id)!,
+      })),
+    queue: (id) => queueOf(game.world, id),
+    ghost: () => layer()?.ghost ?? null,
   };
   return panel;
+}
+
+function queueOf(world: World, id: number): DebugQueue | null {
+  const e = world.entities.get(id);
+  if (!e || !isBuildingObject(e)) return null;
+  return { records: (e.queue ?? []).map((r) => ({ unit: r.unit, count: r.count })), training: trainingStatus(e) };
 }

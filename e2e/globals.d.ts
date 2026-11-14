@@ -28,6 +28,22 @@ interface Window {
     objects(): { id: number; owner: number; type: number; x: number; y: number; state: number; heldType: number; heldAmount: number; graphic: number; frame: number }[];
     issueWork(units: number[], target: number, x: number, y: number): void;
     objectScreenPos(id: number): { x: number; y: number } | null;
+    population(player?: number): { count: number; headroom: number; limit: number };
+    buildings(): {
+      id: number;
+      owner: number;
+      type: number;
+      x: number;
+      y: number;
+      state: number;
+      hp: number;
+      progress: number;
+      graphic: number;
+      facet: number;
+      queue: { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null };
+    }[];
+    queue(id: number): { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null } | null;
+    ghost(): { unit: number; x: number; y: number; fits: boolean } | null;
   };
 }
 

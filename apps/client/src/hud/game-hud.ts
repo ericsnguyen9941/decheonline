@@ -1,6 +1,8 @@
 import type { Application, Ticker } from 'pixi.js';
-import { unitType, type Entity, type World } from '@aoe/sim';
+import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, HOUSE, ObjectState, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
+import { CommandPanel } from './command-panel';
+import { constructionProgress, trainingStatus } from './commands';
 import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
@@ -14,6 +16,9 @@ const CULTURE = 0;
 const BUILDING = 80;
 /** A part of the top strip without icons or buttons (1024 art; the others are narrower but share the texture there). */
 const STRIP_TILE = { x: 300, w: 200 };
+/** itemicon.shp frames of the object panel's rows (`TRIBE_Panel_Object::draw_item`). */
+const ITEM_POPULATION = 4;
+const ITEM_PROGRESS = 9;
 
 export interface GameHudOptions {
   /** The element the canvas sits in; the HUD covers it. */
@@ -25,6 +30,13 @@ export interface GameHudOptions {
   player: number;
   /** Ids of the selected objects. */
   selection: () => ReadonlySet<number>;
+  /** Send a command through the lockstep. */
+  issue: (command: Command) => void;
+  /** Start and stop placing a building on the map. */
+  startPlacement: (unit: number) => void;
+  cancelPlacement: () => void;
+  /** Clear the selection. */
+  unselect: () => void;
 }
 
 function box(parent: HTMLElement | null, className: string, testid?: string): HTMLDivElement {
@@ -60,8 +72,13 @@ export class GameHud {
   private readonly objectIcon = box(this.object, 'hud-object-icon', 'object-icon');
   private readonly objectHealth = box(this.object, 'hud-object-health', 'object-health');
   private readonly objectHp = box(this.object, 'hud-object-hp', 'object-hp');
+  private readonly itemIcon = box(this.object, 'hud-object-item-icon', 'object-item-icon');
+  private readonly itemText = box(this.object, 'hud-object-item', 'object-item');
   private readonly slots = Array.from({ length: 12 }, () => box(this.bottom, 'hud-slot', 'command-slot'));
   private readonly minimap = box(this.bottom, 'hud-minimap', 'minimap');
+  private readonly message = box(this.root, 'hud-message', 'hud-message');
+  /** The command button grid. */
+  readonly commands: CommandPanel;
   private readonly bar: ResourceBar;
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = () => this.applyLayout();
@@ -71,6 +88,19 @@ export class GameHud {
   constructor(private readonly o: GameHudOptions) {
     o.parent.append(this.root);
     this.bar = new ResourceBar(this.topFrame, o.app, o.world, o.player);
+    this.message.hidden = true;
+    this.commands = new CommandPanel({
+      slots: this.slots,
+      message: this.message,
+      world: o.world,
+      provider: o.provider,
+      player: o.player,
+      culture: CULTURE,
+      issue: o.issue,
+      startPlacement: o.startPlacement,
+      cancelPlacement: o.cancelPlacement,
+      unselect: o.unselect,
+    });
     this.age.textContent = 'Stone Age';
     this.root.classList.toggle('art', o.provider.interfaceFrame(SLP.screen[1024], 0) !== null);
     this.applyLayout();
@@ -85,6 +115,7 @@ export class GameHud {
     this.o.app.ticker.remove(this.tick);
     window.removeEventListener('resize', this.onResize);
     this.bar.destroy();
+    this.commands.destroy();
     clearCursors(this.o.parent);
     this.root.remove();
   }
@@ -127,7 +158,10 @@ export class GameHud {
     this.update();
   }
 
-  /** Shows the first selected object in the object panel, as `TRIBE_Panel_Object::draw` does for a single selection. */
+  /**
+   * Shows the first selected object in the object panel, as `TRIBE_Panel_Object::draw` does for a single selection,
+   * and its commands in the button grid.
+   */
   private update(): void {
     const { world, selection } = this.o;
     let entity: Entity | undefined;
@@ -135,8 +169,10 @@ export class GameHud {
       const e = world.entities.get(id);
       if (e && (!entity || e.id < entity.id)) entity = e;
     }
+    this.commands.update(entity);
     const type = entity && unitType(entity.type);
-    const key = entity ? `${entity.id}:${entity.type}:${entity.owner}:${Math.floor(entity.hp)}` : '';
+    const item = entity ? this.itemRow(entity) : null;
+    const key = entity ? `${entity.id}:${entity.type}:${entity.owner}:${Math.floor(entity.hp)}:${item?.icon}:${item?.text}` : '';
     if (key === this.shown) return;
     this.shown = key;
     this.object.hidden = !entity;
@@ -154,5 +190,25 @@ export class GameHud {
     const frame = Math.min(HEALTH_FRAMES - 1, Math.max(0, Math.trunc(HEALTH_FRAMES - (HEALTH_FRAMES * entity.hp) / type.hitPoints)));
     this.objectHealth.hidden = !showHp;
     paintFrame(this.objectHealth, showHp ? provider.interfaceFrame(SLP.health, frame) : null);
+    this.itemIcon.hidden = !item;
+    this.itemText.hidden = !item;
+    paintFrame(this.itemIcon, item ? provider.interfaceFrame(SLP.itemIcons, item.icon) : null);
+    this.itemText.textContent = item?.text ?? '';
+  }
+
+  /**
+   * The first row of the object panel for an own building (tpnl_obj.cpp:430-480): construction or training progress
+   * in percent, or for a House the population over the room the houses give (capped by the population limit).
+   */
+  private itemRow(e: Entity): { icon: number; text: string } | null {
+    if (e.owner !== this.o.player || unitType(e.type).masterType < BUILDING) return null;
+    if (e.state === ObjectState.Unbuilt) return { icon: ITEM_PROGRESS, text: `${constructionProgress(e)}%` };
+    const training = trainingStatus(e);
+    if (training) return { icon: ITEM_PROGRESS, text: `${training.progress}%` };
+    if (e.type !== HOUSE) return null;
+    const a = this.o.world.attributes[this.o.player]!;
+    const population = Math.trunc(a[ATTR_POPULATION]!);
+    const room = Math.min(Math.trunc(a[ATTR_HEADROOM]! + a[ATTR_POPULATION]!), Math.trunc(a[ATTR_POPULATION_LIMIT]!));
+    return { icon: ITEM_POPULATION, text: `${population}/${room}` };
   }
 }

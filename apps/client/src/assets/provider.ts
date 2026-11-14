@@ -16,6 +16,17 @@ export interface GraphicInfo {
   mirroringMode: number;
   /** Seconds per frame. */
   frameDuration: number;
+  /** Parts drawn instead of the graphic's own frames (`RGE_Sprite::draw_list`); empty for a plain graphic. */
+  deltas: GraphicDelta[];
+}
+
+/** One part of a composite graphic: another graphic's frame at an offset (graphic -1: this graphic's own SLP). */
+export interface GraphicDelta {
+  graphic: number;
+  offsetX: number;
+  offsetY: number;
+  /** The only angle the part shows at; -1 every angle. */
+  angle: number;
 }
 
 /** A rectangle of a pack atlas image, for DOM use (CSS backgrounds, cursors). */
@@ -35,6 +46,8 @@ export interface UnitInfo {
   /** `button_pict`: frame of the unit's icon (btnunit, or btnbldg for buildings); -1 none. */
   icon: number;
   hitPoints: number;
+  /** `button_location` in the command grid (1-20); 0 none. */
+  button: number;
   /** `outline_radius_x/y/z` in tiles. */
   outline: [number, number, number];
 }

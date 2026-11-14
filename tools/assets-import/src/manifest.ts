@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 3;
+export const PACK_VERSION = 4;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -38,6 +38,11 @@ export interface PackGraphic {
   angleCount: number;
   mirroringMode: number;
   frameDuration: number;
+  /**
+   * The draw list (`RGE_Sprite::draw_list`): `[graphic, offsetX, offsetY, angle]` per part, drawn in order instead of
+   * the graphic's own SLP; graphic -1 is the graphic itself, angle -1 shows the part at every angle. Empty: just the SLP.
+   */
+  deltas: [number, number, number, number][];
 }
 
 export interface PackTerrain {
@@ -58,6 +63,8 @@ export interface PackUnit {
   icon: number;
   /** Hit points of the object when new (the panel's `x/y`). */
   hitPoints: number;
+  /** `button_location`: where its train or build button sits in the command grid (1-5, 6-10 first page; 11-20 second); 0 none. */
+  button: number;
   /** `outline_radius_x/y/z`: the selection diamond, in tiles (z: height of the health bar). */
   outline: [number, number, number];
 }

@@ -152,6 +152,7 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifes
       angleCount: g.angleCount,
       mirroringMode: g.mirroringMode,
       frameDuration: g.frameDuration,
+      deltas: g.deltas.map((d) => [d.graphicId, d.offsetX, d.offsetY, d.displayAngle]),
     };
   });
   dat.terrainBlock.terrains.slice(0, dat.terrainsUsed).forEach((t, id) => {
@@ -162,7 +163,14 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifes
   dat.civs[1]?.units.forEach((u, id) => {
     if (u) {
       const [x = 0, y = 0, z = 0] = u.outlineSize;
-      manifest.units[id] = { name: u.name, standingGraphic: u.standingGraphic, icon: u.iconId, hitPoints: u.hitPoints, outline: [x, y, z] };
+      manifest.units[id] = {
+        name: u.name,
+        standingGraphic: u.standingGraphic,
+        icon: u.iconId,
+        hitPoints: u.hitPoints,
+        button: u.creatable?.buttonId ?? 0,
+        outline: [x, y, z],
+      };
     }
   });
   return manifest;

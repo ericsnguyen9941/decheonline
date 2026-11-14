@@ -1,10 +1,13 @@
 import { Graphics, Sprite, type Application, type Texture, type Ticker } from 'pixi.js';
-import { spriteInfo, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { buildingFacet, checkPlacement, spriteInfo, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
+import { canBuild } from '../hud/commands';
 import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
+import { composeGraphic } from './composite';
 import { facingFrame } from './facing';
+import { alignBuilding } from './placement';
 
 /** Pointer travel (CSS px) after which a left press becomes a selection box instead of a click. */
 const BOX_THRESHOLD = 4;
@@ -13,6 +16,12 @@ const SELECTION_COLOUR = 0xffffff;
 const BAR_WIDTH = 24;
 const BAR_FILLED = 0x00ff00;
 const BAR_EMPTY = 0xff0101;
+/**
+ * The building being placed is drawn see-through (`fog_next_shape` 5 where it fits); where it does not, also shaded
+ * with a red that pulses (palette 0x24-0x28, stepping every 128 ms of world time).
+ */
+const GHOST_ALPHA = 0.6;
+const GHOST_BLOCKED = [0xff2f2f, 0xe30b00, 0xc71700, 0x8f1f00, 0x6f0b07] as const;
 
 interface Art {
   frames: SpriteFrame[];
@@ -42,11 +51,17 @@ export function isUnit(e: Entity): boolean {
   return e.mover !== undefined && unitType(e.type).masterType < 80;
 }
 
+/** A building (foundations too) of the sim's table. */
+export function isBuildingObject(e: Entity): boolean {
+  return UNIT_TYPES.get(e.type)?.masterType === 80;
+}
+
 /**
- * Facet to draw: a mover's heading. A still object with facings (the mines' pile variants) gets one by id, as the
+ * Facet to draw: a building's `facet` (its construction stage while unbuilt), a mover's heading. A still object with facings (the mines' pile variants) gets one by id, as the
  * sim keeps none (the original takes it from the scenario or map data, `make_scenario_obj`); others use facet 0.
  */
 function facetOf(e: Entity, angles: number): number {
+  if (e.facet !== undefined) return e.facet;
   if (e.mover) return e.mover.facet;
   return e.sprite && spriteInfo(e.sprite.graphic).hasFacings ? e.id % angles : 0;
 }
@@ -62,6 +77,16 @@ export interface UnitLayerOptions {
   issue: (command: Command) => void;
   /** Wall-clock length of a turn, to spread its movement over. */
   turnMs: (turn: number) => number;
+  /** Placing a building started (its master id) or ended (null). */
+  onPlacement?: (unit: number | null) => void;
+}
+
+/** The building following the pointer while placing: the aligned map point and whether it fits there. */
+export interface Ghost {
+  unit: number;
+  x: number;
+  y: number;
+  fits: boolean;
 }
 
 /** Alpha of a pixel of `sprite`'s texture under canvas point (x, y) is above this to count as a hit. */
@@ -70,8 +95,9 @@ const HIT_ALPHA = 8;
 /**
  * Draws every sim object on the map layer (units, buildings, trees, mines, animals, carcasses) with its real sprite
  * as the sim reports it (owner colour, facing, task animation) and handles the original's mouse scheme: left click or
- * drag a box to select own units, right click to order the selection to work on the object under the pointer (a
- * `work` command) or, over bare ground, to move there.
+ * drag a box to select own units, or click an own building, right click to order the selected units to work on the
+ * object under the pointer (a `work` command) or, over bare ground, to move there. While a building is being placed its
+ * ghost follows the pointer; a left click issues `build`, a right click stops placing.
  */
 export class UnitLayer {
   readonly selected = new Set<number>();
@@ -85,11 +111,20 @@ export class UnitLayer {
   private readonly alpha = new WeakMap<Texture, { pixels: Uint8ClampedArray; width: number } | null>();
   private seenTurn: number;
   private press: { x: number; y: number; boxing: boolean } | null = null;
+  /** Master id of the building being placed (`TRIBE_GAME_MODE_PLACE_BUILDING`), or null. */
+  private placing: number | null = null;
+  private readonly ghostSprite = new Sprite();
+  private ghostAt: Ghost | null = null;
+  /** Canvas pixel of the pointer while it is over the canvas. */
+  private pointer: { x: number; y: number } | null = null;
 
   constructor(private readonly o: UnitLayerOptions) {
     this.seenTurn = o.world.turn;
     this.highlight.zIndex = Number.MAX_SAFE_INTEGER;
     o.view.layer.addChild(this.highlight);
+    this.ghostSprite.zIndex = Number.MAX_SAFE_INTEGER - 1;
+    this.ghostSprite.visible = false;
+    o.view.layer.addChild(this.ghostSprite);
     o.app.stage.addChild(this.box);
     this.tick = () => this.draw();
     o.app.ticker.add(this.tick);
@@ -111,12 +146,24 @@ export class UnitLayer {
     return { x: p.x - this.o.view.camera.x, y: p.y - this.o.view.camera.y };
   }
 
-  /** Canvas pixel at the middle of object `id`'s drawn sprite (where a click lands on its body), or null. */
+  /**
+   * Canvas pixel at the middle of object `id`'s drawn sprite, or the drawn pixel nearest it when the middle is see-through
+   * (where a click lands on its body), or null.
+   */
   objectCentre(id: number): { x: number; y: number } | null {
     const t = this.tracks.get(id);
     if (!t?.sprite.visible) return null;
     const b = t.sprite.getBounds();
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    let best: { x: number; y: number; d: number } | null = null;
+    for (let y = Math.floor(b.y) + 1; y < b.y + b.height; y += 2) {
+      for (let x = Math.floor(b.x) + 1; x < b.x + b.width; x += 2) {
+        const d = (x - cx) ** 2 + (y - cy) ** 2;
+        if ((!best || d < best.d) && this.opaque(t.sprite, x, y)) best = { x, y, d };
+      }
+    }
+    return this.opaque(t.sprite, cx, cy) || !best ? { x: cx, y: cy } : { x: best.x, y: best.y };
   }
 
   /** How many drawn objects show pack art (not debug shapes). */
@@ -126,12 +173,35 @@ export class UnitLayer {
     return n;
   }
 
+  /** The building being placed and where it would go, while its ghost is shown. */
+  get ghost(): Ghost | null {
+    return this.placing === null ? null : this.ghostAt;
+  }
+
+  /** Start placing building `unit` (`command_building`): its ghost follows the pointer until a click. */
+  startPlacement(unit: number): void {
+    this.placing = unit;
+    this.press = null;
+    this.box.clear();
+    this.o.onPlacement?.(unit);
+  }
+
+  /** Stop placing (right click, Esc, the cancel button). */
+  cancelPlacement(): void {
+    if (this.placing === null) return;
+    this.placing = null;
+    this.ghostAt = null;
+    this.ghostSprite.visible = false;
+    this.o.onPlacement?.(null);
+  }
+
   destroy(): void {
     this.o.app.ticker.remove(this.tick);
     this.o.app.canvas.style.cursor = '';
     for (const fn of this.cleanup) fn();
     for (const t of this.tracks.values()) t.sprite.destroy();
     this.highlight.destroy();
+    this.ghostSprite.destroy();
     this.box.destroy();
   }
 
@@ -141,8 +211,12 @@ export class UnitLayer {
     const key = `${graphic}:${owner}`;
     if (this.art.has(key)) return this.art.get(key)!;
     this.art.set(key, null);
-    void this.o.provider.graphicFrames(graphic, owner).then(async (frames) => {
-      if (frames.length > 0) this.art.set(key, { frames, info: this.o.provider.graphicInfo(graphic), pack: true });
+    const { provider, app } = this.o;
+    const info = provider.graphicInfo(graphic);
+    const composite = info !== null && info.deltas.length > 0;
+    const frames = composite ? composeGraphic(provider, app.renderer, graphic, info, owner) : provider.graphicFrames(graphic, owner);
+    void frames.then(async (frames) => {
+      if (frames.length > 0) this.art.set(key, { frames, info: composite ? { ...info, mirroringMode: 0 } : info, pack: true });
       else this.art.set(key, { frames: await this.fallback.graphicFrames(graphic, owner), info: null, pack: false });
     });
     return null;
@@ -216,6 +290,58 @@ export class UnitLayer {
       this.selected.delete(id);
     }
     this.drawHighlight();
+    this.drawGhost();
+  }
+
+  /**
+   * `RGE_View::draw_place_object` (src/view.cpp:1160): the building's standing sprite at the aligned map point under the
+   * pointer, in the player's colour and building facet, see-through, and shaded red where `check_placement` fails.
+   */
+  private drawGhost(): void {
+    const sprite = this.ghostSprite;
+    const unit = this.placing;
+    sprite.visible = false;
+    if (unit === null || !this.pointer) {
+      this.ghostAt = null;
+      return;
+    }
+    const { world, view, player } = this.o;
+    const t = unitType(unit);
+    const { camera } = view;
+    const at = pixelToTileCoords(this.pointer.x + camera.x, this.pointer.y + camera.y, world.map.width);
+    // `fixup_pick_info`: a point off the map is pulled onto its last tile.
+    const col = Math.min(Math.max(at.col, 0), world.map.width - 1);
+    const row = Math.min(Math.max(at.row, 0), world.map.height - 1);
+    const { x, y } = alignBuilding(t.radiusX, t.radiusY, col, row, world.map.width, world.map.height);
+    const fits = checkPlacement(world.gameContext(), t, x, y, true, true) === 0;
+    this.ghostAt = { unit, x, y, fits };
+    const art = this.loadArt(t.standing.graphic, player);
+    if (!art) return;
+    const info = art.info;
+    const facet = buildingFacet(world, player, unit);
+    const pick = info ? facingFrame(facet, 0, info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
+    const frame = art.frames[pick.index] ?? art.frames[0]!;
+    const pos = tileCoordsToPixel(x, y, world.map.width);
+    sprite.texture = frame.texture;
+    sprite.scale.x = pick.flipped ? -1 : 1;
+    sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - frame.hotspotY);
+    sprite.alpha = GHOST_ALPHA;
+    const pulse = (world.worldTime >> 7) & 7;
+    sprite.tint = fits ? 0xffffff : GHOST_BLOCKED[pulse < 4 ? pulse : 8 - pulse]!;
+    sprite.visible = true;
+  }
+
+  /** Left click while placing (`command_place_object`): a `build` for the selected builders where the building fits. */
+  private placeAt(keepPlacing: boolean): void {
+    const ghost = this.ghostAt;
+    if (!ghost?.fits) return;
+    const units = this.selectedOwn().filter((id) => {
+      const e = this.o.world.entities.get(id);
+      return e !== undefined && isUnit(e) && canBuild(unitType(e.type));
+    });
+    if (units.length === 0) return;
+    if (!keepPlacing) this.cancelPlacement();
+    this.o.issue({ type: 'build', units, unitType: ghost.unit, x: ghost.x, y: ghost.y });
   }
 
   /**
@@ -260,13 +386,25 @@ export class UnitLayer {
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
     on('contextmenu', (e) => e.preventDefault());
+    on('pointerleave', () => (this.pointer = null));
     on('pointerdown', (e) => {
       const p = local(e);
+      this.pointer = p;
+      if (this.placing !== null) {
+        // Shift (or ctrl) keeps placing more of the same, as `reset_mode` 0 in the original.
+        if (e.button === 0) {
+          this.drawGhost();
+          this.placeAt(e.shiftKey || e.ctrlKey);
+        } else if (e.button === 2) this.cancelPlacement();
+        return;
+      }
       if (e.button === 0) this.press = { ...p, boxing: false };
       else if (e.button === 2) this.orderAt(p.x, p.y);
     });
     on('pointermove', (e) => {
       const p = local(e);
+      this.pointer = p;
+      if (this.placing !== null) return;
       if (!this.press) {
         canvas.style.cursor = this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
         return;
@@ -297,11 +435,15 @@ export class UnitLayer {
     return out;
   }
 
-  /** Topmost own unit whose sprite covers the canvas pixel. */
+  /** Topmost own unit whose sprite covers the canvas pixel, or own building whose drawn pixels do. */
   private selectAt(x: number, y: number): void {
-    const hits = this.ownTracks()
-      .filter(([, t]) => t.sprite.getBounds().containsPoint(x, y))
-      .sort((a, b) => b[1].sprite.zIndex - a[1].sprite.zIndex);
+    const hits: [Entity, Track][] = this.ownTracks().filter(([, t]) => t.sprite.getBounds().containsPoint(x, y));
+    for (const e of this.o.world.entities.ofPlayer(this.o.player)) {
+      const t = this.tracks.get(e.id);
+      if (!isBuildingObject(e) || !t?.sprite.visible) continue;
+      if (t.sprite.getBounds().containsPoint(x, y) && this.opaque(t.sprite, x, y)) hits.push([e, t]);
+    }
+    hits.sort((a, b) => b[1].sprite.zIndex - a[1].sprite.zIndex);
     if (hits[0]) this.selected.add(hits[0][0].id);
   }
 
@@ -354,12 +496,12 @@ export class UnitLayer {
   }
 
   private hasOwnSelection(): boolean {
-    return this.selectedOwn().length > 0;
+    return this.selectedOwn().some((id) => isUnit(this.o.world.entities.get(id)!));
   }
 
   /** Right click: the selected units work on the object under the pointer, or else walk to the map point there. */
   private orderAt(x: number, y: number): void {
-    const units = this.selectedOwn();
+    const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
     if (units.length === 0) return;
     const { camera } = this.o.view;
     const { col, row } = pixelToTileCoords(x + camera.x, y + camera.y, this.o.world.map.width);

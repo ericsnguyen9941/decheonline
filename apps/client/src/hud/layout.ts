@@ -24,6 +24,8 @@ export const SLP = {
   unitIcons: 50730,
   /** `btnbldg_<culture>`: building icons, 50x50. */
   buildingIcons: 50704,
+  /** `itemicon`: the object panel's row icons (4 population, 9 progress). */
+  itemIcons: 50731,
   /** `health`: 26 frames of the hit point bar, full first. */
   health: 50745,
   /** `mcursors`: the mouse cursors. */

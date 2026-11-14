@@ -32,8 +32,14 @@ class PackProvider implements AssetProvider {
 
   graphicInfo(graphicId: number): GraphicInfo | null {
     const g = this.manifest.graphics[graphicId];
-    if (!g?.slp) return null;
-    return { frameCount: g.frameCount, angleCount: g.angleCount, mirroringMode: g.mirroringMode, frameDuration: g.frameDuration };
+    if (!g || (!g.slp && g.deltas.length === 0)) return null;
+    return {
+      frameCount: g.frameCount,
+      angleCount: g.angleCount,
+      mirroringMode: g.mirroringMode,
+      frameDuration: g.frameDuration,
+      deltas: g.deltas.map(([graphic, offsetX, offsetY, angle]) => ({ graphic, offsetX, offsetY, angle })),
+    };
   }
 
   async graphicFrames(graphicId: number, owner = 1): Promise<SpriteFrame[]> {
@@ -49,7 +55,7 @@ class PackProvider implements AssetProvider {
 
   unitInfo(unitId: number): UnitInfo | null {
     const u = this.manifest.units[unitId];
-    return u ? { icon: u.icon, hitPoints: u.hitPoints, outline: u.outline } : null;
+    return u ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline } : null;
   }
 
   terrainLayout(terrainId: number): { rows: number; cols: number } {
