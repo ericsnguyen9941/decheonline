@@ -15,6 +15,11 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   reporter: 'list',
   use: { baseURL },
+  projects: [
+    { name: 'main', testIgnore: /latency\.spec\.ts/ },
+    // Wall-clock timing: run alone, after the rest, so other browsers do not slow its frames (and so its step size).
+    { name: 'latency', testMatch: /latency\.spec\.ts/, dependencies: ['main'], fullyParallel: false },
+  ],
   webServer: {
     command: 'npm run dev',
     cwd: '..',

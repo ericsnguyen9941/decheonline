@@ -18,7 +18,7 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 - `npm run build`: client and server bundles.
 - `npm run check`: tracked-file guard, ESLint, typecheck, unit tests. Run before every commit.
 - `npm test`: unit tests (Vitest) in every workspace; one workspace: `npm test -w @aoe/sim`.
-- `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`. `npm run test:e2e -- determinism`: one sim replay hashed in Node, Chromium, Firefox and WebKit.
+- `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`. `npm run test:e2e -- determinism`: one sim replay hashed in Node, Chromium, Firefox and WebKit. `e2e/tests/latency.spec.ts` (wall-clock click-to-action, RTT change) is its own project that runs after the rest; alone: `npm run test:e2e -- latency --no-deps`.
 - `AOE1_DIR=<install> npm run assets:import`: build the pack (~8 s, ~100 MB). Then `AOE1_DIR=<install> npm run test:e2e:real -w @aoe/e2e` (local-only screenshot to `assets-local/screenshots/`).
 - `AOE1_DIR=<install> npm run test:golden`: tests against real game files (skipped without `AOE1_DIR`); `@aoe/data` parses `data2/empires.dat` to its last byte.
 - `AOE1_DIR=<install> npm run dat:dump -- unit 83`: print a record from `data2/empires.dat` (`unit|tech|graphic|terrain|effect|civ <id>`, `summary`; no vitest).
@@ -34,3 +34,4 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 - TypeScript is pinned to 6.0.x: typescript-eslint 8.x does not accept TypeScript 7 yet.
 - `window.__game.applied()` lists a batch when it is received; `World.addBatch` runs it `COMMAND_DELAY_TURNS` (2) turns later. An e2e that waits on `applied()` must also wait 2 more turns before reading unit state (`e2e/tests/move.spec.ts` `settle`).
 - A new `window.__game` hook must also be typed in `e2e/globals.d.ts`, or `npm run check` fails on the e2e typecheck.
+- The step size follows the measured frame time, as in the original (turn-timing.md §4, §8.1): on a loaded machine or software WebGL (the Playwright Linux image) frames take 70-300 ms, the server picks `G` 70-150 and click-to-action grows past 1 s. Wall-clock assertions only hold on an idle machine with a GPU; check `uptime` first.
