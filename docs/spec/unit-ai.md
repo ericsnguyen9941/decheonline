@@ -571,9 +571,11 @@ All draws are `debug_rand` → the C runtime `rand()` (`core.md` §4.1). A
 The alert cooldown `update_count` is set to 20 by an accepted 0x201 and
 decremented once per game second in `TRIBE_Player::update`
 (`src/tplayer.cpp:352-377`, M), per player. Gaia (`TRIBE_Gaia`) has its own
-`update` (`src/tplayer.cpp:3968`) that was not checked for this decrement:
-**unverified** whether Gaia's cooldown ever runs down (it matters only for
-Gaia victims' draws).
+`update` (`src/tplayer.cpp:3968`), which only calls `RGE_Player::update`
+(`src/player.cpp`); neither touches `update_count`. So Gaia's cooldown never
+runs down: after Gaia's first accepted 0x201 it stays at 20, and every later
+ATTACKED on a Gaia object skips the inner fence. The port runs the cooldown
+down for players ≥ 1 only (`World.step`).
 
 Not covered here: draws inside `moveTo`/pathing (`src/move_obj.cpp` has
 `debug_rand` calls; see `movement.md`) and inside the attack itself
@@ -706,7 +708,7 @@ These are what `packages/sim` must do; they are not decomp statements.
   alert cooldown, 4.0/3.0 flee factors) are code constants, not dat values,
   so retail differences would only show in a recording: `beta-only?` not
   ruled out.
-- Gaia visibility/diplomacy buckets and Gaia's alert cooldown (§5, §6).
+- Gaia visibility/diplomacy buckets (§5).
 - Whether any draw happens between the creation fence and `initUnitAI`
   (§1.2).
 - Sprite `base_speed` for the villager walking sprite (Example 4).

@@ -671,6 +671,41 @@ updates later in the same step it draws `rand() = 27125` and reseeds
 raw stream's 9192. (If the Clubman updated before the Axeman, its death
 draw happens one step later.)
 
+### Example 7 — a Clubman kills an enemy Villager
+
+Refs: §2.1, §2.4, §3; `unit-ai.md` §3. Test map, 50 ms steps. Player 1's
+Clubman at (10.5, 10.5), player 2's Villager (25 hp, armour 0) at
+(13.5, 10.5); player 1 issues `attack {units: [Clubman], target: Villager}`
+(do_command_work at the target, `COMMAND_TYPE_IDS` 7). Once the command is
+applied the Clubman's AI holds order ATTACK, action ATTACK, target the
+Villager. Its weapon (4,3) vs armour 0 deals **3** per hit: the hp goes
+25 → 22 → … → 1 in **8** hits, and the **9th** (3 damage on 1 hp) clamps it
+to 0 (a loss of 1). Player 1's kills (attribute 20) become **1**. The
+Villager switches to its dying sprite (graphic 196, unit 83's dying graphic),
+and when it is removed it leaves a Dead_Man (unit 43) owned by player 2 at
+its position. With the target gone the attack ends and the Clubman's AI
+action returns to −1.
+
+### Example 8 — a Bowman shoots a Villager dead
+
+Refs: §4.2, §5; `unit-ai.md` §4.3. Player 1's Bowman at (10.5, 10.5),
+player 2's Villager at (14.5, 10.5), `attack` ordered as in Example 7. Every
+launch at a player's object first creates a Flare (unit 112) for the target's
+owner, then the Arrow (unit 9): the objects created are exactly
+**[112, 9] × 9**. Each arrow hits for (3,3) vs 0 = **3**: eight hits of 3,
+the ninth clamped (a loss of 1), hp 0. Hit by a player's unit, the Villager
+runs away (east, away from the Bowman), and the Bowman moves after it to keep
+it in range: both end east of where they started.
+
+### Example 9 — a building is damaged and destroyed
+
+Refs: §2.1 (buildings), §2.4. Player 1's Clubman at (10.5, 10.5) attacks
+player 2's finished House (unit 70, 75 hp; armour (4,0), (6,−140)) at (14, 10).
+Every hit takes (4,3) vs 0 = **3** hp (above the building minimum loss), so the House
+falls in **25** hits to 0 hp. Player 1's razings (attribute 43) become **1**
+and its kills (attribute 20) stay 0. The House dies and, when removed,
+leaves its dead unit (`dead_unit_id` 327, the rubble).
+
 ## 9. Implications for the port
 
 - Keep `hp` as f32, apply the minimum-damage rule after the clamp exactly as
