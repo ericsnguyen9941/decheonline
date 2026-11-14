@@ -10,7 +10,7 @@ decompilation and are the only place its knowledge enters this repository.
   Clone it **outside** this repo, at `../ref/aoe1-decomp` (that is,
   `/Users/erics/workspace/aoe1online/ref/aoe1-decomp`).
 - Per-function match status lives in the clone at
-  `config/functions/src/<file>.json` (`matching`, `accepted_drift`,
+  `config/functions/src/<file>.cpp.json` (`matching`, `accepted_drift`,
   `accepted_logic`, `nonmatching`; meanings in the clone's `README.md`).
 
 ## Rules for writing a spec
@@ -48,3 +48,11 @@ in the clone; specs that depend on it say so.
 - `INDEX.md` — subsystem → decomp files/functions map with match status.
 - `core.md` — update loop, time step, turns and command scheduling, numeric
   types, RNG.
+- `movement.md` — movement and pathing.
+- `economy.md` — gather, drop-off, build, train.
+- `combat.md` — attacks, damage, projectiles, line of sight.
+- `techs.md` — techs and the effect engine.
+- `support-actions.md` — convert, heal, repair, trade.
+- `victory.md` — victory conditions and score.
+- `random-maps.md` — random map generation.
+- `unit-ai.md` — idle behaviour, auto-attack, reactions.

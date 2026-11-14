@@ -21,6 +21,7 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 - `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`. `npm run test:e2e -- determinism`: one sim replay hashed in Node, Chromium, Firefox and WebKit.
 - `AOE1_DIR=<install> npm run assets:import`: build the pack (~8 s, ~100 MB). Then `AOE1_DIR=<install> npm run test:e2e:real -w @aoe/e2e` (local-only screenshot to `assets-local/screenshots/`).
 - `AOE1_DIR=<install> npm run test:golden`: tests against real game files (skipped without `AOE1_DIR`); `@aoe/data` parses `data2/empires.dat` to its last byte.
+- `AOE1_DIR=<install> npm run dat:dump -- unit 83`: print a record from `data2/empires.dat` (`unit|tech|graphic|terrain|effect|civ <id>`, `summary`; no vitest).
 
 ## Standing rules
 - Original game files never go in git. They live in `assets-local/` or under `AOE1_DIR`. `npm run guard` (part of `check`) fails if a `.drs .slp .dat .wav .mid .exe .dll` file or anything under `assets-local/` is tracked or staged.

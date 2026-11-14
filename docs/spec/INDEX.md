@@ -4,12 +4,14 @@ Map from each simulation subsystem to the files and entry functions in
 aoe1-decomp @ `6d6d8b1` (paths relative to the clone root; see `README.md`).
 
 **Status.** The decomp records a status per function in
-`config/functions/src/<file>.json`. Per-file counts below are
+`config/functions/src/<file>.cpp.json`. Per-file counts below are
 `M/D/L/N` = matching / accepted_drift / accepted_logic / nonmatching.
 After a function, `[M]` etc. is that function's own status. `L` and `N`
 bodies are not byte-proven: read them with extra care and prefer golden
 recordings to settle doubts. Totals over the whole decomp (clone
 `README.md`): 5,013 M, 140 D, 217 L, 56 N of 5,426 functions.
+
+Statuses re-derived from `config/functions/src/*.cpp.json` on 2026-11-14.
 
 **Naming.** `RGE_*` classes are the generic engine ("Genie"); `TRIBE_*`
 classes are the AoE-specific subclasses that override them. A behaviour spec
@@ -20,10 +22,12 @@ tasks).
 
 ## Update loop, time step
 
+Spec: [core.md](core.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/world.cpp` | 88/1/1/1 | `RGE_Game_World::update` :1206 [M], `check_game_state` :1377 [M], `set_game_speed` :875 [M] | core.md §1 |
-| `src/scr_game.cpp` | 88/2/4/2 | `TRIBE_Screen_Game::handle_game_update` :1086 [M] | core.md §1.1 |
+| `src/scr_game.cpp` | 88/2/4/2 | `TRIBE_Screen_Game::handle_game_update` :1086 [L] | core.md §1.1 |
 | `src/tribegam.cpp` | 114/1/3/0 | `TRIBE_Game::handle_idle` :3835 [M] | core.md §1.1 |
 | `src/basegame.cpp` | 195/4/2/1 | `RGE_Base_Game::run` :884 [M] | core.md §1.1 |
 | `src/player.cpp` | 114/2/1/0 | `RGE_Player::update` :870 [M] | core.md §1.2 |
@@ -66,13 +70,13 @@ Spec: [movement.md](movement.md).
 | `src/move_obj.cpp` | 47/2/2/0 | `RGE_Moving_Object::findPath` :557 [M] (48 `RGE_Moving_Object` methods) | R2 |
 | `src/pathsys.cpp` | 16/1/2/1 | `PathingSystem::findTilePath` :210 [L], `passable` [L], `checksum` :1172 [M], `decrementObstruction` [N] | R2 |
 | `src/Path.cpp` | 30/0/0/0 | `Path` waypoint container | R2 |
-| `src/zone_map.cpp` | 21/1/0/0 | `RGE_Zone_Map::do_zone_map` :109 [M] (connectivity zones) | R2 |
+| `src/zone_map.cpp` | 21/1/0/0 | `RGE_Zone_Map::do_zone_map` :109 [D] (connectivity zones) | R2 |
 | `src/act_move.cpp` | 8/1/0/0 | `RGE_Action_Move_To::update` :120 [D] | R2 |
 | `src/m_mo_obj.cpp` | 14/0/0/0 | master (type) data for moving units | R2 |
 
 ## Gather, build, train
 
-Spec: `economy.md` (gather, hunt/wood, drop-off, construction, production queue, training, costs).
+Spec: [economy.md](economy.md) (gather, hunt/wood, drop-off, construction, production queue, training, costs).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
@@ -87,7 +91,7 @@ Spec: `economy.md` (gather, hunt/wood, drop-off, construction, production queue,
 
 ## Combat, projectiles, line of sight
 
-Spec: `combat.md`.
+Spec: [combat.md](combat.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
@@ -99,11 +103,13 @@ Spec: `combat.md`.
 | `src/act_misl.cpp` | 5/0/2/0 | `RGE_Action_Missile::update` :154 [L], `intercept` [M] | R2 |
 | `src/misl_obj.cpp` | 10/0/1/0 | `RGE_Missile_Object::update` :56 [M], `missile_move` :77 [L] | R2 |
 | `src/m_mi_obj.cpp` | 14/0/0/0 | `RGE_Master_Missile_Object` | R2 |
-| `src/visible.cpp` | 21/1/4/1 | `RGE_Visible_Map::explore_terrain` :397 [L], `unexplore_terrain` [L], `checksumVisible` :863 [M] | R2 |
+| `src/visible.cpp` | 21/1/4/1 | `RGE_Visible_Map::explore_terrain` :397 [L], `unexplore_terrain` [L], `checksumVisible` :863 [D] | R2 |
 | `src/vis_unit.cpp` | 10/1/2/0 | `Visible_Unit_Manager`, `Visible_Resource_Manager` | R2 |
 | `src/map.cpp` | 54/2/6/2 | `RGE_Map` tiles, terrain, elevation | R2 |
 
 ## Techs, effects
+
+Spec: [techs.md](techs.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
@@ -114,22 +120,26 @@ Spec: `combat.md`.
 
 ## Convert, heal, repair, trade (and artifacts, wonders)
 
+Spec: [support-actions.md](support-actions.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/tact_cnv.cpp` | 9/0/0/0 | `TRIBE_Action_Convert::update` :204 [M] | R3 |
 | `src/tact_hea.cpp` | 7/0/0/0 | `TRIBE_Action_Heal::update` :117 [M] | R3 |
-| `src/tact_rep.cpp` | 11/0/0/1 | `TRIBE_Action_Repair::update` :167 [M] | R3 |
-| `src/tact_trd.cpp` | 11/0/1/0 | `TRIBE_Action_Trade::update` :186 [M] | R3 |
+| `src/tact_rep.cpp` | 11/0/0/1 | `TRIBE_Action_Repair::update` :167 [N] | R3 |
+| `src/tact_trd.cpp` | 11/0/1/0 | `TRIBE_Action_Trade::update` :186 [L] | R3 |
 | `src/t_c_obj.cpp` | 38/0/1/0 | `TRIBE_Combat_Object::convert` :525, `heal` :552, `repair` :579, `trade` :638 (all [M]) | R3 |
 | `src/tact_art.cpp`, `tact_dar.cpp`, `tact_wnd.cpp` | 11/0/0/0, 8/0/0/0, 6/0/0/0 | artifact capture, discovery, wonder | R3 |
 
 ## Victory, score
 
+Spec: [victory.md](victory.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/victory.cpp` | 49/7/0/2 | `RGE_Victory_Conditions::update` :320 [M], `update_for_object` :339 [M], `victory_achieved` [M] | R3 |
 | `src/tvictory.cpp` | 6/0/0/0 | `TRIBE_Victory_Conditions::handle_condition` :17, `handle_tech` :25 | R3 |
-| `src/tworld.cpp` | 27/1/2/0 | `TRIBE_World::check_game_state` :923 [M], `fill_in_score` :1281 (zone score report) | R3 |
+| `src/tworld.cpp` | 27/1/2/0 | `TRIBE_World::check_game_state` :923 [L], `fill_in_score` :1281 (zone score report) | R3 |
 | `src/scr_game.cpp`, `src/scr_ach.cpp` | 88/2/4/2, 6/0/1/1 | in-game score display and achievements screen | R3 |
 
 Score formula location: **not pinned yet**. Candidates are the score panel in
@@ -137,6 +147,8 @@ Score formula location: **not pinned yet**. Candidates are the score panel in
 R3.
 
 ## Random maps
+
+Spec: [random-maps.md](random-maps.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
@@ -153,9 +165,11 @@ golden-map comparisons to be needed.
 
 ## Unit auto-behaviour (unit AI, tasks)
 
+Spec: [unit-ai.md](unit-ai.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
-| `src/aiuaimod.cpp` | 107/0/6/1 | `UnitAIModule::update` :409 [M], `updateGroup` :583, `attackObject`, `convertObject`, `healObject`, `repairObject`, `gatherObject`, `explore` | R3 |
+| `src/aiuaimod.cpp` | 107/0/6/1 | `UnitAIModule::update` :409 [L], `updateGroup` :583, `attackObject`, `convertObject`, `healObject`, `repairObject`, `gatherObject`, `explore` | R3 |
 | `src/taiuaimd.cpp` | 60/0/2/1 | per-class unit AI: civilian, priest, soldier, ranged, tower, building, ships, animals (hunted, predator, lion, elephant), artifact | R3 |
 | `src/task.cpp`, `task_lst.cpp`, `ttsk_lst.cpp`, `tact_lst.cpp` | 6/0/0/0, 11/0/0/0, 1/0/1/0, 4/0/0/0 | right-click task tables (which action a unit takes on which target) | R2 |
 | `src/action.cpp`, `act_list.cpp`, `act_obj.cpp`, `taction.cpp` | 29/0/0/0, 25/0/0/0, 35/0/0/0, 5/0/0/0 | action stack per unit | R2 |
@@ -167,7 +181,7 @@ Out of the first milestone (computer players in M5), indexed for later.
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/aimodule.cpp` | 66/0/0/0 | `AIModule::update` :238 [M] (time-budgeted) | M5 |
-| `src/taimdmd.cpp` | 18/0/1/0 | `TribeMainDecisionAIModule::update` :160 [M] | M5 |
+| `src/taimdmd.cpp` | 18/0/1/0 | `TribeMainDecisionAIModule::update` :160 [L] | M5 |
 | `src/taitacmd.cpp` | 185/6/22/3 | `TribeTacticalAIModule::update` :1746 [M] — largest `L` count of any file | M5 |
 | `src/taistrmd.cpp` | 31/0/2/0 | `TribeStrategyAIModule::update` :930 [L] | M5 |
 | `src/taiinfmd.cpp` | 102/3/12/4 | information module (map knowledge) | M5 |
