@@ -57,15 +57,12 @@ async function settle(host: Page, guest: Page, commands: number): Promise<{ turn
     await page.waitForFunction(
       (t) => window.__game!.turn() > t + 2 && window.__game!.units().every((u) => !u.moving),
       received,
-      { timeout: 30_000 },
     );
   }
   const turn = Math.max(...(await Promise.all([host, guest].map((p) => p.evaluate(() => window.__game!.turn()))))) + 2;
   for (const page of [host, guest]) await page.waitForFunction((t) => window.__game!.turn() > t, turn);
   return { turn, hashes: await Promise.all([host, guest].map((p) => p.evaluate((t) => window.__game!.hash(t), turn))) };
 }
-
-test.setTimeout(60_000);
 
 test('a unit moved with the mouse ends on the same tile in both clients and the hashes stay equal', async ({ browser }) => {
   const [host, guest] = await startGame(browser);

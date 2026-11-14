@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc -p .",
     "test:e2e": "playwright test",
+    "test:e2e:latency": "playwright test -c playwright.latency.config.ts",
     "test:e2e:real": "playwright test -c playwright.real.config.ts"
   },
   "devDependencies": {

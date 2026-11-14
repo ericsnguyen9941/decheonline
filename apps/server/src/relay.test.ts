@@ -6,6 +6,8 @@ import { CODE_LENGTH, isValidCode, type ClientMessage, type ServerMessage } from
 import { createApp } from './app';
 import { PING_INTERVAL_MS, RoomRegistry, type Peer } from './rooms';
 
+const WAIT_MS = 15_000;
+
 /** A ws client that queues server messages so tests can await them in order. Pings are left unanswered and skipped. */
 class TestClient {
   private readonly queue: ServerMessage[] = [];
@@ -39,7 +41,8 @@ class TestClient {
     const queued = this.queue.shift();
     if (queued) return Promise.resolve(queued);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timed out waiting for a server message')), 2000);
+      // Only a hung relay reaches this; a loaded machine takes seconds to schedule the server and the client.
+      const timer = setTimeout(() => reject(new Error('timed out waiting for a server message')), WAIT_MS);
       this.waiter = (m) => {
         clearTimeout(timer);
         resolve(m);
@@ -53,10 +56,15 @@ class TestClient {
     return m as Extract<ServerMessage, { t: T }>;
   }
 
-  /** Assert nothing else arrives shortly. */
+  /**
+   * Assert nothing else is on its way. The relay answers a socket's messages in order, so a malformed frame's error
+   * arriving with nothing queued before it means the relay had nothing more to send this client (no fixed sleep).
+   */
   async expectSilence(): Promise<void> {
-    await new Promise((r) => setTimeout(r, 50));
+    this.socket.send('{nope');
+    const m = await this.next();
     expect(this.queue).toEqual([]);
+    expect(m).toMatchObject({ t: 'error', code: 'bad-message' });
   }
 
   close(): void {

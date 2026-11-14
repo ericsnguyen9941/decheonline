@@ -54,8 +54,6 @@ async function selectUnit(page: Page, id: number): Promise<void> {
   await expect.poll(() => page.evaluate(() => window.__game!.selection())).toEqual([id]);
 }
 
-test.setTimeout(180_000);
-
 test("a Clubman trained at a Barracks kills the other player's Villager; both clients show the body and agree on the hash", async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   const box = await canvasBox(host);
@@ -72,7 +70,6 @@ test("a Clubman trained at a Barracks kills the other player's Villager; both cl
   await host.waitForFunction(
     ([type, active]) => window.__game!.buildings().some((b) => b.owner === 1 && b.type === type && b.state === active),
     [BARRACKS, ACTIVE] as const,
-    { timeout: 60_000 },
   );
 
   // The Barracks trains one Clubman.
@@ -81,7 +78,7 @@ test("a Clubman trained at a Barracks kills the other player's Villager; both cl
   await host.mouse.click(box.x + barracksAt.x, box.y + barracksAt.y);
   await expect.poll(() => host.evaluate(() => window.__game!.selection())).toEqual([barracks.id]);
   await slot(host, 'train', CLUBMAN).click();
-  await host.waitForFunction((type) => window.__game!.units().some((u) => u.owner === 1 && u.type === type), CLUBMAN, { timeout: 60_000 });
+  await host.waitForFunction((type) => window.__game!.units().some((u) => u.owner === 1 && u.type === type), CLUBMAN);
   const clubman = (await host.evaluate(() => window.__game!.units())).find((u) => u.owner === 1 && u.type === CLUBMAN)!;
   await selectUnit(host, clubman.id);
 
@@ -118,7 +115,6 @@ test("a Clubman trained at a Barracks kills the other player's Villager; both cl
         return (villager === undefined || villager.state >= dying) && objects.some((o) => o.owner === 2 && o.type === dead);
       },
       [prey.id, DYING, DEAD_MAN] as const,
-      { timeout: 90_000 },
     );
   }
   for (const page of [host, guest]) {

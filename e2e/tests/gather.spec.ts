@@ -53,8 +53,6 @@ async function sendToWork(page: Page, villager: Obj, types: number[]): Promise<n
   return target.id;
 }
 
-test.setTimeout(90_000);
-
 test('villagers of both players gather and deposit; both clients show equal totals and hashes', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   const start = await host.evaluate(() => window.__game!.resources(1));
@@ -82,7 +80,6 @@ test('villagers of both players gather and deposit; both clients show equal tota
         return o.find((x) => x.id === h)!.type === hostType && o.find((x) => x.id === g)!.type === guestType;
       },
       [hostVillager.id, guestVillager.id, LUMBERJACK, FORAGER] as const,
-      { timeout: 30_000 },
     );
   }
 
@@ -90,12 +87,10 @@ test('villagers of both players gather and deposit; both clients show equal tota
   await host.waitForFunction(
     (s) => window.__game!.resources(1).wood > s.wood && window.__game!.resources(2).food > s.food,
     start,
-    { timeout: 60_000 },
   );
   await guest.waitForFunction(
     (s) => window.__game!.resources(1).wood > s.wood && window.__game!.resources(2).food > s.food,
     start,
-    { timeout: 60_000 },
   );
 
   // A turn both clients have run, and what each logged for it.

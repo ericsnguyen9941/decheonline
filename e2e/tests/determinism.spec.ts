@@ -7,8 +7,15 @@ import { runReplay, sampleReplay } from '@aoe/sim';
 // deterministic if V8 (Node, Chromium), SpiderMonkey (Firefox) and JavaScriptCore (WebKit) agree bit for bit.
 const simEntry = fileURLToPath(new URL('../../packages/sim/src/index.ts', import.meta.url));
 
+// Playwright's Firefox (v1572) does not start on macOS 27 ("Could not find profile folder"; AGENTS.md Traps). Only there
+// is it skipped, loudly; on Linux (the docker image) a Firefox that fails to launch fails the test.
+const firefoxBroken = process.platform === 'darwin';
+
 test('sample replay gives the same hashes in Node, Chromium, Firefox and WebKit', async () => {
-  test.setTimeout(120_000);
+  if (firefoxBroken) {
+    test.info().annotations.push({ type: 'skipped-engine', description: 'firefox: cannot launch on macOS; run this test in the Linux image' });
+    console.warn('determinism: SKIPPING firefox on macOS (cannot launch); node, chromium and webkit are compared');
+  }
   const bundle = await build({ entryPoints: [simEntry], bundle: true, format: 'iife', globalName: 'AoeSim', write: false });
   const script = bundle.outputFiles[0]!.text;
 
@@ -19,6 +26,7 @@ test('sample replay gives the same hashes in Node, Chromium, Firefox and WebKit'
     ['webkit', webkit],
   ];
   for (const [name, engine] of engines) {
+    if (name === 'firefox' && firefoxBroken) continue;
     const browser = await engine.launch();
     try {
       const page = await browser.newPage();

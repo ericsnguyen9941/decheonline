@@ -24,8 +24,6 @@ async function startGame(browser: Browser): Promise<Page> {
   return host;
 }
 
-test.setTimeout(60_000);
-
 test('selecting a villager fills the bottom panel with its name and hit points', async ({ browser }) => {
   const host = await startGame(browser);
   await expect(host.getByTestId('hud-top')).toBeVisible();

@@ -53,8 +53,6 @@ async function select(page: Page, id: number, unit = false): Promise<void> {
   await expect.poll(() => page.evaluate(() => window.__game!.selection())).toEqual([id]);
 }
 
-test.setTimeout(120_000);
-
 test('one player builds a House and trains a Villager; both clients show the same buildings, population and hashes', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   const startPop = await host.evaluate(() => window.__game!.population(1));
@@ -94,18 +92,13 @@ test('one player builds a House and trains a Villager; both clients show the sam
     await page.waitForFunction(
       (house) => window.__game!.buildings().some((b) => b.owner === 1 && b.type === house),
       HOUSE,
-      { timeout: 30_000 },
     );
   }
   const foundation = (await host.evaluate(() => window.__game!.buildings())).find((b) => b.type === HOUSE)!;
   expect(foundation).toMatchObject({ x: 14, y: 8 });
-  await host.waitForFunction(([id, builder]) => window.__game!.objects().find((o) => o.id === id)?.type === builder, [villager.id, BUILDER] as const, {
-    timeout: 30_000,
-  });
+  await host.waitForFunction(([id, builder]) => window.__game!.objects().find((o) => o.id === id)?.type === builder, [villager.id, BUILDER] as const);
   for (const page of [host, guest]) {
-    await page.waitForFunction(([id, active]) => window.__game!.buildings().find((b) => b.id === id)?.state === active, [foundation.id, ACTIVE] as const, {
-      timeout: 60_000,
-    });
+    await page.waitForFunction(([id, active]) => window.__game!.buildings().find((b) => b.id === id)?.state === active, [foundation.id, ACTIVE] as const);
   }
   const built = (await host.evaluate(() => window.__game!.buildings())).find((b) => b.id === foundation.id)!;
   expect(built.progress).toBe(100);
@@ -140,20 +133,26 @@ test('one player builds a House and trains a Villager; both clients show the sam
   // (The first of them may finish meanwhile: the refund, not the count, tells the right click worked.)
   await slot(guest, 'train', VILLAGER).click({ button: 'right' });
   await expect.poll(() => guest.evaluate(() => window.__game!.resources(2).food)).toBe(50);
-  const left = (await guest.evaluate((id) => window.__game!.queue(id)!.records, guestTc.id))[0]!.count;
-  expect(left).toBeLessThanOrEqual(3);
-  await expect(slot(guest, 'train', VILLAGER).locator('.hud-slot-count')).toHaveText(String(left));
-
+  // The button's number is the queue's count. A Villager may finish between two reads, so both are read in one evaluate.
+  await expect
+    .poll(() =>
+      guest.evaluate((id) => {
+        const shown = document.querySelector('[data-testid=command-slot][data-command=train][data-unit="83"] .hud-slot-count')?.textContent;
+        const queued = window.__game!.queue(id)!.records[0]!.count;
+        return shown === String(queued) && queued <= 3;
+      }, guestTc.id),
+    )
+    .toBe(true);
   // The host's new villager appears on both clients and the population goes up by one.
   for (const page of [host, guest]) {
-    await page.waitForFunction((n) => window.__game!.population(1).count === n, startPop.count + 1, { timeout: 60_000 });
+    await page.waitForFunction((n) => window.__game!.population(1).count === n, startPop.count + 1);
     await page.waitForFunction((n) => window.__game!.units().filter((u) => u.owner === 1).length === n, startPop.count + 1);
   }
 
   // Both clients end with the same buildings and populations, and agree on the hash of a turn both have run.
   const state = (page: Page) =>
     page.evaluate(() => ({ buildings: window.__game!.buildings(), one: window.__game!.population(1), two: window.__game!.population(2) }));
-  await expect.poll(async () => JSON.stringify(await state(host)) === JSON.stringify(await state(guest)), { timeout: 30_000 }).toBe(true);
+  await expect.poll(async () => JSON.stringify(await state(host)) === JSON.stringify(await state(guest))).toBe(true);
   const final = await state(host);
   expect(final.buildings.filter((b) => b.type === HOUSE)).toHaveLength(1);
   expect(final.one.count).toBe(startPop.count + 1);

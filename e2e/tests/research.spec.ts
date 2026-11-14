@@ -96,7 +96,6 @@ async function build(pages: Page[], unit: number): Promise<number> {
     await p.waitForFunction(
       ([type, seen]) => window.__game!.buildings().some((b) => b.owner === 1 && b.type === type && !seen.includes(b.id)),
       [unit, [...before]] as const,
-      { timeout: 30_000 },
     );
   }
   return (await page.evaluate(() => window.__game!.buildings())).find((b) => b.type === unit && !before.has(b.id))!.id;
@@ -104,15 +103,13 @@ async function build(pages: Page[], unit: number): Promise<number> {
 
 async function finished(pages: Page[], id: number): Promise<void> {
   for (const p of pages) {
-    await p.waitForFunction(([b, active]) => window.__game!.buildings().find((x) => x.id === b)?.state === active, [id, ACTIVE] as const, {
-      timeout: 120_000,
-    });
+    await p.waitForFunction(([b, active]) => window.__game!.buildings().find((x) => x.id === b)?.state === active, [id, ACTIVE] as const);
   }
 }
 
 // The lockstep paces steps to the clients' frame times (turn-timing.md §8.1), so a loaded machine runs the game slower
 // than 20x: the waits are generous.
-test.setTimeout(360_000);
+test.setTimeout(600_000);
 
 test('one player researches the Tool Age, builds an Archery Range and trains a Bowman; both clients agree on hashes', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
@@ -152,7 +149,7 @@ test('one player researches the Tool Age, builds an Archery Range and trains a B
   await expect(host.getByTestId('object-item')).toHaveText(/^\d+%$/);
 
   // The Tool Age: the host's top bar says so, the guest's (still Stone Age) does not.
-  for (const page of both) await page.waitForFunction(([t, s]) => window.__game!.techState(t, 1) === s, [TOOL_AGE, DONE] as const, { timeout: 150_000 });
+  for (const page of both) await page.waitForFunction(([t, s]) => window.__game!.techState(t, 1) === s, [TOOL_AGE, DONE] as const);
   await expect(host.getByTestId('age')).toHaveText('Tool Age');
   await expect(guest.getByTestId('age')).toHaveText('Stone Age');
   expect(await guest.evaluate(() => [window.__game!.age(1), window.__game!.age(2)])).toEqual([2, 1]);
@@ -167,13 +164,13 @@ test('one player researches the Tool Age, builds an Archery Range and trains a B
   await bowman.click();
   await expect(slot(host, 'stop')).toHaveCount(1);
   for (const page of both) {
-    await page.waitForFunction((b) => window.__game!.units().some((u) => u.owner === 1 && u.type === b), BOWMAN, { timeout: 120_000 });
+    await page.waitForFunction((b) => window.__game!.units().some((u) => u.owner === 1 && u.type === b), BOWMAN);
   }
 
   // Both clients end with the same buildings, ages and stockpiles, and agree on the hash of a turn both have run.
   const state = (page: Page) =>
     page.evaluate(() => ({ buildings: window.__game!.buildings(), ages: [window.__game!.age(1), window.__game!.age(2)], one: window.__game!.resources(1) }));
-  await expect.poll(async () => JSON.stringify(await state(host)) === JSON.stringify(await state(guest)), { timeout: 30_000 }).toBe(true);
+  await expect.poll(async () => JSON.stringify(await state(host)) === JSON.stringify(await state(guest))).toBe(true);
   const turns = await Promise.all(both.map((p) => p.evaluate(() => window.__game!.turn())));
   const turn = Math.max(...turns) + 2;
   for (const page of both) await page.waitForFunction((t) => window.__game!.turn() > t, turn);

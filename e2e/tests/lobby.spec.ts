@@ -49,7 +49,7 @@ test('two players join by invite code and stay in sync to turn 50 with commands 
   await host.waitForFunction(() => window.__game!.turn() > 8);
   await guest.evaluate(() => window.__game!.issueTest(50, 60));
 
-  for (const page of [host, guest]) await page.waitForFunction(() => window.__game!.turn() > 50, undefined, { timeout: 30_000 });
+  for (const page of [host, guest]) await page.waitForFunction(() => window.__game!.turn() > 50);
   const hashes = await Promise.all([host, guest].map((p) => p.evaluate(() => window.__game!.hash(50))));
   expect(hashes[0]).toBeDefined();
   expect(hashes[0]).toBe(hashes[1]);
