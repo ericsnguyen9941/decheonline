@@ -19,6 +19,7 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 - `npm run check`: tracked-file guard, ESLint, typecheck, unit tests. Run before every commit.
 - `npm test`: unit tests (Vitest) in every workspace; one workspace: `npm test -w @aoe/sim`.
 - `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`.
+- `AOE1_DIR=<install> npm run test:golden`: tests against real game files (skipped without `AOE1_DIR`); `@aoe/data` parses `data2/empires.dat` to its last byte.
 
 ## Standing rules
 - Original game files never go in git. They live in `assets-local/` or under `AOE1_DIR`. `npm run guard` (part of `check`) fails if a `.drs .slp .dat .wav .mid .exe .dll` file or anything under `assets-local/` is tracked or staged.
