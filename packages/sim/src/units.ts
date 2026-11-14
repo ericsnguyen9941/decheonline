@@ -1,6 +1,9 @@
 import { f32 } from './num';
 
-/** A dat sprite (graphic) as movement reads it: `facet_num`, `base_speed` and `flags & 2` (docs/spec/movement.md §2). */
+/**
+ * A dat sprite (graphic) as the sim reads it: `facet_num`, `base_speed` and `flags & 2` (docs/spec/movement.md §2),
+ * and whether showing it draws a random start frame (docs/spec/sprites.md §4).
+ */
 export interface SpriteInfo {
   /** Dat graphic id. */
   graphic: number;
@@ -10,6 +13,8 @@ export interface SpriteInfo {
   baseSpeed: number;
   /** The sprite has facings (`flags & 2`). */
   hasFacings: boolean;
+  /** Animated with a random start frame (`flags & 1` and `& 4`): each new active sprite of it draws one `rand()`. */
+  randomStart: boolean;
 }
 
 /**
@@ -57,8 +62,8 @@ export const UNIT_TYPES: ReadonlyMap<number, UnitType> = new Map([
       turnSpeed: 0,
       terrainRestriction: 7,
       terrainTable: LAND_TERRAINS,
-      standing: { graphic: 285, facets: 8, baseSpeed: 0, hasFacings: true },
-      walking: { graphic: 665, facets: 8, baseSpeed: 1, hasFacings: true },
+      standing: { graphic: 285, facets: 8, baseSpeed: 0, hasFacings: true, randomStart: true },
+      walking: { graphic: 665, facets: 8, baseSpeed: 1, hasFacings: true, randomStart: false },
     },
   ],
 ]);

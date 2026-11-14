@@ -482,9 +482,14 @@ All draws go through `debug_rand` (`core.md` §4). In this subsystem:
 | moving object recycled into the game | 1, same formula | `src/move_obj.cpp:122` (197) |
 | first blocked step (`collisionAvoidanceDistance == 0`) | 1: `r % 6` | `src/move_obj.cpp:1157` (1743) or `:1161` (1745) |
 | blocked again right after a repath (human players) | 1: `r % 6` | `src/move_obj.cpp:1336` (2003) or `:1340` (2005) |
+| move action enters state 4 / 1, 13, 14 and the sprite actually changes, new sprite animated with random start (flags 1 and 4) | 1: start frame (`sprites.md` §4) | `RGE_Action_Move_To::set_state`, `src/act_move.cpp:101-118`; `RGE_Moving_Object::new_sprite`, `src/move_obj.cpp:299-307` |
 
-No draws in `Path.cpp`, `pathsys.cpp`, `zone_map.cpp`, `act_move.cpp` or
-`m_mo_obj.cpp` (`grep -n debug_rand` finds none). Per step, units draw in
+No direct draws in `Path.cpp`, `pathsys.cpp`, `zone_map.cpp`, `act_move.cpp`
+or `m_mo_obj.cpp` (`grep -n debug_rand` finds none); the sprite swap above
+draws inside the new active sprite. For the Villager the walk sprite (665,
+sequence type 3) has no random start and the standing sprite (285, type 7)
+has one, so a walk costs one draw when it ends (done or failed), none when
+it starts. Per step, units draw in
 object-update order (`core.md` §1.2 step 7.4); at most one draw per unit per
 step from movement, since both draw sites return immediately.
 
@@ -496,8 +501,10 @@ step from movement, since both draw sites return immediately.
   and `update` walks it from the head (`:226-247`), so a player's objects
   update **newest first**; that order decides who gets the 2 path searches
   and the order of RNG draws.
-- Creating a moving object draws twice: the static setup draws `r` and
-  reseeds with it (`src/stat_obj.cpp:279-286`), then the facing draw of §9.
+- Creating a moving object: the static setup shows the standing sprite (one
+  draw if it has a random start, `sprites.md` §4), draws `r` and reseeds
+  with it (`src/stat_obj.cpp:279-286`), then the facing draw of §9. A
+  Villager takes three.
 - Distance per step = `world_time_delta × 0.001 × speed`. At the default
   multiplayer step (`core.md` §2.2) and game speed the step length is fixed;
   at higher game speed `world_time_delta` grows, so each step moves farther

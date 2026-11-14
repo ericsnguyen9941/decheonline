@@ -19,7 +19,7 @@ const UNIT: UnitType = {
   turnSpeed: 0,
   terrainRestriction: 0,
   terrainTable: [f32(1)],
-  standing: { graphic: 0, facets: 8, baseSpeed: 0, hasFacings: true },
+  standing: { graphic: 0, facets: 8, baseSpeed: 0, hasFacings: true, randomStart: false },
   walking: null,
 };
 

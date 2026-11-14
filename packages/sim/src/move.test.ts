@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'vitest';
 import type { Command } from './commands';
-import { MOVE_MOVING, MOVE_NEED_PATH } from './movement';
-import { add32, mul32, sub32, toInt } from './num';
+import { MOVE_MOVING, MOVE_NEED_PATH, orderMove, updateMover, type MoveContext } from './movement';
+import { add32, f32, mul32, sub32, toInt } from './num';
 import { runReplay, sampleReplay } from './replay';
+import { CrtRand } from './rng';
 import { unitType, VILLAGER } from './units';
 import { startingUnits, World, type StartUnit } from './world';
 
@@ -35,6 +36,40 @@ function expectedCells(world: World): Uint8Array {
   }
   return cells;
 }
+
+/** A `CrtRand` that counts its draws. */
+class CountingRand extends CrtRand {
+  draws = 0;
+  override rand(): number {
+    this.draws++;
+    return super.rand();
+  }
+}
+
+describe('random draws of the Villager sprites (sprites.md §4)', () => {
+  test('creating a Villager draws its standing start frame, the setup fence and its facing', () => {
+    const seed = 777;
+    const world = new World({ players: 2, randomSeed: seed, units: [villager(1, 10.5, 10.5)] });
+    const r = new CrtRand();
+    r.srand(seed);
+    r.rand(); // standing sprite (sequence type 7: animated, facings, random start)
+    r.srand(r.rand()); // static setup fence
+    r.rand(); // facing
+    expect(world.randomSeed).toBe(r.rand());
+  });
+
+  test('a walk draws nothing to start (the walk sprite has no random start) and one draw to stand again', () => {
+    const world = new World({ players: 2, units: [villager(1, 10.5, 10.5)] });
+    const rng = new CountingRand();
+    const ctx: MoveContext = { map: world.map, entities: world.entities, pathing: world.pathing, rng, deltaSeconds: f32(0.09), attempts: 0 };
+    const e = world.entities.get(1)!;
+    orderMove(e, 14.5, 10.5, rng);
+    updateMover(ctx, e);
+    expect([e.mover!.action!.state, e.mover!.walking, rng.draws]).toEqual([MOVE_MOVING, true, 0]);
+    while (e.mover!.action) updateMover(ctx, e);
+    expect([e.mover!.walking, rng.draws]).toEqual([false, 1]);
+  });
+});
 
 describe('move orders on the test map', () => {
   test('a Villager ordered to a point walks until its footprint is within the move range of it, then stops', () => {

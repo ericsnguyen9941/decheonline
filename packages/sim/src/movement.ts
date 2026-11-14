@@ -579,7 +579,7 @@ function doMove(ctx: MoveContext, e: Entity, t: UnitType, m: Mover): number {
 }
 
 /** Give `e` a new move order to (x, y): `move_to` replaces the current action (movement.md §5). */
-export function orderMove(e: Entity, x: number, y: number): void {
+export function orderMove(e: Entity, x: number, y: number, rng: CrtRand): void {
   const m = e.mover;
   if (!m) return;
   const t = unitType(e.type);
@@ -587,13 +587,25 @@ export function orderMove(e: Entity, x: number, y: number): void {
   m.userWaypoints = [];
   m.speed = 0;
   m.action = { state: MOVE_NEED_PATH, x: f32(x), y: f32(y), z: 0, range: MOVE_RANGE };
-  if (maximumSpeed(t, m) === 0) setState(m, MOVE_FAILED);
+  if (maximumSpeed(t, m) === 0) setState(m, t, MOVE_FAILED, rng);
 }
 
-function setState(m: Mover, state: number): void {
+/**
+ * `RGE_Action_Move_To::set_state`: moving shows the move sprite, done or failed the standing one again. A sprite that
+ * actually changes is a new active sprite, which draws its random start frame (docs/spec/sprites.md §4).
+ */
+function setState(m: Mover, t: UnitType, state: number, rng: CrtRand): void {
   m.action!.state = state;
-  if (state === MOVE_MOVING) m.walking = true;
-  else if (state === MOVE_DONE || state === MOVE_FAILED) m.walking = false;
+  const walking = state === MOVE_MOVING ? true : state === MOVE_DONE || state === MOVE_FAILED ? false : m.walking;
+  if (walking === m.walking) return;
+  m.walking = walking;
+  if (t.walking) showSprite(currentSprite(t, m), rng);
+}
+
+/** A new active sprite of `s` (`RGE_Active_Animated_Sprite`): one `rand()` for a random start frame. */
+export function showSprite(s: SpriteInfo, rng: CrtRand): void {
+  // The frame it picks is animation state the sim does not keep yet; the draw is what other rules see.
+  if (s.randomStart) rng.rand();
 }
 
 /** End the action: the list drops it, its destructor clears user waypoints and stops the unit. */
@@ -620,19 +632,19 @@ export function updateMover(ctx: MoveContext, e: Entity): void {
         m.finalUserWaypoint = true;
       }
       m.actionRange = action.range;
-      if (findPath(ctx, e, t, m) === PathResult.Found) setState(m, MOVE_MOVING);
+      if (findPath(ctx, e, t, m) === PathResult.Found) setState(m, t, MOVE_MOVING, ctx.rng);
       return;
     }
     case MOVE_MOVING: {
       const r = doMove(ctx, e, t, m);
       if (r === 0 || r === 2) {
-        setState(m, MOVE_DONE);
+        setState(m, t, MOVE_DONE, ctx.rng);
         endAction(m);
       }
       return;
     }
     default:
-      setState(m, action.state);
+      setState(m, t, action.state, ctx.rng);
       endAction(m);
   }
 }

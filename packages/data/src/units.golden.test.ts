@@ -13,8 +13,9 @@ describe.skipIf(!dir)('golden: sim unit table vs data2/empires.dat', () => {
   const load = (): RuleSet => (parsed ??= RuleSet.fromFile(readFileSync(join(dir ?? '', 'data2', 'empires.dat'))));
   const sprite = (rules: RuleSet, graphic: number) => {
     const g = rules.graphic(graphic);
-    // Sprite flags are the graphic's sequence type; bit 2 means "has facings".
-    return { graphic, facets: g.angleCount, baseSpeed: Math.fround(g.speedMultiplier), hasFacings: (g.sequenceType & 2) !== 0 };
+    // Sprite flags are the graphic's sequence type: 1 animated, 2 has facings, 4 random start frame.
+    const flags = g.sequenceType;
+    return { graphic, facets: g.angleCount, baseSpeed: Math.fround(g.speedMultiplier), hasFacings: (flags & 2) !== 0, randomStart: (flags & 5) === 5 };
   };
 
   for (const t of UNIT_TYPES.values()) {

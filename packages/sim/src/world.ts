@@ -3,7 +3,7 @@ import { EntityStore, type Entity } from './entities';
 import { Hasher } from './hash';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
 import { createTestMap, TileMap, type MapSnapshot } from './map';
-import { initialFacing, newMover, orderMove, teleport, updateMover, type MoveContext, type Mover } from './movement';
+import { initialFacing, newMover, orderMove, showSprite, teleport, updateMover, type MoveContext, type Mover } from './movement';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { CrtRand } from './rng';
 import { unitType, VILLAGER } from './units';
@@ -133,13 +133,15 @@ export class World {
   }
 
   /**
-   * Make a moving unit at (x, y): `RGE_Moving_Object::setup`. The static part draws one `rand()` and reseeds with
-   * it (economy.md §8), then the facing takes one more draw (movement.md §11).
+   * Make a moving unit at (x, y): `RGE_Moving_Object::setup`. The static part shows the standing sprite (one draw if
+   * it has a random start frame, sprites.md §4), draws one `rand()` and reseeds with it (economy.md §8), then the
+   * facing takes one more draw (movement.md §11).
    */
   createUnit({ owner, type, x, y }: StartUnit): Entity {
     const t = unitType(type);
     const e = this.entities.create({ owner, type, x, y, z: 0, hp: t.hitPoints, mover: newMover() });
     teleport(this.moveContext(), e, t, e.x, e.y, e.z);
+    showSprite(t.standing, this.rng);
     this.rng.srand(this.rng.rand());
     initialFacing(t, e.mover!, this.rng);
     return e;
@@ -270,7 +272,7 @@ export class World {
         if (ty < 0) ty = 1;
         else if (ty >= height) ty = sub32(height, 1);
       }
-      orderMove(e, tx, ty);
+      orderMove(e, tx, ty, this.rng);
     });
   }
 
