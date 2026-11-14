@@ -72,6 +72,8 @@ Spec: [movement.md](movement.md).
 
 ## Gather, build, train
 
+Spec: `economy.md` (gather, hunt/wood, drop-off, construction, production queue, training, costs).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/act_gath.cpp` | 10/0/2/0 | `RGE_Action_Gather::update` :227 [M] | R2 |

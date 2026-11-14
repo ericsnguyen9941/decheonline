@@ -1,0 +1,597 @@
+# Economy: gather, drop-off, build, train
+
+Source: aoe1-decomp @ `6d6d8b1` (July 1998 RoR beta; see `README.md` for the
+version caveat and reference format). Status letters: M matching,
+D accepted_drift, L accepted_logic, N nonmatching. Data values are read from
+the retail RoR `data2/empires.dat` with `@aoe/data` (`parseDat`), civ 1
+(Egyptian) unless stated; dat field names are those of
+`packages/data/src/types.ts`.
+
+Time: every rate below is multiplied by `world_time_delta_seconds`
+(`dts`, float, `delta_ms * 0.001f`, `core.md` §1.2 step 7.3). There is no
+fixed economy tick: each world step applies one increment of `rate × dts`.
+
+## 1. Function status
+
+| function | ref | status | notes |
+| --- | --- | --- | --- |
+| `RGE_Action_Gather::first_in_stack` | `src/act_gath.cpp:57` | M | |
+| `RGE_Action_Gather::set_state` | `src/act_gath.cpp:93` | **L** | drop-site search lives here |
+| `RGE_Action_Gather::update` | `src/act_gath.cpp:227` | **L** | INDEX.md listed it as M; the JSON says `accepted_logic` |
+| `RGE_Action_Gather::move_to`, `work` | `src/act_gath.cpp:496`, `:526` | M | |
+| `TRIBE_Action_Hunt::first_in_stack`, `set_state` | `src/tact_hnt.cpp:57`, `:95` | M | |
+| `TRIBE_Action_Hunt::update` | `src/tact_hnt.cpp:248` | **L** | |
+| `TRIBE_Action_Build::set_state` | `src/tact_bld.cpp:56` | M | |
+| `TRIBE_Action_Build::update` | `src/tact_bld.cpp:136` | **D** | INDEX.md listed it as M |
+| `TRIBE_Building_Object::setup` | `src/t_b_obj.cpp:144` | M | |
+| `TRIBE_Building_Object::set_object_state` | `src/t_b_obj.cpp:229` | M | completion, RNG draw |
+| `TRIBE_Building_Object::update` | `src/t_b_obj.cpp:334` | M | |
+| `TRIBE_Building_Object::build` | `src/t_b_obj.cpp:700` | M | |
+| `TRIBE_Building_Object::cancel_build` | `src/t_b_obj.cpp:672` | M | |
+| `TRIBE_Building_Object::heal` | `src/t_b_obj.cpp:215` | M | repair cost |
+| `TRIBE_Building_Object::add_to_production_queue` | `src/t_b_obj.cpp:800` | **D** | |
+| `TRIBE_Building_Object::remove_from_production_queue` | `src/t_b_obj.cpp:862` | M | |
+| `TRIBE_Building_Object::advance_production_queue` | `src/t_b_obj.cpp:922` | **N** | |
+| `TRIBE_Building_Object::empty_production_queue` | `src/t_b_obj.cpp:939` | M | |
+| `TRIBE_Building_Object::update_production_queue` | `src/t_b_obj.cpp:959` | M | |
+| `TRIBE_Action_Make_Obj::first_in_stack` | `src/tact_mob.cpp:55` | **N** | |
+| `TRIBE_Action_Make_Obj::update`, `place_obj`, `stop` | `src/tact_mob.cpp:102`, `:161`, `:225` | M | |
+| `RGE_Action_Make::first_in_stack`, `set_state`, `update` | `src/act_make.cpp:20`, `:30`, `:35` | M | farm food production |
+| `TRIBE_Player::check_obj_cost`, `pay_obj_cost`, `reimburse_obj_cost` | `src/tplayer.cpp:1031`, `:1080`, `:1101` | M | |
+| `RGE_Player::add_attribute_num` / `TRIBE_Player::add_attribute_num` | `src/player.cpp:853` / `src/tplayer.cpp:3661` | M / M | |
+| `RGE_Static_Object::set_attribute_amount` | `src/stat_obj.cpp:2210` | M | |
+| `RGE_Static_Object::distance_to_object` | `src/stat_obj.cpp:2299` | M | |
+| `RGE_Object_List::find_by_master_ids` | `src/obj_list.cpp:418` | M | nearest drop site |
+| `RGE_Action_Object::work2` | `src/act_obj.cpp:147` | M | task choice, villager type swap |
+| `TRIBE_Command::do_command`, `do_command_make`, `do_command_build`, `do_command_queue`, `do_command_cancel_build` | `src/tcommand.cpp:36`, `:104`, `:175`, `:530`, `:435` | M | |
+
+The three `L`/`D` bodies that carry the gather and build rates
+(`act_gath.cpp` update, `tact_hnt.cpp` update, `tact_bld.cpp` update) were
+not byte-proven; their arithmetic is the same shape in all three files, which
+is weak corroboration only.
+
+## 2. Data used (empires.dat)
+
+### 2.1 Field map
+
+| decomp field | dat field (`@aoe/data`) | used for |
+| --- | --- | --- |
+| `RGE_Master_Action_Object::work_rate` (`include/m_ac_obj.h:19`) | `action.workRate` | gather, build and train speed |
+| `drop_site`, `backup_drop_site` (`include/m_ac_obj.h:20-21`) | `action.dropSites[0..1]` | where carried goods go |
+| `RGE_Master_Static_Object::attribute_max_amount` (`include/m_s_obj.h:518`) | `resourceCapacity` | carry limit; also clamp on a resource object |
+| `attribute_type_held[3]`, `attribute_amount_held[3]`, `attribute_flag[3]` | `resourceStorages[i].type/amount/flag` | starting load, owner effects (§6.3) |
+| `build_inventory[3]` (`type`, `amount`, `flag`) | `creatable.costs[i]` | cost; flag 0 = checked but not paid |
+| `build_pts_required` | `creatable.trainTime` | build points of a building, train time of a unit (s at rate 1) |
+| `RGE_Task::attribute_type` | `task.resourceIn` | type carried while doing the task |
+| `RGE_Task::attribute_type2` | `task.resourceMultiplier` | player attribute that multiplies the take |
+| `RGE_Task::attribute_type3` | `task.resourceOut` | player attribute credited on drop-off (`-1`: the carried type) |
+| `RGE_Task::work_val1` | `task.workValue1` | rate multiplier |
+| `RGE_Task::work_range` | `task.workRange` | approach range |
+| `RGE_Task::work_flag` | `task.gatherType` | farm: 0 = put food into the farm itself |
+
+The task field order is from `RGE_Task::load` (`src/task.cpp:71-93`, M).
+The name `gatherType` for `work_flag` is the reader's; the position match is
+the evidence (`src/task.cpp:93`).
+
+### 2.2 Values (RoR `data2/empires.dat`, civ 1)
+
+Villager types share one task-swap group (`taskSwapGroup` 1):
+
+| id | name | workRate | cap | drop sites | task (action type, target, in → out, ×attr) |
+| --- | --- | --- | --- | --- | --- |
+| 83 | Man | 1 | 0 | 109, -1 | none (switches type on first work order, §3.1) |
+| 118 | Builder | 1 | 10 | 109, -1 | 101 build |
+| 119 | Fisherman | 0.6 | 10 | 103, 109 | 5 gather, class 5, 17 → 0, range 0.6 |
+| 120 | Forager | 0.45 | 10 | 109, 68 | 5 gather, class 7, 16 → 0 |
+| 122 | Hunter | 0.45 | 10 | 109, 103 | 110 hunt, classes 9 and 10, 15 → 0 |
+| 123 | Lumberjack | 0.55 | 10 | 109, 103 | 110 hunt, class 15 (trees), 1 → carried |
+| 124 | Miner-Stone | 0.45 | 10 | 109, 103 | 5 gather, unit 102, 2 → carried |
+| 251 | Miner-Gold | 0.45 | 10 | 109, 103 | 5 gather, unit 66, 3 → carried, × attribute 47 |
+| 259 | Farmer | 0.45 | 10 | 109, 68 | 5 gather, unit 50, 16 → 0 |
+
+All `workValue1` = 1. Rates are float32 (`0.45` is stored as
+0.449999988…). Drop-site ids: 109 Town Center, 103 Storage Pit, 68 Granary,
+45 Dock.
+
+| id | name | hp | trainTime | cost | storages (type, amount, flag) |
+| --- | --- | --- | --- | --- | --- |
+| 83 | Man (villager) | 25 | 20 | 50 food (flag 1), 1 of attr 4 (flag 0) | (4, -1, 2), (11, +1, 2), (19, +1, 1) |
+| 109 | Town_Center1 | 600 | 60 | 200 wood, 1 of attr 30 (flag 0) | (4, +4, 4), (30, -1, 2) |
+| 12 | Barracks1 | 350 | 30 | 125 wood, 1 of attr 30 | (30, -1, 2) |
+| 70 | House | 75 | 20 | 30 wood, 1 of attr 30 | (4, +4, 4), (30, -1, 2), (51, +1, 1) |
+| 50 | Farm | 50 | 30 | 75 wood, 1 of attr 30 | (0, 15, 0), (30, -1, 2); cap 15; workRate 0.4; task 21 make, in 16 |
+| 68 / 103 | Granary / Storage_Pit1 | 350 | 30 | 120 wood | |
+
+Gaia resources (civ 0): Mine-Gold 66 holds 400 (cap 400), Mine-Stone 102
+holds 250, Forage-Fruit 59 holds 150, Gazelle 65 holds 150 (8 hp),
+Elephant 48 holds 300 (45 hp), trees (class 15) 25 hp and 40 or 75 wood.
+Collision radii used by §5.4: Town_Center1 1.5 × 1.5, villager 0.2 × 0.2.
+
+Player attributes involved (`include/player.h:5-56`): 0 food, 1 wood,
+2 stone, 3 gold, 4 population headroom, 11 population, 19 total units owned,
+29 gold replacement, 32 population limit, 49 gold earned. Not named in the
+header, meaning **inferred**: 36 = farm food (civ start value 250; used only
+by `RGE_Action_Make`, §4.3), 47 = gold-mining multiplier (civ start value 1;
+the gold miner's `resourceMultiplier`), 30 = a building allowance that each
+building costs 1 of (flag 0) and holds −1 of while it exists
+(`TRIBE_Player` load sets it to 0 at `src/tplayer.cpp:461`; how it becomes
+≥ 1 in a game is **unverified**, likely a start tech effect).
+
+## 3. Gathering
+
+### 3.1 Choosing the action
+
+A work order on an object calls `RGE_Action_Object::work2`
+(`src/act_obj.cpp:147`, M). It asks the unit's own task list for a task
+matching the target (`src/act_obj.cpp:159`). If none matches and the unit has
+a task-swap group, it scans `master_objects` in ascending id order for a
+master of the same object group, master type and swap group whose tasks
+match, and **transforms** the unit into that master
+(`src/act_obj.cpp:160-172`): first match wins. This is how a Man (83)
+becomes Lumberjack (123), Miner-Gold (251), and so on.
+
+When a gather or hunt action becomes active, if the unit holds a type other
+than the task's `attribute_type`, its load is replaced by 0 of the task type
+(`src/act_gath.cpp:60-62`, `src/tact_hnt.cpp:60-63`): **switching task
+throws away the carried goods** with no credit.
+
+### 3.2 State machine (`RGE_Action_Gather`, `src/act_gath.cpp`)
+
+States (numbers as in the code): 1 done, 2 idle, 3 waiting for a task,
+4 moving to target, 6 turning to target, 7 working, 8 returning goods,
+11/15 moving to a point, 13 failed.
+
+Checks at the start of every `update` (`src/act_gath.cpp:228-246`): a
+target id that no longer resolves, or a target in state ≥
+pending-removal, is dropped; a target owned by a player other than Gaia and
+other than the gatherer's owner makes the action end (state 1, returns
+target-invalid).
+
+| state | per-step behaviour | ref |
+| --- | --- | --- |
+| 3 | timer starts at −10 s; adds `dts`; when it passes 0 it is reset to −10 and the unit AI is asked for a new task (no RNG) | `src/act_gath.cpp:98-104`, `:249-260` |
+| 4 | walk sub-action to target within `work_range`; on arrival → 6; on fail → 3 (human) or 13 (computer player) | `:131-151`, `:293-314` |
+| 6 | turn towards target; when facing: if target holds > 0 (or is a farm/dock, §3.4) → 7, else drop target → 3 | `:316-330` |
+| 7 | transfer (§3.3) | `:332-383` |
+| 8 | find drop site, walk there, deposit (§3.5) | `:169-213`, `:385-439` |
+
+### 3.3 Transfer per step (state 7)
+
+In order (`src/act_gath.cpp:347-381`, L):
+
+1. `give = work_val1 × work_rate × dts` (product left to right, float).
+   With the debug `quick_build` flag set, `give` is the whole target amount.
+2. `give = min(give, target.held)`.
+3. `m = 1` if `attribute_type2 == -1`, else `m = owner.attributes[attribute_type2]`.
+4. `max_hold = cap × m` (cap = gatherer's `resourceCapacity` as float);
+   `adj = m × give`.
+5. If `adj > max_hold − unit.held`: `excess = adj − (max_hold − unit.held)`;
+   `adj −= excess`; `give −= excess / m`.
+6. `target.held = target.held − give`, then clamped to at most
+   `(float)(int) target.cap` (`set_attribute_amount(-give, 1, 1)`,
+   `src/stat_obj.cpp:2210-2222`).
+7. `unit.held = unit.held + adj` with **no clamp** (`check_max` = 0).
+8. Stay in 7 while `unit.held < max_hold` and (`target.held > 0` or the
+   target is a farm or dock); otherwise → 8.
+
+Notes:
+- The take is not limited by anything else: a gatherer's yield per second is
+  exactly `work_val1 × work_rate × m` until full.
+- Because of step 5, the unit ends at exactly `max_hold` up to float
+  rounding; if rounding leaves it just below, it keeps working one more step
+  (step 8 compares with `<`).
+- Step 6 clamps the **target** to its own cap. A resource object whose
+  starting load exceeds its cap (Tree94, id 56: 75 wood, cap 40) loses the
+  excess on the first take. Whether trees are gathered as the living object
+  or as their dead object (`deadUnitId`) is decided by the hunt/death code
+  (§3.6) — **unverified** which object holds the wood at that point.
+- Thresholds `g_gather_positive_amount_threshold = 0.0f` and
+  `g_gather_dropoff_distance_threshold = 1.0`
+  (`src/game_globals.cpp:187-188`).
+
+### 3.4 Farms and docks keep the worker
+
+`keepGatheringWhenObjectIsOut` is true only for master ids 50 (Farm) and 45
+(Dock_1) (`src/t_c_obj.cpp:665-671`, M). An empty farm therefore keeps its
+farmer in state 7, taking 0 per step, until the farm has food again or is
+gone. The farm makes its own food, §4.3.
+
+### 3.5 Drop-off (state 8)
+
+1. If carrying > 0 and no drop site is set: if the unit's `drop_site` is
+   −1, there is none; else search the owner's object list with
+   `find_by_master_ids(drop_site, backup_drop_site, unit.x, unit.y, …)` for
+   objects in state **active** (`src/act_gath.cpp:170-189`).
+   - Land gatherers pass themselves as the zone object, so only drop sites
+     in the same connectivity zone count; fishing and trade boats (groups
+     `OBJECT_GROUP_FISHING_BOAT`, `OBJECT_GROUP_TRADE_BOAT`) pass none
+     (`useSameZoneDropsite`, `src/t_c_obj.cpp:685-690`).
+   - Choice: smallest squared Euclidean distance between centres (float);
+     ties keep the **earlier** object in the owner's list (strict `>`)
+     (`src/obj_list.cpp:452-453`). Primary and backup ids are equal
+     candidates.
+2. No drop site: notify the AI and fail (state 13) (`:203-204`). Carrying
+   0: drop a target that is empty (unless farm/dock) and go to 3
+   (`:208-212`).
+3. Walk to the drop site within `work_range`. When the walk ends, if
+   `distance_to_object(drop) > 1.0` the unit stops and waits 3 s (timer −3),
+   then searches again (`src/act_gath.cpp:386-412`). `distance_to_object`
+   is the edge-to-edge distance: per axis `max(0, |dx| − r_a − r_b)`, then
+   the Euclidean length (`src/stat_obj.cpp:2299-2320`).
+4. Deposit (`src/act_gath.cpp:418-424`): attribute = `attribute_type3`, or
+   the carried type if −1; `owner.attributes[attr] += unit.held` (float, no
+   rounding to integers); if attr is gold (3) and this is the gather action,
+   `attributes[49]` (gold earned) also increases
+   (`src/tplayer.cpp:3661-3664`; the hunt action passes "not earned",
+   `src/tact_hnt.cpp:458`). Then the unit holds nothing (type −1, 0).
+5. Go back: to the target object if it still exists (state 4), else to the
+   remembered point (state 11), else idle (`:426-435`).
+
+**Implication for the port:** the drop-off distance test compares a square
+root with 1.0; compare the squared length with 1.0 instead (same result,
+no `sqrt` in `packages/sim`).
+
+Ordering a gatherer onto its own drop site while it carries anything sends
+it straight to state 8 with that building as the drop site
+(`src/act_gath.cpp:72-80`, `:526-545`).
+
+### 3.6 Hunting and wood (`TRIBE_Action_Hunt`, `src/tact_hnt.cpp`)
+
+Hunter and Lumberjack use action type 110 (`TRIBE_ACTION_TYPE_HUNT`,
+`include/action.h:23`), not gather. Differences from §3.2–3.5:
+
+- Entering state 4 with a target whose object state is ≤ active (still
+  alive) goes to state 12, which runs an attack sub-action with the task's
+  work sprite and range (`src/tact_hnt.cpp:142-145`, `:157-170`). After the
+  attack completes it re-enters 4 on the (now dead) target. Damage and death
+  are the combat spec's.
+- `produceWhenKilledBy` keeps the carcass food only when the killer is a
+  civilian (group 4) (`src/t_c_obj.cpp:676-683`); so a hunted animal
+  killed by a soldier or a lion has 0 food.
+- The transfer is the same 8 steps as §3.3 (`src/tact_hnt.cpp:369-417`), but
+  step 8 has **no** farm/dock exception, and thresholds are
+  `g_hunt_empty_amount = 0.0f`, `g_hunt_drop_distance_threshold = 1.0`
+  (`src/game_globals.cpp:338-339`).
+- The drop-site search always uses the zone check (`src/tact_hnt.cpp:195-203`).
+- Deposit is not "earned" (`src/tact_hnt.cpp:458`).
+- `update` is **L**; set_state and first_in_stack are M.
+
+## 4. Construction
+
+### 4.1 Placing a foundation (`do_command_build`, `src/tcommand.cpp:175`, M)
+
+1. `check_placement` on the master at the order's x, y; non-zero means
+   refused: tell the AI, stop (`:194-206`).
+2. `pay_obj_cost(obj_id, 1.0, 0)` (§6.1); not affordable: stop (`:208-219`).
+3. `make_new_obj` creates the building (`:221`). `TRIBE_Building_Object::setup`
+   (`src/t_b_obj.cpp:144-163`) sets state **unbuilt**, `build_pts = 0`,
+   `hp = 1.0`, the construction sprite.
+4. Every listed unit gets `do_command(building)` (`:226-236`).
+
+### 4.2 Building per step (`TRIBE_Action_Build`, `src/tact_bld.cpp`)
+
+States as gather, without 8. In state 7 (`src/tact_bld.cpp:208-232`, D):
+
+1. `work = work_val1 × work_rate × dts` (1000 with `quick_build`).
+2. `TRIBE_Building_Object::build(work)` (`src/t_b_obj.cpp:700-717`, M):
+   - only if state is unbuilt (else returns "done");
+   - `work = min(work, required − build_pts)`, `required` =
+     `(float)(int) trainTime`;
+   - `hp = hp + max_hp × work / required` (product before division), clamp
+     `hp ≤ max_hp`;
+   - `build_pts += work`; if `build_pts ≥ required` → set state
+     **active** (§4.3) and return done.
+3. Done: if the building is a Farm (id 50), set the builder's timer to −1
+   and stay in 7; the next step sees "timer < 0 and the farm holds food"
+   and issues `do_command(farm)`, which turns the builder into a Farmer
+   (`src/tact_bld.cpp:208-214`, `:227-230`). Any other building: state 3
+   (wait for task).
+
+Several builders on one site each call `build` in their own update, in list
+order; speed adds linearly. Starting hp is 1, so hp reaches max a little
+before the last point (`(required × (max_hp − 1) / max_hp)` points).
+
+At the start of each update (`src/tact_bld.cpp:155-170`): a target that is
+no longer unbuilt is either handed to repair (if `hp < max_hp`, as an AI
+order with priority 100) or dropped (→ 3).
+
+### 4.3 Completion (`TRIBE_Building_Object::set_object_state(active)`, `src/t_b_obj.cpp:229-327`, M)
+
+In order:
+1. `build_pts = required`.
+2. **RNG:** `r = rand()`, play the construction sound for the local player
+   only, `srand(r)` (`src/t_b_obj.cpp:235-245`).
+3. `built = 1`; give flag-≥4 storages to the owner (`src/t_b_obj.cpp:198-206`):
+   a House or Town Center adds 4 to attribute 4 (population headroom).
+4. If `disappearsWhenBuilt`, the object removes itself; else re-explore,
+   final sprite, connect walls (`:249-260`).
+5. `on_build_make_obj`, `on_build_make_tile`, `on_build_make_tech`
+   (`techId`, e.g. Town_Center1 → tech 105, Barracks1 → tech 62) run
+   (`:262-294`).
+6. Notify, register with the AI (`:296-300`).
+
+`TRIBE_Building_Object::update` (`src/t_b_obj.cpp:334-363`) also sets the
+construction frame `trunc(frames × build_pts / required)` and repeats the
+`build_pts ≥ required` check while unbuilt. Losing the building later takes
+the flag-≥4 storages back (`:303-307`).
+
+The farm's own food comes from `RGE_Action_Make` (`src/act_make.cpp`, M),
+the farm's default task (task 21, `resourceIn` 16, `gatherType` 0):
+- On start, the farm's held load is replaced by 0 of type 16 (it held 15
+  food of type 0 from its storage) (`src/act_make.cpp:20-28`).
+- `timer = owner.attributes[36]` (250) at start (`src/act_make.cpp:30-33`).
+- Each step: `work = work_rate × dts × work_val1` (0.4 × dts). With
+  `work_flag` 0 the farm's held amount grows by `work`, clamped to its cap
+  15; `timer −= (actual increase)` (`src/act_make.cpp:60-69`).
+- When `timer ≤ 0` (and attribute 36 > 0) production stops; once the held
+  amount is ≤ 0 the farm reports depleted and dies (`:46-56`).
+So a farm yields 250 food in total at most 0.4 food/s, with at most 15
+stored; a farmer (0.45/s) is limited by the farm. When the farm's update
+runs relative to the farmer's within a step depends on list order
+(**unverified** which comes first in practice).
+
+### 4.4 Cancelling a foundation (`cancel_build`, `src/t_b_obj.cpp:672-697`, M)
+
+`p = (required − build_pts) / required × 0.5`, capped at 1; `p = 0` if the
+building is active or `hp ≤ 0`. For each cost slot with flag ≠ 0:
+`attributes[type] += (float)(int) amount × p`. Then `hp = 0`. Constants
+`g_build_cancel_refund_factor = 0.5`, `g_building_one_threshold = 1.0`,
+`g_building_zero_hp = 0.0f` (`src/game_globals.cpp:315-317`).
+
+### 4.5 Repair cost (`TRIBE_Building_Object::heal`, `src/t_b_obj.cpp:215-227`, M)
+
+Given `h` build points of repair work: `hp_gain = h × max_hp / required`,
+capped so `hp ≤ max_hp`; the player pays
+`pay_obj_cost(id, hp_gain / (2 × max_hp), 0)`, i.e. half the building's
+cost scaled by the fraction of hp restored; if unaffordable no hp is added.
+Who calls it with what `h` is the repair action (not in this spec).
+
+## 5. Training
+
+### 5.1 Production queue (the human UI path)
+
+The UI train button sends `command_queue` because `production_queues_is_use`
+is 1 (`src/scr_game.cpp:4253-4260`, M; `src/game_globals.cpp:107`).
+`do_command_queue` (`src/tcommand.cpp:530-539`, M): positive count → add,
+negative → remove. Neither checks that the unit is trained at this
+building (`trainLocationId`) — decomp-marked bug.
+
+`add_to_production_queue(id, n)` (`src/t_b_obj.cpp:800-860`, D):
+- If the queue is empty or its **last** record is a different unit, every
+  existing record is removed first with refunds (the queue holds one unit
+  type at a time), then the cost is checked once with `ignore_pop = 1`; if it
+  fails, stop. A new record is appended.
+- For each of the `n` units: check cost (`ignore_pop` 1); stop at the first
+  failure; else `pay_obj_cost(id, 1.0, 1)` and count it. Units are paid
+  when queued.
+- Same unit as the last record: just the per-unit loop on that record.
+
+`remove_from_production_queue(id, n)` (`src/t_b_obj.cpp:862-920`, M) refunds
+`min(n, count)` units with `reimburse_obj_cost`, then subtracts **n** from
+the count; a record at ≤ 0 is removed; removing record 0 also stops and
+deletes the running train action.
+
+`update_production_queue` (`src/t_b_obj.cpp:959-1029`, M), called by the
+building's update after its own action list (`src/t_b_obj.cpp:356-361`):
+1. Disabled or empty: nothing.
+2. If the building's main action list is training or researching (action
+   type 0x66 / 0x67): the whole queue is removed with refunds
+   (`:1024-1027`).
+3. Else, if no train action exists: if `population ≥ population_limit`
+   wait (attribute 32 needed); else if `headroom > 0` create
+   `TRIBE_Action_Make_Obj(first id, pre_paid = 1)` and add it; else wait
+   (attribute 4 needed) (`:976-1016`).
+4. Update the train action; on removed/completed/failed, drop it and
+   `advance_production_queue` (count −1, record removed at 0)
+   (`:1018-1023`).
+
+Because step 3 adds the action and step 4 updates it in the same call, the
+first increment of training happens in the **same step** the action is
+created, and the next unit starts in the step after one finishes.
+
+### 5.2 Train progress (`TRIBE_Action_Make_Obj::update`, `src/tact_mob.cpp:102-152`, M)
+
+- `work_done = work_rate(building) × dts + work_done` (1000 with
+  `quick_build`) (`:107-112`). The **building's** `workRate` is used
+  (Town_Center1: 1).
+- When `(float) trainTime(unit) ≤ work_done`: state 1, `place_obj` (§5.4).
+  Placement failure: refund the cost, notify "no room", remove.
+  Success: notify, remove (`:116-150`).
+- Progress shown: `(int)(work_done × 100 / trainTime)` (`:247-263`).
+
+### 5.3 Direct make (`do_command_make`, `src/tcommand.cpp:104-138`, M)
+
+Used by AI and scripted code (`TRIBE_Player::trainUnit`,
+`src/tplayer.cpp:1547`). If the building's current action is not train or
+research, it replaces the building's actions with a not-prepaid
+`Make_Obj`, which pays `pay_obj_cost(id, 1.0, 0)` in `first_in_stack`
+(`src/tact_mob.cpp:73-88`, **N**) and cancels if unaffordable. `stop` refunds
+it unless pre-paid (`src/tact_mob.cpp:225-244`).
+
+### 5.4 Placing the trained unit (`place_obj`, `src/tact_mob.cpp:161-222`, M)
+
+- `rx = building.r_x + unit.r_x − (−0.01)`, same for `ry`
+  (`g_make_obj_radius_adjustment = −0.01f`, `src/game_globals.cpp:340`);
+  `rx2 = rx + rx`.
+- Up to 3 rings × 60 tries. Each try:
+  1. **RNG draw A:** side `d = (A × 2) / 32767` (integer division) for tries
+     0–39, `d = (A × 2) / 32767 + 2` for tries 40–59 (`:178-182`).
+     So `A ≤ 16383` → 0, `16384 ≤ A ≤ 32766` → 1, `A = 32767` → 2 (and +2
+     in the late tries, so `A = 32767` gives side 4, which matches no case).
+  2. **RNG draw B** (for sides 0–3): offset
+     `B × side_len × 3.051851e-05f − r` (`g_make_obj_random_scale`,
+     `src/game_globals.cpp:341`; about 1/32767):
+     side 0: `y = cy + ry`, `x = cx + off(rx2, rx)`; side 1: `x = cx − rx`,
+     `y = cy + off(ry2, ry)`; side 2: `x = cx + rx`, `y = cy + off(ry2, ry)`;
+     side 3: `y = cy − ry`, `x = cx + off(rx2, rx)` (`:183-204`).
+     Side 4 draws nothing and reuses the previous target.
+  3. `check_placement` of the unit master there; 0 = free → `make_new_obj`
+     at `(x, y, building.z)` and stop (`:205-211`). Else count a failed try.
+- After 60 failed tries, grow: `rx += 2 × unit.r_x`, `rx2 += 4 × unit.r_x`
+  (same for y) (`:214-218`). After 3 rings: fail.
+
+So in the first 40 tries only the `+y` edge (side 0) and the `−x` edge (side 1)
+are used, except for `A = 32767`; tries 40–59 use the `+x` and `−y` edges.
+Whether `check_placement` itself draws random numbers is **unverified**.
+
+## 6. Costs and owner attributes
+
+### 6.1 `check_obj_cost` / `pay_obj_cost` / `reimburse_obj_cost` (`src/tplayer.cpp:1031-1115`, M)
+
+`check_obj_cost(id, modifier, ignore_pop)`; for each of the 3 cost slots
+with `type ≥ 0`, `cost = amount × modifier`:
+- type 4 (headroom) and not `ignore_pop`: fail if `population ≥ population_limit`.
+- If gold replacement is on (`attributes[29] ≥ 1`), gold costs are also
+  checked against a running "gold left" figure, and a missing amount of a
+  flagged slot may be covered by gold. Off by default (**inferred**: civ
+  start value of attribute 29 is 0).
+- Fail if `attributes[type] < cost`, unless (type 4 and `ignore_pop`).
+  Flag-0 slots are checked like any other.
+
+`pay_obj_cost` re-runs the check, then subtracts every **flag ≠ 0** slot
+(skipping type 4 when `ignore_pop`); if a slot exceeds the stock (only
+possible with gold replacement) the rest comes out of gold.
+`reimburse_obj_cost` adds back `amount` (no modifier) of every flag ≠ 0
+slot, including type 4 — no current unit has a flagged type-4 cost, so the
+asymmetry is latent.
+
+With the villager's costs: 50 food is paid; the "1 of attribute 4" slot is
+flag 0, so headroom is only checked, never paid.
+
+### 6.2 Resources are floats
+
+All resource stocks and loads are `float` (`include/player.h:457`,
+`include/stat_obj.h:460`). Deposits add the exact float load; nothing rounds
+to integers. The UI rounding is presentation only.
+
+### 6.3 Storages applied to the owner
+
+- On object creation, storage slots with flag 1 or 2 are added to the
+  owner (`give_attribute_to_owner`, `src/stat_obj.cpp:445-456`, D;
+  called at `src/stat_obj.cpp:261`); on removal, flag-2 slots are taken
+  back (`src/stat_obj.cpp:458-468`, D). A villager therefore makes headroom
+  −1, population +1, total units +1, and on death returns headroom and
+  population.
+- Flag 0 is the object's own starting load (`get_starting_attribute`,
+  `src/stat_obj.cpp:419-443`).
+- Flag ≥ 4 is given when a building completes and taken when it dies
+  (§4.3).
+
+## 7. RNG calls in this subsystem, in order
+
+| when | draws | ref |
+| --- | --- | --- |
+| each command executed (build, queue, make, work, …) | 1 `rand()`, value unused, before dispatch | `src/tcommand.cpp:37` |
+| building completes | 1 `rand()` = r, then `srand(r)` | `src/t_b_obj.cpp:235-245` |
+| trained unit placement, per try | 1 (side) + 1 (offset) for sides 0–3; 1 for side 4 | `src/tact_mob.cpp:179-202` |
+| any object created (trained unit, foundation, …) | 1 `rand()` = r, then `srand(r)` at the end of `RGE_Static_Object::setup` | `src/stat_obj.cpp:279-286` |
+
+Gathering, drop-off, construction progress, the queue and costs draw
+nothing. The `srand(r)` fences make the stream after them depend only on the
+15-bit `r` (`core.md` §4.2); the port must perform the draw and the reseed.
+Subclass `setup`/`make_new_obj` paths beyond `RGE_Static_Object::setup` may
+draw more — **unverified**.
+
+## 8. Worked examples (test vectors)
+
+Common inputs: one world step of 50 ms, so
+`dts = fround(50 × fround(0.001)) = 0.05000000074505806`. Float values are
+IEEE single (`Math.fround` after every operation and store). The two
+precisions in `core.md` §3 (round after each operation vs. extended
+intermediates rounded at the store) were both computed; they agree except
+where noted. Computed with a scratch script, not with the game.
+
+### 8.1 Vector E1: gold miner fills up and drops off
+
+Miner-Gold (251): `workRate` 0.45f, `workValue1` 1, cap 10,
+`resourceMultiplier` 47 with `attributes[47] = 1`; target Mine-Gold (66),
+400 gold, Gaia-owned; miner already facing the mine (state 7).
+
+- Per step: `give = fround(fround(1 × 0.45f) × dts) = 0.022499999031424522`;
+  `m = 1`; `adj = give`.
+- Steps 1–444: no clamp; held rises by `adj`.
+- Step 445: step 5 of §3.3 clips the take; **held = 10.0 exactly**; state → 8.
+- Mine after step 445: **390.0038146972656** (not 390: each `−give` is
+  rounded at the mine's magnitude).
+- Deposit at the Town Center: `attributes[3] += 10.0`,
+  `attributes[49] += 10.0`; miner holds (−1, 0).
+
+Refs: `src/act_gath.cpp:347-381`, `:418-424`; `src/tplayer.cpp:3661-3664`.
+
+### 8.2 Vector E2: one builder raises a Barracks
+
+Builder (118): `workRate` 1, `workValue1` 1; Barracks1 (12): `trainTime`
+30, hp 350; new foundation (`build_pts 0`, `hp 1`).
+
+| step | build_pts | hp (round each op) | hp (round at store) |
+| --- | --- | --- | --- |
+| 1 | 0.05000000074505806 | 1.5833332538604736 | 1.5833333730697632 |
+| 2 | 0.10000000149011612 | 2.1666665077209473 | 2.1666667461395264 |
+| 300 | 15.000039100646973 | 175.9998016357422 | 175.9998016357422 |
+| 599 | | 350 (first clamp) | 350 (first clamp) |
+| 601 | 30.0 (clipped last work) | 350 | 350 |
+
+- `build_pts` reaches 30 at **step 601**, not 600: the float sum of 600
+  increments of 0.05 stays below 30, and step 601's work is clipped to the
+  remainder.
+- Step 601: completion (§4.3) with one `rand()`/`srand` pair; the builder
+  goes to state 3.
+- Step 1 differs between the two precisions in the last bit; a golden
+  test must pin which precision the port uses (`core.md` §3, unverified).
+
+Refs: `src/tact_bld.cpp:216-232`; `src/t_b_obj.cpp:144-163`, `:700-717`,
+`:229-245`.
+
+### 8.3 Vector E3: Town Center trains a villager and places it
+
+Town_Center1 (109) at centre (20.5, 20.5), `workRate` 1; one Man (83)
+queued with 200 food, headroom ≥ 1, population below the limit.
+
+- Queue command (step 1): one `rand()` in `do_command`; cost check passes;
+  food 200 → **150**; headroom unchanged (flag-0 slot).
+- Same step 1: train action created and first increment applied.
+  `work_done` after step n = n increments of `fround(1 × dts)`.
+- `work_done ≥ 20` first at **step 401**: `work_done = 20.04998016357422`.
+- Placement, with the RNG at state `srand(14)` when `place_obj` starts
+  (stream 84, 27125, 9192, …, `core.md` §4.3):
+  - `rx = ry = fround(fround(1.5 + 0.2f) + 0.01f) = 1.7100000381469727`,
+    `rx2 = 3.4200000762939453`.
+  - Draw A = **84** → `168 / 32767 = 0` → side 0: `y = 20.5 + 1.71 =`
+    **22.209999084472656**.
+  - Draw B = **27125** → offset `= 27125 × 3.42 × 3.051851e-05 − 1.71`
+    = 1.1211258172988892 (round at store) or 1.1211256980895996 (round
+    each op); `x = 20.5 + offset =` **21.621126174926758** in both.
+  - If the spot is free: unit created; `setup` draws C = **9192** and
+    reseeds `srand(9192)`; the next draw in the step is **30055**.
+  - Owner effects: headroom −1, population +1, total units +1 (§6.3).
+- Side mapping edge cases for draw A: 16383 → 0, 16384 → 1, 32766 → 1,
+  32767 → 2.
+
+Refs: `src/t_b_obj.cpp:800-860`, `:959-1019`; `src/tact_mob.cpp:102-152`,
+`:161-222`; `src/stat_obj.cpp:279-286`.
+
+### 8.4 Vector E4: cancelling a Barracks at 12 build points
+
+`p = fround((30 − 12) / 30 × 0.5) = 0.30000001192092896`; refund
+`125 × p = 37.5` wood (the attribute-30 slot has flag 0 and is not
+refunded). Ref: `src/t_b_obj.cpp:678-697`.
+
+## 9. Known decomp-marked bugs that matter here
+
+Kept as behaviour (the target is the original game):
+- Training at the wrong building: neither queue nor make checks
+  `trainLocationId` (`src/tcommand.cpp:115-116`, `:534`). The UI only offers
+  valid buttons, so it is reachable only by a hand-made command; the
+  server/peer should reject such commands (**port decision**, not the
+  game's).
+- Farm completion arms the builder to farm immediately and discards a
+  non-food load (`src/tact_bld.cpp:224-230`, `src/act_gath.cpp:59`).
+- `update_production_queue` step 2 calls `remove_from_production_queue`
+  with count −1: the refund loop runs 0 times and the count goes **up** by
+  1, so the `while` would never end (`src/t_b_obj.cpp:1024-1027`,
+  `:872-884`). Reading the code, this path would hang the game; that it is
+  reachable (queue non-empty while the main list trains or researches) is
+  **unverified** — the UI may forbid it (`src/scr_game.cpp:2759-2776`).
+  `beta-only?`
+- Train actions destroyed with their building never tell the AI
+  (`src/tact_mob.cpp:36-45`); AI-only.
