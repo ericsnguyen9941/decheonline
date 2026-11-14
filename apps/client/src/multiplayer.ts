@@ -4,7 +4,8 @@ import { Lockstep, showEndDialog } from './lockstep';
 import { LobbyView, Session } from './lobby';
 import { exposeMapDebug, MapView } from './map';
 import { tileCoordsToPixel } from './map/iso';
-import { ResourceBar, resourcesOf, type Resources } from './hud/resource-bar';
+import { GameHud } from './hud/game-hud';
+import { resourcesOf, type Resources } from './hud/resource-bar';
 import { connect } from './net/link';
 import { isUnit, UnitLayer } from './units/unit-layer';
 
@@ -97,7 +98,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   let panel: HTMLElement | undefined;
   let mapView: MapView | undefined;
   let units: UnitLayer | undefined;
-  let bar: ResourceBar | undefined;
+  let hud: GameHud | undefined;
 
   const end = (kind: 'desync' | 'peer-left', detail: string) => {
     lockstep?.stop();
@@ -105,8 +106,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     panel?.remove();
     units?.destroy();
     units = undefined;
-    bar?.destroy();
-    bar = undefined;
+    hud?.destroy();
+    hud = undefined;
     mapView?.destroy();
     mapView = undefined;
     window.__game = undefined;
@@ -133,7 +134,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       if (lockstep !== game) return view.destroy();
       mapView = view;
       units = new UnitLayer({ app, view, world: game.world, provider, player, issue: (c) => game.issue(c), turnMs: (t) => game.turnMs(t) });
-      bar = new ResourceBar(app.canvas.parentElement!, app, game.world, player);
+      hud = new GameHud({ parent: app.canvas.parentElement!, app, world: game.world, provider, player, selection: () => units?.selected ?? new Set() });
       // Start looking at this player's town centre spot.
       const own = units.ownUnits()[0];
       if (own) {

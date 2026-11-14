@@ -1,10 +1,10 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 2;
+export const PACK_VERSION = 3;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
-export type SlpSource = 'graphics' | 'terrain' | 'border';
+export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
 
 /** Owners with a recoloured image: 1 = blue ... 8 = orange (palette 50500 ramps). */
 export const PLAYER_OWNERS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
@@ -54,6 +54,12 @@ export interface PackTerrain {
 export interface PackUnit {
   name: string;
   standingGraphic: number;
+  /** `button_pict`: frame of the unit's icon in btnunit.shp (interface SLP 50730), or in btnbldg for buildings; -1 none. */
+  icon: number;
+  /** Hit points of the object when new (the panel's `x/y`). */
+  hitPoints: number;
+  /** `outline_radius_x/y/z`: the selection diamond, in tiles (z: height of the health bar). */
+  outline: [number, number, number];
 }
 
 export interface PackManifest {

@@ -30,6 +30,14 @@ test('maps graphics, terrains and units by their dat ids', () => {
   expect(manifest.units[SYNTHETIC.unitId]?.standingGraphic).toBe(SYNTHETIC.standingGraphic);
 });
 
+test('imports interface slps, a data2 Interfac.drs overriding the base one, and the unit icon, hit points and outline', () => {
+  expect(manifest.slps[slpKey('interface', SYNTHETIC.interfaceSlp)]?.frames).toHaveLength(2);
+  expect(manifest.slps[slpKey('interface', SYNTHETIC.overriddenInterfaceSlp)]?.frames).toHaveLength(1);
+  const unit = manifest.units[SYNTHETIC.unitId]!;
+  expect(unit).toMatchObject({ hitPoints: expect.any(Number), icon: expect.any(Number) });
+  expect(unit.outline).toHaveLength(3);
+});
+
 test('stores frame rectangles, hotspots and one image per player owner', async () => {
   const slp = manifest.slps[slpKey('graphics', SYNTHETIC.graphicSlp)]!;
   expect(slp.playerColour).toBe(true);

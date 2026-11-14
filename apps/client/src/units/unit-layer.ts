@@ -9,6 +9,10 @@ import { facingFrame } from './facing';
 /** Pointer travel (CSS px) after which a left press becomes a selection box instead of a click. */
 const BOX_THRESHOLD = 4;
 const SELECTION_COLOUR = 0xffffff;
+/** The hit point bar over a selected object: width in pixels, and palette indices 0x4a (green) and 0x97 (red). */
+const BAR_WIDTH = 24;
+const BAR_FILLED = 0x00ff00;
+const BAR_EMPTY = 0xff0101;
 
 interface Art {
   frames: SpriteFrame[];
@@ -214,16 +218,36 @@ export class UnitLayer {
     this.drawHighlight();
   }
 
+  /**
+   * The selection marker of the original's default outline (`outline_type` 2, RGE_Static_Object::capture_frame_3d_square):
+   * a white diamond on the ground, the unit's outline radii wide, and a 24x2 hit point bar (green, red where hurt) over
+   * its top corner.
+   */
   private drawHighlight(): void {
     const g = this.highlight.clear();
+    const { world, provider } = this.o;
+    const now = performance.now();
     for (const id of this.selected) {
       const t = this.tracks.get(id);
-      if (!t?.sprite.visible) continue;
-      const b = t.sprite.getLocalBounds();
-      const x0 = t.sprite.x + (t.sprite.scale.x < 0 ? -b.maxX : b.minX);
-      g.rect(x0 - 1, t.sprite.y + b.minY - 1, b.width + 2, b.height + 2);
+      const e = world.entities.get(id);
+      if (!t?.sprite.visible || !e) continue;
+      const type = unitType(e.type);
+      const [rx, ry, rz] = provider.unitInfo(e.type)?.outline ?? [type.radiusX, type.radiusY, type.radiusZ];
+      const at = this.drawnAt(t, now);
+      const o = tileCoordsToPixel(at.x, at.y, world.map.width);
+      // RGE_Map::get_point: a tile offset (x, y, z) lands at ((y + x) * 32, (y - x - z) * 16) from the object.
+      const point = (x: number, y: number, z: number) => ({ x: Math.round(o.x + (y + x) * 32), y: Math.round(o.y + (y - x - z) * 16) });
+      const corners = [point(rx, -ry, 0), point(rx, ry, 0), point(-rx, ry, 0), point(-rx, -ry, 0)];
+      g.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: SELECTION_COLOUR });
+      if (type.hitPoints <= 0) continue;
+      const bar = point(rx, -ry, rz);
+      const left = bar.x - 12;
+      const top = bar.y - 2;
+      const hp = Math.max(0, Math.floor(e.hp));
+      const filled = hp >= type.hitPoints ? BAR_WIDTH : hp === 0 ? 0 : Math.min(BAR_WIDTH - 1, Math.floor((hp * BAR_WIDTH) / type.hitPoints) + 1);
+      g.rect(left, top, BAR_WIDTH, 2).fill(BAR_EMPTY);
+      if (filled > 0) g.rect(left, top, filled, 2).fill(BAR_FILLED);
     }
-    g.stroke({ width: 1, color: SELECTION_COLOUR });
   }
 
   private listen(canvas: HTMLCanvasElement): void {
@@ -244,7 +268,7 @@ export class UnitLayer {
     on('pointermove', (e) => {
       const p = local(e);
       if (!this.press) {
-        canvas.style.cursor = this.workTarget(p.x, p.y) ? 'pointer' : '';
+        canvas.style.cursor = this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
         return;
       }
       if (!this.press.boxing && Math.hypot(p.x - this.press.x, p.y - this.press.y) < BOX_THRESHOLD) return;

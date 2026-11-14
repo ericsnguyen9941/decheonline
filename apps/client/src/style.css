@@ -195,26 +195,134 @@ dialog h2 {
   margin-top: 0;
 }
 
-/* Resource strip at the top of the game window: wood, food, gold, stone. */
-#resource-bar {
+/* The game screen's panels (src/hud/game-hud.ts): the original's art where the pack has it, plain stone boxes without. */
+#game {
+  cursor: var(--cursor-normal, default);
+}
+.hud {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  font: 13px Arial, Helvetica, sans-serif;
+  user-select: none;
+}
+.hud > div,
+.hud-frame {
+  pointer-events: auto;
+}
+.hud-top {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  display: flex;
-  gap: 1.5rem;
-  padding: 0.25rem 1rem;
+  background: linear-gradient(180deg, var(--stone) 0%, var(--stone-dark) 100%) center top / auto 100% repeat-x;
+}
+.hud-frame {
+  position: relative;
+  height: 20px;
+  margin: 0 auto;
+  background-repeat: no-repeat;
+}
+.hud-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
   background: linear-gradient(180deg, var(--stone) 0%, var(--stone-dark) 100%);
-  border-bottom: 2px solid #000;
-  color: var(--gold);
-  font-size: 0.95rem;
+  background-repeat: no-repeat;
+}
+.hud-bottom > *,
+.hud-frame > * {
+  position: absolute;
+  box-sizing: border-box;
+}
+.hud div {
+  image-rendering: pixelated;
+}
+
+/* Counts, age and menu labels are black with a white shadow one pixel down-left in the Egyptian style. */
+#resource-bar {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
 }
-#resource-bar span {
+#resource-bar > span {
+  position: absolute;
+  top: 2px;
   display: inline-flex;
   gap: 0.4rem;
+  line-height: 16px;
 }
-#resource-bar b {
-  min-width: 2.5rem;
+#resource-bar b,
+.hud-age,
+.hud-menu {
+  font-weight: normal;
+  color: #000;
+  text-shadow: -1px 1px 0 #fff;
+}
+.hud:not(.art) #resource-bar b,
+.hud:not(.art) .hud-age,
+.hud:not(.art) .hud-menu {
   color: var(--parchment);
+  text-shadow: none;
+}
+.hud.art #resource-bar > span > span {
+  display: none;
+}
+.hud-age {
+  text-align: center;
+  line-height: 16px;
+}
+.hud-menu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-repeat: no-repeat;
+}
+.hud:not(.art) .hud-menu {
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+  background-color: var(--stone);
+}
+
+/* The selected object: owner colour icon, hit point bar and texts at the offsets of TRIBE_Panel_Object::draw. */
+.hud-object > * {
+  position: absolute;
+}
+.hud-object[hidden],
+.hud-object > [hidden] {
+  display: none;
+}
+.hud-object-name {
+  left: 3px;
+  top: 13px;
+  color: #fff;
+  white-space: nowrap;
+}
+.hud-object-hp {
+  left: 3px;
+  top: 92px;
+  color: #fff;
+}
+.hud-object-icon {
+  left: 3px;
+  top: 30px;
+  width: 50px;
+  height: 50px;
+}
+.hud-object-health {
+  left: 3px;
+  top: 84px;
+  width: 50px;
+  height: 7px;
+}
+.hud:not(.art) .hud-object {
+  background: rgba(0, 0, 0, 0.35);
+}
+.hud-minimap {
+  /* The art's placeholder diamond is a little larger than the minimap's rectangle. */
+  transform: scale(1.03);
+  background: #000;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }

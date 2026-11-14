@@ -36,6 +36,14 @@ export class DebugProvider implements AssetProvider {
     return [{ texture, hotspotX: 10, hotspotY: 32 }];
   }
 
+  interfaceFrame(): null {
+    return null;
+  }
+
+  unitInfo(): null {
+    return null;
+  }
+
   terrainLayout(): { rows: number; cols: number } {
     return { rows: 1, cols: 1 };
   }

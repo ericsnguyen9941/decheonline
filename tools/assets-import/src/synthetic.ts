@@ -24,6 +24,10 @@ export const SYNTHETIC = {
     { slp: 15001, index: 90 },
   ],
   terrainFrame: [64, 32],
+  /** An interface SLP (the real one with this id is btnunit): 2 frames of 4x4 in the shared palette index 100. */
+  interfaceSlp: 50730,
+  /** Overridden by data2/Interfac.drs with a single frame. */
+  overriddenInterfaceSlp: 50741,
 } as const;
 
 const fillRow = (...commands: number[]) => ({ left: 0, right: 0, commands: [...commands, 0x0f] });
@@ -54,13 +58,20 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
       data: buildSlp([{ width: tileW, rows: terrainRows(index) }, { width: tileW, rows: terrainRows(index + 1) }]),
     })),
   );
-  const interfac = buildDrs([{ type: 'bina', id: 50500, data: syntheticPalette() }]);
+  const four = (...commands: number[]) => Array.from({ length: 4 }, () => fillRow(...commands));
+  const interfac = buildDrs([
+    { type: 'bina', id: 50500, data: syntheticPalette() },
+    { type: 'slp', id: SYNTHETIC.interfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
+    { type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
+  ]);
+  const interfac2 = buildDrs([{ type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) }]);
 
   await mkdir(join(dir, 'data'), { recursive: true });
   await mkdir(join(dir, 'data2'), { recursive: true });
   await writeFile(join(dir, 'data', 'graphics.drs'), graphics);
   await writeFile(join(dir, 'data', 'Terrain.drs'), terrain);
   await writeFile(join(dir, 'data', 'Interfac.drs'), interfac);
+  await writeFile(join(dir, 'data2', 'Interfac.drs'), interfac2);
   const dat = buildSyntheticDat();
   dat.terrainBlock.terrains[0]!.terrainDimensions = [1, 2];
   await writeFile(join(dir, 'data2', 'empires.dat'), writeDat(dat));

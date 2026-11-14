@@ -65,6 +65,7 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     ],
     terrain: [(await openDrs(installDir, 'data/Terrain.drs', true)) as DrsArchive],
     border: [...[await openDrs(installDir, 'data/Border.drs', false)].filter((d) => d !== null)],
+    interface: [interfac, ...[await openDrs(installDir, 'data2/Interfac.drs', false)].filter((d) => d !== null)],
   };
 
   const paletteBytes = interfac.read('bina', PALETTE_ID);
@@ -159,7 +160,10 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifes
     manifest.terrains[id] = { name: t.name, slp: t.slp >= 0 && slps[key] ? key : null, rows: Math.max(rows, 1), cols: Math.max(cols, 1) };
   });
   dat.civs[1]?.units.forEach((u, id) => {
-    if (u) manifest.units[id] = { name: u.name, standingGraphic: u.standingGraphic };
+    if (u) {
+      const [x = 0, y = 0, z = 0] = u.outlineSize;
+      manifest.units[id] = { name: u.name, standingGraphic: u.standingGraphic, icon: u.iconId, hitPoints: u.hitPoints, outline: [x, y, z] };
+    }
   });
   return manifest;
 }

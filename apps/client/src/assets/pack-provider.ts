@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
-import { slpImagePath, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
-import type { AssetProvider, GraphicInfo, SpriteFrame } from './provider';
+import { slpImagePath, slpKey, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
+import type { AssetProvider, GraphicInfo, ImageFrame, SpriteFrame, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -38,6 +38,18 @@ class PackProvider implements AssetProvider {
 
   async graphicFrames(graphicId: number, owner = 1): Promise<SpriteFrame[]> {
     return this.slpFrames(this.manifest.graphics[graphicId]?.slp ?? null, owner);
+  }
+
+  interfaceFrame(slp: number, frame: number, owner = 1): ImageFrame | null {
+    const pack = this.manifest.slps[slpKey('interface', slp)];
+    const f = pack?.frames[frame];
+    if (!pack || !f) return null;
+    return { url: `${this.baseUrl}/${slpImagePath(pack, owner)}`, x: f.x, y: f.y, w: f.w, h: f.h, hotspotX: f.hotspotX, hotspotY: f.hotspotY };
+  }
+
+  unitInfo(unitId: number): UnitInfo | null {
+    const u = this.manifest.units[unitId];
+    return u ? { icon: u.icon, hitPoints: u.hitPoints, outline: u.outline } : null;
   }
 
   terrainLayout(terrainId: number): { rows: number; cols: number } {

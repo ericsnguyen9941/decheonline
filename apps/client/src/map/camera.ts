@@ -90,7 +90,8 @@ export class CameraControls {
     });
     on(window, 'keyup', (e: KeyboardEvent) => this.keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
     on(window, 'blur', () => this.keys.clear());
-    on(canvas, 'pointermove', (e: PointerEvent) => {
+    // On the window, not the canvas: the HUD panels over the canvas edges must not stop the edge scrolling.
+    on(window, 'pointermove', (e: PointerEvent) => {
       const box = canvas.getBoundingClientRect();
       this.pointer = { x: e.clientX - box.left, y: e.clientY - box.top };
       if (this.drag?.id === e.pointerId) {
@@ -99,7 +100,7 @@ export class CameraControls {
         this.drag.y = e.clientY;
       }
     });
-    on(canvas, 'pointerleave', () => (this.pointer = null));
+    on(document.documentElement, 'pointerleave', () => (this.pointer = null));
     on(canvas, 'pointerdown', (e: PointerEvent) => {
       if (e.button !== 1) return;
       e.preventDefault();

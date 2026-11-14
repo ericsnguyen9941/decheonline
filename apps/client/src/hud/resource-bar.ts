@@ -15,7 +15,7 @@ export function resourcesOf(world: World, player: number): Resources {
   return { food: whole(ATTR_FOOD), wood: whole(ATTR_WOOD), gold: whole(ATTR_GOLD), stone: whole(ATTR_STONE) };
 }
 
-/** Wood, food, gold and stone in a strip along the top of `parent`, in the original's order; text only. */
+/** Wood, food, gold and stone counts in the top strip of `parent`, in the original's order; the icons are in the strip's art. */
 export class ResourceBar {
   readonly root = document.createElement('div');
   private readonly fields: [keyof Resources, HTMLElement][];
@@ -43,6 +43,14 @@ export class ResourceBar {
     this.tick = () => this.update();
     app.ticker.add(this.tick);
     this.update();
+  }
+
+  /** Moves each count to its x (px from the strip's left edge), as `TRIBE_Panel_Inven::draw` does. */
+  place(xs: readonly number[]): void {
+    this.fields.forEach(([, el], i) => {
+      const field = el.parentElement!;
+      field.style.left = `${xs[i]}px`;
+    });
   }
 
   private update(): void {
