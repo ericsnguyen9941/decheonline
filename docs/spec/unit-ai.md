@@ -98,9 +98,13 @@ creation sound (`src/stat_obj.cpp:280-286`); later in the same setup chain
 `TRIBE_Combat_Object::setup` → `initUnitAI` constructs the AI, which draws
 one (civilian, tower, building, ...) or two (soldier, hunted, lion,
 artifact) more `rand()` values (`src/t_c_obj.cpp:76`). These AI draws are
-**not** fenced: they advance the shared stream. Whether anything between
-`RGE_Static_Object::setup` and `initUnitAI` draws as well is unverified
-(movement/combat setup code not checked here).
+**not** fenced: they advance the shared stream. Between the fence and
+`initUnitAI`, a moving object with a facing sprite (`facet_num > 1`) draws
+one facing `rand()` (`src/move_obj.cpp:150-169`, `:222`, called by
+`RGE_Moving_Object::setup`, which `TRIBE_Combat_Object::setup` reaches first,
+`src/t_c_obj.cpp:69`). Before the fence, a standing sprite with the random
+start (flag 4) draws one (`sprites.md` §4). A Villager therefore draws 3
+before its AI draw: start frame, fence, facing.
 
 Loading a saved game does not re-draw: `UnitAIModule::load` reads the
 stored values (`src/aiuaimod.cpp:131`, M) — unverified whether
@@ -552,7 +556,7 @@ All draws are `debug_rand` → the C runtime `rand()` (`core.md` §4.1). A
 
 | when | draws, in order | ref |
 | --- | --- | --- |
-| combat object created | fence (creation sound), then 1 or 2 `rand()` for the idle timeout (§1.2) | `src/stat_obj.cpp:280-286`, `src/aiuaimod.cpp:2422`, `src/taiuaimd.cpp:36`, `:256`, `:1672`, `:1929` |
+| combat object created | (start frame if flag-4 standing sprite), fence (creation sound), facing (if the sprite has facings), then 1 or 2 `rand()` for the idle timeout (§1.2) | `src/stat_obj.cpp:280-286`, `src/aiuaimod.cpp:2422`, `src/taiuaimd.cpp:36`, `:256`, `:1672`, `:1929` |
 | every `TRIBE_Player::notify` call | fence at the end (`notifyAI` runs inside it, computer players only) | `src/tplayer.cpp:1776-1783`, M |
 | `TRIBE_Player::notify(0x201)` when the 20 s alert cooldown is 0 and the attacker exists | one extra fence **before** the final one (alert sound and minimap ping are local) | `src/tplayer.cpp:1740-1762`, M |
 | base ATTACKED handling | `notifyCommander` → 1 owner notify (fence); fatal: +1 (0x209); first attacker: +1 (0x201, possibly with its extra fence) | §4.2 |
@@ -584,22 +588,25 @@ RNG states follow `core.md` §4.1 (`state = state × 214013 + 2531011 mod
 ### Example 1 — clubman creation and first idle scan
 
 A Soldier-Inf1 (id 73, class 6 → soldier AI) is created when the RNG state
-is 312.
+is 312 at the creation fence (the standing sprite's start-frame draw, if it
+has one, came before; `sprites.md` §4).
 
 | step | value |
 | --- | --- |
 | creation fence: `r0 = rand()` from 312, `srand(r0)` | r0 = 1057, state 1057 |
-| base constructor: `r1 = rand()`; adjusted = `r1 % 1500 + 2250` | r1 = 3490 → 2740 |
-| soldier constructor (T = 1500): `r2 = rand()`; adjusted = `r2 % 750 + 1125` | r2 = 31057 → **1432** |
+| facing: `rf = rand()` (`src/move_obj.cpp:222`; clubman has facings, `movement.md` §9) | rf = 3490 |
+| base constructor: `r1 = rand()`; adjusted = `r1 % 1500 + 2250` | r1 = 31057 → 3307 |
+| soldier constructor (T = 1500): `r2 = rand()`; adjusted = `r2 % 750 + 1125` | r2 = 29299 → **1174** |
 
 A villager (civilian, one draw) created from the same state gets
-`3490 % 1500 + 2250 = 2740`; a gazelle (two draws, 3000 then 4000) gets
-`31057 % 2000 + 3000 = 4057`.
+`31057 % 1500 + 2250 = 3307`; a gazelle (two draws, 3000 then 4000) gets
+`29299 % 2000 + 3000 = 4299`. (An earlier version of this example left out
+the facing draw; the numbers were wrong.)
 
 With 270 ms per AI update (§1.3) and the clubman fully idle from birth, the
-idle timer reads 270, 540, 810, 1080, 1350, 1620 after its 1st..6th AI
-update; 1620 > 1432 first, so `processIdle(1)` runs on its **6th** AI
-update (18 world steps after creation, if it was created right after its
+idle timer reads 270, 540, 810, 1080, 1350 after its 1st..5th AI
+update; 1350 > 1174 first, so `processIdle(1)` runs on its **5th** AI
+update (15 world steps after creation, if it was created right after its
 owner's turn).
 
 ### Example 2 — idle target choice

@@ -459,7 +459,7 @@ Refs: `src/stat_obj.cpp:1189-1192`, `src/ani_obj.cpp:47-69`,
 - The x87 precision of the f32 steps above is assumed, as in `combat.md`
   (unverified on retail).
 
-## 10. Points that disagree with other specs (not edited here)
+## 10. Points that disagreed with other specs (since corrected there)
 
 - `techs.md` §5 item 2 says a flag-1 overlay draws **two** `rand()`; with
   the start-frame draw of §4 it is **three** for every retail overlay.

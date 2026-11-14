@@ -435,10 +435,11 @@ The tech and effect code itself calls `rand()` **nowhere** (no `rand`/
    command is accepted.
 2. Type 3 upgrade of an **active** object: up to two `check_damage_sprites`
    calls (§4.5 steps 2 and 4). Each one that newly selects a damage sprite
-   with flag 1 (randomly placed overlay) draws two `rand()` (x then y,
-   `src/stat_obj.cpp:1286`, `:1293`). `check_damage_sprites` is **L**.
-   Units have no damage sprites in practice (inferred); buildings do, so
-   e.g. a damaged House upgraded by Tool Age can draw. `combat.md` does not cover
+   with flag 1 (randomly placed overlay) draws **three** `rand()`: the new overlay sprite's start frame
+   (flag-4 sprite, `sprites.md` §4), then x and y
+   (`src/stat_obj.cpp:1286`, `:1293`; `sprites.md` §6). `check_damage_sprites`
+   is **L**. Buildings, every boat and heroes 236/297/377 have damage
+   sprites (`sprites.md` §6); a damaged House upgraded by Tool Age can draw. `combat.md` does not cover
    `check_damage_sprites` yet (follow-up).
 3. Instance `modify` (codes 0/1) does not call `check_damage_sprites`
    (`src/stat_obj.cpp:1724-1776`), so hp effects draw nothing even if the
@@ -575,8 +576,8 @@ At player creation `check_for_new_tech` runs once (ascending ids):
 - Instance code for codes 0/1 being the only per-object handlers rests on
   a grep for `::modify` overrides at `6d6d8b1` (stat_obj, t_c_obj, t_b_obj).
 - Type-101 cost/population code (§4.3) not traced to gameplay.
-- Units having no flag-1 damage sprites (§5 item 2) is inferred, not
-  checked in the dat.
+- (Resolved: boats and heroes 236/297/377 do have flag-1 damage sprites,
+  `sprites.md` §6; §5 item 2 corrected.)
 - All of this is beta code; retail 1.0a logic assumed equal (`beta-only?`
   where it would matter: none found).
 

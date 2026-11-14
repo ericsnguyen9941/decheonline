@@ -593,7 +593,10 @@ the timer is decremented once per step: after 30 steps it is
 on the **31st** step. The next swing starts in that 31st update; the swing
 period is **31 steps = 1.55 s**, not 30. Bowman (`1.4`): **29 steps**
 (1.45 s). A port that uses exact decimal arithmetic or doubles gets 30 for
-the Clubman and desyncs.
+the Clubman and desyncs. 31 steps is the **reload**, not the hit cadence:
+damage lands when the fight sprite crosses its attack frame or wraps, so
+the Clubman's hits mostly come 30 steps apart (`sprites.md` §8, Example 1;
+`src/act_atak.cpp:390-396`).
 
 ### Example 3 — in range or not
 

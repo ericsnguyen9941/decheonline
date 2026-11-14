@@ -52,6 +52,8 @@ in the clone; specs that depend on it say so.
 - `economy.md` — gather, drop-off, build, train.
 - `combat.md` — attacks, damage, projectiles, line of sight.
 - `techs.md` — techs and the effect engine.
+- `effects-extra.md` — effect codes 100/101, attribute 29, cliff table.
+- `sprites.md` — sprite frame advance, attack damage frame, random start frame, damage overlays, death length.
 - `support-actions.md` — convert, heal, repair, trade.
 - `victory.md` — victory conditions and score.
 - `random-maps.md` — random map generation.

@@ -91,7 +91,7 @@ Spec: [economy.md](economy.md) (gather, hunt/wood, drop-off, construction, produ
 
 ## Combat, projectiles, line of sight
 
-Spec: [combat.md](combat.md).
+Spec: [combat.md](combat.md); sprite animation state, attack damage frame, random start frame, damage overlays and death length: [sprites.md](sprites.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
@@ -109,7 +109,7 @@ Spec: [combat.md](combat.md).
 
 ## Techs, effects
 
-Spec: [techs.md](techs.md).
+Spec: [techs.md](techs.md); effect codes 100/101, attribute 29 writers and the cliff table: [effects-extra.md](effects-extra.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
