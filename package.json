@@ -15,6 +15,7 @@
     "build": "npm run build --workspaces --if-present",
     "check": "npm run guard && npm run lint && npm run typecheck && npm test",
     "guard": "node tools/check-tracked-files.mjs",
+    "assets:verify": "node tools/install-check.mjs",
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
