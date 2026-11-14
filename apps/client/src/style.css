@@ -294,6 +294,12 @@ dialog h2 {
 .hud-object > [hidden] {
   display: none;
 }
+.hud-object-civ {
+  left: 3px;
+  top: -2px;
+  color: #fff;
+  white-space: nowrap;
+}
 .hud-object-name {
   left: 3px;
   top: 13px;
@@ -320,16 +326,14 @@ dialog h2 {
 .hud:not(.art) .hud-object {
   background: rgba(0, 0, 0, 0.35);
 }
-/* The object panel's first item row: its itemicon at (54, 30), the value at (88, 33). */
-.hud-object-item-icon {
+/* The object panel's rows: itemicon at (54, 30 + 20 * row), the value at (88, 33 + 20 * row); top is set per row. */
+.hud-object-row-icon {
   left: 54px;
-  top: 30px;
   width: 33px;
   height: 23px;
 }
-.hud-object-item {
+.hud-object-row {
   left: 88px;
-  top: 33px;
   color: #fff;
 }
 

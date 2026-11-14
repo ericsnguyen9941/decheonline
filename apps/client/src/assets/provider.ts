@@ -50,6 +50,14 @@ export interface UnitInfo {
   button: number;
   /** `outline_radius_x/y/z` in tiles. */
   outline: [number, number, number];
+  /** `string_id`: the name in the language strings; 0 or less, none. */
+  nameId: number;
+  /** `string_id2`: the train or build button's text. */
+  creationId: number;
+  /** `unit_level` (the dat's interface kind): 2 building, 3 villager, 4 soldier, ... */
+  level: number;
+  /** `orig_weapon`, `orig_armor`, `orig_pierce_armor`, `orig_weapon_range`: the object panel's base values. */
+  displayed: [number, number, number, number];
 }
 
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */
@@ -67,6 +75,8 @@ export interface AssetProvider {
   interfaceFrame(slp: number, frame: number, owner?: number): ImageFrame | null;
   /** Dat numbers of a unit type (the first playable civ's record); null when unknown. */
   unitInfo(unitId: number): UnitInfo | null;
+  /** Text of a language string id (language.dll, languagex.dll over it); null when the pack has none. */
+  string(id: number): string | null;
   /** Flat-tile variants of a terrain: a `rows` x `cols` grid at the start of its frames (RGE_View::get_tile_picture). */
   terrainLayout(terrainId: number): { rows: number; cols: number };
 }

@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 4;
+export const PACK_VERSION = 5;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -67,6 +67,14 @@ export interface PackUnit {
   button: number;
   /** `outline_radius_x/y/z`: the selection diamond, in tiles (z: height of the health bar). */
   outline: [number, number, number];
+  /** `string_id`: the name's id in the language strings (`PackManifest.strings`); 0 or less: use `name`. */
+  nameId: number;
+  /** `string_id2`: the train or build button's text ("Create Villager (C)"). */
+  creationId: number;
+  /** `unit_level` (the dat's interface kind): which rows the object panel shows (2 building, 3 villager, 4 soldier...). */
+  level: number;
+  /** `orig_weapon`, `orig_armor`, `orig_pierce_armor`, `orig_weapon_range`: the panel's base values; zeros without combat. */
+  displayed: [number, number, number, number];
 }
 
 export interface PackManifest {
@@ -83,6 +91,8 @@ export interface PackManifest {
   terrains: Record<string, PackTerrain>;
   /** Keyed by unit id; the first playable civ's table (the sprites are shared across civs). */
   units: Record<string, PackUnit>;
+  /** The game's text by string id: language.dll's string tables with languagex.dll's (Rise of Rome) over them. */
+  strings: Record<string, string>;
 }
 
 export const slpKey = (source: SlpSource, id: number): string => `${source}/${id}`;

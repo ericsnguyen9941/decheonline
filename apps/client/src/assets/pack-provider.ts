@@ -55,7 +55,13 @@ class PackProvider implements AssetProvider {
 
   unitInfo(unitId: number): UnitInfo | null {
     const u = this.manifest.units[unitId];
-    return u ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline } : null;
+    return u
+      ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline, nameId: u.nameId, creationId: u.creationId, level: u.level, displayed: u.displayed }
+      : null;
+  }
+
+  string(id: number): string | null {
+    return this.manifest.strings[id] ?? null;
   }
 
   terrainLayout(terrainId: number): { rows: number; cols: number } {

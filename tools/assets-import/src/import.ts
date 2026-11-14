@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseDat, type DatFile } from '@aoe/data';
-import { DrsArchive, parsePalette, parseSlp, slpFrameToRgba, SlpPixelKind, type Palette } from '@aoe/formats';
+import { DrsArchive, mergeStrings, parsePalette, readPeStrings, parseSlp, slpFrameToRgba, SlpPixelKind, type Palette } from '@aoe/formats';
 import { blit, packShelves } from './atlas';
 import {
   PACK_VERSION,
@@ -72,6 +72,11 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
   if (!paletteBytes) throw new Error(`assets:import: palette ${PALETTE_ID} missing from Interfac.drs`);
   const palette = parsePalette(paletteBytes);
   const dat = parseDat(await readFile(datPath));
+  // Rise of Rome's languagex.dll overrides language.dll; an install without them gets the dat's internal names.
+  const languages = await Promise.all(['language.dll', 'languagex.dll'].map((name) => find(installDir, name)));
+  const strings = mergeStrings(
+    ...(await Promise.all(languages.filter((p) => p !== null).map(async (p) => readPeStrings(await readFile(p))))),
+  );
 
   await rm(outDir, { recursive: true, force: true });
   await mkdir(join(outDir, 'sprites'), { recursive: true });
@@ -95,7 +100,8 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     log(`${source}: ${bytesById.size} slp`);
   }
 
-  const manifest = buildManifest(dat, slps);
+  const manifest = buildManifest(dat, slps, strings);
+  log(`strings: ${strings.size}`);
   await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
   return { manifest, slpCount: Object.keys(slps).length, imageCount };
 }
@@ -129,7 +135,7 @@ async function writeSlp(
   return { slp, images: owners.length };
 }
 
-function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifest {
+function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map<number, string>): PackManifest {
   const graphicSlp = (slp: number): string | null => {
     const key = slpKey('graphics', slp);
     return slp >= 0 && slps[key] ? key : null;
@@ -142,6 +148,7 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifes
     graphics: {},
     terrains: {},
     units: {},
+    strings: Object.fromEntries(strings),
   };
   dat.graphics.forEach((g, id) => {
     if (!g) return;
@@ -170,6 +177,12 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifes
         hitPoints: u.hitPoints,
         button: u.creatable?.buttonId ?? 0,
         outline: [x, y, z],
+        nameId: u.languageDllName,
+        creationId: u.languageDllCreation,
+        level: u.interfaceKind,
+        displayed: u.combat
+          ? [u.combat.displayedAttack, u.combat.displayedMeleeArmour, u.creatable?.displayedPierceArmour ?? 0, u.combat.displayedRange]
+          : [0, 0, 0, 0],
       };
     }
   });

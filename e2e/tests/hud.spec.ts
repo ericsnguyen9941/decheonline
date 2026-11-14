@@ -40,6 +40,8 @@ test('selecting a villager fills the bottom panel with its name and hit points',
   await expect.poll(() => host.evaluate(() => window.__game!.selection())).toEqual([villager.id]);
 
   await expect(host.getByTestId('object-panel')).toBeVisible();
+  // The synthetic pack's language.dll has the civilization (string 10231) but no record for unit 83: the dat name.
+  await expect(host.getByTestId('object-civ')).toHaveText('Egyptian');
   await expect(host.getByTestId('object-name')).toHaveText('Man');
   await expect(host.getByTestId('object-hp')).toHaveText('25/25');
 

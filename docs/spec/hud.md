@@ -18,6 +18,21 @@ Text colours for the Egyptian, Greek styles: black with a white shadow at (-1, +
 ## Object panel (`TRIBE_Panel_Object::draw`)
 From the panel corner: owner (civilization) name at (3, -2), object name at (3, 13), icon at (3, 30) (`master.button_pict` frame; `btnbldg` + building facet for buildings), hit point bar at (3, 84), `hp/max` text at (3, 92), then attack/armor rows. Text is white.
 
+Stat rows (tpnl_obj.cpp:256-300, `draw_item`): each row is an `itemicon` 50731 frame at (54, 30 + 20 * row) and its value at (88, 33 + 20 * row); a value is `ValueTypeBonus`, the dat's displayed value (`orig_*`) and `+bonus` when the current one is higher. By `unit_level` (the dat's `interfaceKind`; 2 building, 3 villager, 4 soldier, 6 ranged/priest): attack (frame 7; levels 3, 4; current = the highest attack amount), armour (8; when above 0, always for 4 and 6; current = `base_armor` or a higher class-4 armour), pierce armour (10; above 0; class-3 armours), range (6; levels 4 and 6, current range > 0.99). A building (level 2) shows attack and range when above 0, unless it is unbuilt, or the player's own and training: then the progress row of the next section comes first. The Villager shows only `3` (attack). Not drawn yet: level 6's percent row, a unit's carried resource row. `apps/client/src/hud/text.ts` `statRows`.
+
+## Language strings (language.dll, languagex.dll)
+`RT_STRING` tables of `language.dll` with Rise of Rome's `languagex.dll` over them (`packages/formats` `readPeStrings`, `mergeStrings`; ~2500 strings), imported into the pack's `manifest.strings` (pack version 5). The original falls back to the dat's internal name (`Man`) when a name id has no text; so does the HUD, and so does it without a pack. Which ids feed which label (`apps/client/src/hud/text.ts`):
+
+| label | string id | example |
+| --- | --- | --- |
+| object name (panel, text of a button without art) | unit `languageDllName` (`string_id`) | 5131 Villager, 5255 Town Center |
+| owner line (not for Gaia, owner 0) | `STRING_ID_CIVILIZATION_*`: 10230 + civ for 1-12 (10231 Egyptian), Roman 10246, Carthaginian 10247, Palmyran 10249, Macedonian 10248, unknown 10244 | Egyptian (every player is civ 1 for now) |
+| train / build button message | unit `languageDllCreation` (`string_id2`) + cost | 6131 Create Villager (C), 6119 Build House (E) |
+| cost names | `STRING_ID_RESOURCE_*`: food 4301, wood 4302, stone 4303, gold 4304 (resource types 0-3) | Food |
+| Build, Cancel Construction, Next, Cancel, Unselect buttons | 4103, 4120, 4112, 4111, 4106 (`get_string2(RGE_STRING_TYPE_COMMAND)`) | Build (B), Unselect (ESC) |
+
+The button under the mouse puts its message on the message line (`handle_mouse_move` -> `text_line_panel`): `calc_text_msg` builds `"<string_id2> (<cost>)"`, the cost from the three `build_inventory` slots that are paid (flag set) and food/wood/stone/gold, `"Food: 50"`, the second and third each after two spaces. The help ids (`string_id2 + 100000`) and hotkey texts are not in the DLLs' tables we import and are not used.
+
 First item row (tpnl_obj.cpp:430-480), own buildings only: under construction, `item` icon 50731 frame 9 and the construction percent (`get_construction_progress`: `trunc(build_points / train_time * 100)` in float32); training, the same icon and the unit's percent (`production_queue_status`, `trunc(work_done * 100 / train_time)`; 0 for a queued unit not started); a House otherwise shows frame 4 and `population / min(population + headroom, limit)`. The sim's live population count is attribute 11 and the headroom attribute 4; attribute 32 is the limit and 33 is not the live count. `apps/client/src/hud/game-hud.ts` `itemRow`.
 
 ## Command buttons (`TRIBE_Screen_Game::setup_buttons`, scr_game.cpp:2409; `do_button_action`)

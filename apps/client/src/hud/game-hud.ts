@@ -7,11 +7,14 @@ import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
 import { ResourceBar } from './resource-bar';
+import { civilizationName, objectName, statRows } from './text';
 
 /** Frames in health.shp; the bar shows frame `count - count * hp / max`. */
 const HEALTH_FRAMES = 26;
 /** Egyptian: the game does not track a player's culture yet, and the sim's unit records are the first civ's. */
 const CULTURE = 0;
+/** Egyptians: every player's civilization until the lobby lets players pick one. */
+const CIVILIZATION = 1;
 /** Building icons live in a different SLP and are chosen by `master_type` 80 and over (the sim's `UnitType.masterType`). */
 const BUILDING = 80;
 /** A part of the top strip without icons or buttons (1024 art; the others are narrower but share the texture there). */
@@ -19,6 +22,15 @@ const STRIP_TILE = { x: 300, w: 200 };
 /** itemicon.shp frames of the object panel's rows (`TRIBE_Panel_Object::draw_item`). */
 const ITEM_POPULATION = 4;
 const ITEM_PROGRESS = 9;
+/** The rows' itemicon at (54, 30 + 20 * row) and value at (88, 33 + 20 * row) (`TRIBE_Panel_Object::draw_item`). */
+const ROW_HEIGHT = 20;
+
+/** One row of the object panel: `kind` names its test ids (`object-<kind>`, `object-<kind>-icon`). */
+interface PanelRow {
+  kind: string;
+  icon: number;
+  text: string;
+}
 
 export interface GameHudOptions {
   /** The element the canvas sits in; the HUD covers it. */
@@ -68,12 +80,12 @@ export class GameHud {
   });
   private readonly bottom = box(this.root, 'hud-bottom', 'hud-bottom');
   private readonly object = box(this.bottom, 'hud-object', 'object-panel');
+  private readonly objectCiv = box(this.object, 'hud-object-civ', 'object-civ');
   private readonly objectName = box(this.object, 'hud-object-name', 'object-name');
   private readonly objectIcon = box(this.object, 'hud-object-icon', 'object-icon');
   private readonly objectHealth = box(this.object, 'hud-object-health', 'object-health');
   private readonly objectHp = box(this.object, 'hud-object-hp', 'object-hp');
-  private readonly itemIcon = box(this.object, 'hud-object-item-icon', 'object-item-icon');
-  private readonly itemText = box(this.object, 'hud-object-item', 'object-item');
+  private rowEls: HTMLElement[] = [];
   private readonly slots = Array.from({ length: 12 }, () => box(this.bottom, 'hud-slot', 'command-slot'));
   private readonly minimap = box(this.bottom, 'hud-minimap', 'minimap');
   private readonly message = box(this.root, 'hud-message', 'hud-message');
@@ -171,14 +183,16 @@ export class GameHud {
     }
     this.commands.update(entity);
     const type = entity && unitType(entity.type);
-    const item = entity ? this.itemRow(entity) : null;
-    const key = entity ? `${entity.id}:${entity.type}:${entity.owner}:${Math.floor(entity.hp)}:${item?.icon}:${item?.text}` : '';
+    const rows = entity ? this.rows(entity) : [];
+    const key = entity ? `${entity.id}:${entity.type}:${entity.owner}:${Math.floor(entity.hp)}:${JSON.stringify(rows)}` : '';
     if (key === this.shown) return;
     this.shown = key;
     this.object.hidden = !entity;
     if (!entity || !type) return;
     const { provider } = this.o;
-    this.objectName.textContent = type.name;
+    // Gaia's objects have no owner line; a player's shows the civilization (the scenario's player name in a campaign).
+    this.objectCiv.textContent = entity.owner !== 0 ? civilizationName(provider, CIVILIZATION) : '';
+    this.objectName.textContent = objectName(provider, entity.type);
     const info = provider.unitInfo(entity.type);
     const building = type.masterType >= BUILDING;
     const icon: ImageFrame | null =
@@ -190,10 +204,25 @@ export class GameHud {
     const frame = Math.min(HEALTH_FRAMES - 1, Math.max(0, Math.trunc(HEALTH_FRAMES - (HEALTH_FRAMES * entity.hp) / type.hitPoints)));
     this.objectHealth.hidden = !showHp;
     paintFrame(this.objectHealth, showHp ? provider.interfaceFrame(SLP.health, frame) : null);
-    this.itemIcon.hidden = !item;
-    this.itemText.hidden = !item;
-    paintFrame(this.itemIcon, item ? provider.interfaceFrame(SLP.itemIcons, item.icon) : null);
-    this.itemText.textContent = item?.text ?? '';
+    for (const el of this.rowEls) el.remove();
+    this.rowEls = rows.flatMap((r, i) => {
+      const icon = box(this.object, 'hud-object-row-icon', `object-${r.kind}-icon`);
+      const text = box(this.object, 'hud-object-row', `object-${r.kind}`);
+      icon.style.top = `${30 + i * ROW_HEIGHT}px`;
+      text.style.top = `${33 + i * ROW_HEIGHT}px`;
+      paintFrame(icon, provider.interfaceFrame(SLP.itemIcons, r.icon));
+      text.textContent = r.text;
+      return [icon, text];
+    });
+  }
+
+  /** The object panel's rows: the stats, then the own building's progress or population row as `item`. */
+  private rows(e: Entity): PanelRow[] {
+    const item = this.itemRow(e);
+    const busy = e.state === ObjectState.Unbuilt || (e.owner === this.o.player && trainingStatus(e) !== null);
+    const rows: PanelRow[] = statRows(this.o.provider, e.type, busy);
+    if (item) rows.push({ kind: 'item', ...item });
+    return rows;
   }
 
   /**

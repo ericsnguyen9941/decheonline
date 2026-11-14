@@ -36,6 +36,13 @@ test('imports interface slps, a data2 Interfac.drs overriding the base one, and 
   const unit = manifest.units[SYNTHETIC.unitId]!;
   expect(unit).toMatchObject({ hitPoints: expect.any(Number), icon: expect.any(Number), button: expect.any(Number) });
   expect(unit.outline).toHaveLength(3);
+  expect(unit).toMatchObject({ nameId: expect.any(Number), creationId: expect.any(Number), level: expect.any(Number) });
+  expect(unit.displayed).toHaveLength(4);
+});
+
+test("imports language.dll's strings with languagex.dll's over them", () => {
+  const [id, text] = SYNTHETIC.overriddenString;
+  expect(manifest.strings).toEqual({ ...SYNTHETIC.strings, [id]: text });
 });
 
 test('stores frame rectangles, hotspots and one image per player owner', async () => {

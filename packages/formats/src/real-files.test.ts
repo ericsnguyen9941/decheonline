@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { DrsArchive } from './drs';
+import { mergeStrings, readPeStrings } from './pe-strings';
 import { parsePalette } from './palette';
 import { parseSlp, SlpPixelKind, slpFrameToRgba } from './slp';
 
@@ -50,5 +51,18 @@ describe.skipIf(!dir)('real game files (AOE1_DIR)', () => {
     }
     console.log(`decoded ${slps} slp files, ${frames} frames`);
     expect(slps).toBeGreaterThan(0);
+  });
+});
+
+describe.skipIf(!dir)('real language DLLs (AOE1_DIR)', () => {
+  test("reads language.dll and languagex.dll's string tables, Rise of Rome's over the original", () => {
+    const read = (name: string) => {
+      const file = readdirSync(dir as string).find((f) => f.toLowerCase() === name);
+      return readPeStrings(readFileSync(join(dir as string, file as string)));
+    };
+    const strings = mergeStrings(read('language.dll'), read('languagex.dll'));
+    expect(strings.size).toBeGreaterThan(1000);
+    expect(strings.get(5131)).toBe('Villager');
+    expect(strings.get(10231)).toBe('Egyptian');
   });
 });

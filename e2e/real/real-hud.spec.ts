@@ -14,7 +14,7 @@ async function open(browser: Browser): Promise<Page> {
   return page;
 }
 
-test('the game screen shows the original panels, and a selected villager its icon, name and hit points', async ({ browser }) => {
+test('the game screen shows the original panels, a selected villager its civilization, name, hit points and attack, and the Town Center its name', async ({ browser }) => {
   test.setTimeout(90_000);
   const host = await open(browser);
   const guest = await open(browser);
@@ -45,8 +45,15 @@ test('the game screen shows the original panels, and a selected villager its ico
   await host.mouse.click(box.x + at.x, box.y + at.y - 15);
   await expect.poll(() => host.evaluate(() => window.__game!.selection())).toEqual([villager.id]);
 
-  await expect(host.getByTestId('object-name')).toHaveText('Man');
+  // The language strings (languagex.dll over language.dll): the name is string 5131, not the dat's "Man".
+  await expect(host.getByTestId('object-civ')).toHaveText('Egyptian');
+  await expect(host.getByTestId('object-name')).toHaveText('Villager');
   await expect(host.getByTestId('object-hp')).toHaveText('25/25');
+  // The attack row: itemicon (50731) frame 7 and the dat's displayed attack; a villager has no armour or range row.
+  await expect(host.getByTestId('object-attack')).toHaveText('3');
+  expect(await style('object-attack-icon', 'background-image')).toContain('/assets/sprites/interface/50731.png');
+  await expect(host.getByTestId('object-armor')).toHaveCount(0);
+  await expect(host.getByTestId('object-range')).toHaveCount(0);
   // The icon is the villager's picture in btnunit (SLP 50730) in the owner's colour (player 1: blue, image .o1).
   expect(await style('object-icon', 'background-image')).toContain('/assets/sprites/interface/50730.o1.png');
   expect(await style('object-health', 'background-image')).toContain('/assets/sprites/interface/50745.png');
@@ -55,6 +62,23 @@ test('the game screen shows the original panels, and a selected villager its ico
   await host.mouse.move(box.x + box.width / 2, box.y + 200); // away from the edges, which scroll the view
   // The debug strip of `?debug=net` covers the corner of the object panel.
   await host.getByTestId('net-debug').evaluate((el) => el.remove());
+  // Over the Build button the message line shows the command's text.
+  await host.locator('[data-testid=command-slot][data-command=build]').hover();
+  await expect(host.getByTestId('hud-message')).toHaveText('Build (B)');
+  await host.mouse.move(box.x + box.width / 2, box.y + 200);
+  await expect(host.getByTestId('hud-message')).toBeHidden();
   await host.screenshot({ path: join(shots, 'hud.png') });
   console.log(`screenshot: ${join(shots, 'hud.png')}`);
+
+  // The Town Center: its string name, and over the Villager button the message with the cost.
+  const tc = (await host.evaluate(() => window.__game!.buildings())).find((b) => b.owner === 1 && b.type === 109)!;
+  const tcAt = (await host.evaluate((id) => window.__game!.objectScreenPos(id), tc.id))!;
+  await host.mouse.click(box.x + tcAt.x, box.y + tcAt.y);
+  await expect.poll(() => host.evaluate(() => window.__game!.selection())).toEqual([tc.id]);
+  await expect(host.getByTestId('object-name')).toHaveText('Town Center');
+  await expect(host.getByTestId('object-civ')).toHaveText('Egyptian');
+  await host.locator('[data-testid=command-slot][data-command=train][data-unit="83"]').hover();
+  await expect(host.getByTestId('hud-message')).toHaveText('Create Villager (C) (Food: 50)');
+  await host.screenshot({ path: join(shots, 'hud-town-center.png') });
+  console.log(`screenshot: ${join(shots, 'hud-town-center.png')}`);
 });

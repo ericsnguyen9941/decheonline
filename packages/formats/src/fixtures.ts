@@ -96,3 +96,67 @@ export function syntheticPalette(): Uint8Array {
     return [c, 255 - c, c ^ 0x55][i % 3] as number;
   });
 }
+
+/**
+ * A minimal PE32 file with one `.rsrc` section holding RT_STRING tables for `strings` (id -> text). `extraLanguage`
+ * adds a second language to every block, with every string replaced by `text + '?'`, after the first.
+ */
+export function buildPe(strings: Record<number, string>, { extraLanguage = false } = {}): Uint8Array {
+  const SECTION_RVA = 0x1000;
+  const SECTION_FILE = 0x200;
+  const blocks = new Map<number, string[]>();
+  for (const [key, text] of Object.entries(strings)) {
+    const id = Number(key);
+    const block = blocks.get((id >> 4) + 1) ?? Array.from({ length: 16 }, () => '');
+    block[id & 15] = text;
+    blocks.set((id >> 4) + 1, block);
+  }
+  const languages = extraLanguage ? [0x409, 0x40c] : [0x409];
+  const tableBytes = (block: string[], language: number): number[] =>
+    block.flatMap((text) => {
+      const t = language === 0x409 || text === '' ? text : `${text}?`;
+      return [...u16(t.length), ...u16(...[...t].map((c) => c.charCodeAt(0)))];
+    });
+
+  // Resource tree: root (1 type) -> type dir (n blocks) -> one dir per block (languages) -> data entries -> data.
+  const dir = (entries: [number, number][]): number[] => [...u32(0, 0), ...u16(0, 0, 0, entries.length), ...entries.flatMap(([id, to]) => u32(id, to))];
+  const ids = [...blocks.keys()].sort((a, b) => a - b);
+  const typeDirAt = 16 + 8;
+  const blockDirsAt = typeDirAt + 16 + ids.length * 8;
+  const blockDirSize = 16 + languages.length * 8;
+  const dataEntriesAt = blockDirsAt + ids.length * blockDirSize;
+  const dataAt = dataEntriesAt + ids.length * languages.length * 16;
+  const tree: number[] = [...dir([[6, 0x80000000 | typeDirAt]]), ...dir(ids.map((id, i) => [id, 0x80000000 | (blockDirsAt + i * blockDirSize)]))];
+  ids.forEach((_, i) => tree.push(...dir(languages.map((lang, l) => [lang, dataEntriesAt + (i * languages.length + l) * 16]))));
+  const blobs: number[] = [];
+  for (const id of ids) {
+    for (const language of languages) {
+      const bytes = tableBytes(blocks.get(id) as string[], language);
+      tree.push(...u32(SECTION_RVA + dataAt + blobs.length, bytes.length, 0, 0));
+      blobs.push(...bytes);
+    }
+  }
+  const section = [...tree, ...Array.from({ length: dataAt - tree.length }, () => 0), ...blobs];
+
+  const pe = 0x40;
+  const optionalSize = 96 + 16 * 8;
+  const header: number[] = [
+    ...u16(0x5a4d),
+    ...Array.from({ length: 0x3a }, () => 0),
+    ...u32(pe),
+    ...u32(0x4550),
+    ...u16(0x14c, 1),
+    ...u32(0, 0, 0),
+    ...u16(optionalSize, 0x2102),
+    ...u16(0x10b),
+    ...Array.from({ length: 94 }, () => 0),
+    ...u32(0, 0, 0, 0),
+    ...u32(SECTION_RVA, section.length),
+    ...Array.from({ length: 13 * 8 }, () => 0),
+    ...ascii('.rsrc', 8),
+    ...u32(section.length, SECTION_RVA, section.length, SECTION_FILE, 0, 0),
+    ...u16(0, 0),
+    ...u32(0x40000040),
+  ];
+  return new Uint8Array([...header, ...Array.from({ length: SECTION_FILE - header.length }, () => 0), ...section]);
+}

@@ -3,6 +3,7 @@ import type { AssetProvider, ImageFrame } from '../assets';
 import { paintFrame } from './frame-image';
 import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, type CommandButton, type CommandMode } from './commands';
 import { SLP } from './layout';
+import { commandMessage, objectName } from './text';
 
 /** An icon fills the slot inside its 2-pixel border (`TRIBE_Panel_Button::draw`, button type 0). */
 const ICON_SIZE = 50;
@@ -14,7 +15,7 @@ const RESOURCE_NAMES: Record<number, string> = { [ATTR_FOOD]: 'food', [ATTR_WOOD
 export interface CommandPanelOptions {
   /** The 12 grid slots, row by row, placed by the HUD. */
   slots: readonly HTMLElement[];
-  /** Where refusals show. */
+  /** The message line: refusals, and the text of the button under the mouse. */
   message: HTMLElement;
   world: World;
   provider: AssetProvider;
@@ -42,6 +43,7 @@ export class CommandPanel {
   private object: Entity | undefined;
   private shown = '';
   private pressed = -1;
+  private hovered = -1;
   private messageTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly cleanup: (() => void)[] = [];
 
@@ -67,7 +69,13 @@ export class CommandPanel {
         this.render(true);
         if (was === i) this.press(i, e.button === 2);
       });
+      on('pointerenter', () => {
+        this.hovered = i;
+        this.showHover();
+      });
       on('pointerleave', () => {
+        this.hovered = -1;
+        this.showHover();
         if (this.pressed !== i) return;
         this.pressed = -1;
         this.render(true);
@@ -123,6 +131,25 @@ export class CommandPanel {
     if (!force && key === this.shown) return;
     this.shown = key;
     this.o.slots.forEach((slot, i) => this.renderSlot(slot, this.buttons[i], this.pressed === i));
+    this.showHover();
+  }
+
+  /**
+   * The button under the mouse puts its message on the message line (`TRIBE_Screen_Game::handle_mouse_move` ->
+   * `text_line_panel->show_message`): the item's text and cost, "Create Villager (C) (Food: 50)", or the command's.
+   */
+  private showHover(): void {
+    const b = this.buttons[this.hovered];
+    const { message } = this.o;
+    if (b) {
+      clearTimeout(this.messageTimer);
+      message.textContent = commandMessage(this.o.provider, b);
+      message.hidden = false;
+      message.dataset.hover = 'true';
+    } else if (message.dataset.hover) {
+      delete message.dataset.hover;
+      message.hidden = true;
+    }
   }
 
   private renderSlot(slot: HTMLElement, b: CommandButton | undefined, down: boolean): void {
@@ -133,7 +160,6 @@ export class CommandPanel {
     slot.classList.toggle('down', down);
     slot.dataset.command = b?.kind ?? '';
     slot.dataset.unit = b && 'unit' in b ? String(b.unit) : '';
-    slot.title = b ? this.label(b) : '';
     paintFrame(slot, b ? provider.interfaceFrame(SLP.buttonBorder + this.o.culture, down ? 1 : 0) : null);
     const art = b ? this.icon(b) : null;
     paintFrame(icon, art);
@@ -158,22 +184,9 @@ export class CommandPanel {
     return frame && { ...frame, w: Math.min(frame.w, ICON_SIZE), h: Math.min(frame.h, ICON_SIZE) };
   }
 
+  /** Text in place of a missing picture. */
   private label(b: CommandButton): string {
-    switch (b.kind) {
-      case 'place':
-      case 'train':
-        return unitType(b.unit).name;
-      case 'build':
-        return 'Build';
-      case 'cancel-construction':
-        return 'Cancel construction';
-      case 'more':
-        return 'More';
-      case 'cancel':
-        return 'Cancel';
-      case 'unselect':
-        return 'Unselect';
-    }
+    return b.kind === 'place' || b.kind === 'train' ? objectName(this.o.provider, b.unit) : commandMessage(this.o.provider, b);
   }
 
   /** `do_button_action`. */
@@ -220,6 +233,7 @@ export class CommandPanel {
     const what = short && RESOURCE_NAMES[short.type];
     this.o.message.textContent = what ? `Not enough ${what}.` : 'You cannot build that now.';
     this.o.message.hidden = false;
+    delete this.o.message.dataset.hover;
     clearTimeout(this.messageTimer);
     this.messageTimer = setTimeout(() => (this.o.message.hidden = true), MESSAGE_MS);
   }

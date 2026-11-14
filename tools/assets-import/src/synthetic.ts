@@ -3,7 +3,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildSyntheticDat, writeDat } from '@aoe/data';
-import { buildDrs, buildSlp, syntheticPalette } from '@aoe/formats/fixtures';
+import { buildDrs, buildPe, buildSlp, syntheticPalette } from '@aoe/formats/fixtures';
 
 /** What the synthetic install contains, for assertions on the imported pack. */
 export const SYNTHETIC = {
@@ -28,6 +28,9 @@ export const SYNTHETIC = {
   interfaceSlp: 50730,
   /** Overridden by data2/Interfac.drs with a single frame. */
   overriddenInterfaceSlp: 50741,
+  /** language.dll's strings; languagex.dll replaces `overriddenString`. */
+  strings: { 10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)' },
+  overriddenString: [5131, 'Villager'],
 } as const;
 
 const fillRow = (...commands: number[]) => ({ left: 0, right: 0, commands: [...commands, 0x0f] });
@@ -72,6 +75,8 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'data', 'Terrain.drs'), terrain);
   await writeFile(join(dir, 'data', 'Interfac.drs'), interfac);
   await writeFile(join(dir, 'data2', 'Interfac.drs'), interfac2);
+  await writeFile(join(dir, 'language.dll'), buildPe(SYNTHETIC.strings));
+  await writeFile(join(dir, 'languagex.dll'), buildPe({ [SYNTHETIC.overriddenString[0]]: SYNTHETIC.overriddenString[1] }));
   const dat = buildSyntheticDat();
   dat.terrainBlock.terrains[0]!.terrainDimensions = [1, 2];
   await writeFile(join(dir, 'data2', 'empires.dat'), writeDat(dat));
