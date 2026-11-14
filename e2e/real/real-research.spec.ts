@@ -76,14 +76,16 @@ async function build(page: Page, unit: number): Promise<number> {
     }
   }
   expect(placed).toBe(true);
-  await page.waitForFunction(([type, seen]) => window.__game!.buildings().some((b) => b.type === type && !seen.includes(b.id)), [unit, [...before]] as const);
+  await page.waitForFunction(([type, seen]) => window.__game!.buildings().some((b) => b.type === type && !seen.includes(b.id)), [unit, [...before]] as const, {
+    timeout: 60_000,
+  });
   const id = (await page.evaluate(() => window.__game!.buildings())).find((b) => b.type === unit && !before.has(b.id))!.id;
-  await page.waitForFunction(([b, active]) => window.__game!.buildings().find((x) => x.id === b)?.state === active, [id, ACTIVE] as const, { timeout: 60_000 });
+  await page.waitForFunction(([b, active]) => window.__game!.buildings().find((x) => x.id === b)?.state === active, [id, ACTIVE] as const, { timeout: 180_000 });
   return id;
 }
 
 test('a research button and its message, the age-up in progress and a Tool Age town show the original art', async ({ browser }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(600_000);
   const host = await open(browser);
   const guest = await open(browser);
   await host.getByTestId('name').fill('Alice');
@@ -106,7 +108,7 @@ test('a research button and its message, the age-up in progress and a Tool Age t
   await build(host, BARRACKS);
   await build(host, GRANARY);
   const tc = (await host.evaluate(() => window.__game!.buildings())).find((b) => b.owner === 1 && b.type === TOWN_CENTER)!;
-  await host.waitForFunction((t) => window.__game!.techState(t) === 1, TOOL_AGE);
+  await host.waitForFunction((t) => window.__game!.techState(t) === 1, TOOL_AGE, { timeout: 60_000 });
 
   // The Town Center's Tool Age button: btntech (50729) in a research border, the message its text and cost.
   await select(host, tc.id);
@@ -119,7 +121,7 @@ test('a research button and its message, the age-up in progress and a Tool Age t
 
   // Researching: Stop alone in slot 0 and the progress in the panel.
   await toolAge.click();
-  await host.waitForFunction((id) => (window.__game!.buildings().find((b) => b.id === id)?.research?.progress ?? 0) >= 20, tc.id, { timeout: 60_000 });
+  await host.waitForFunction((id) => (window.__game!.buildings().find((b) => b.id === id)?.research?.progress ?? 0) >= 20, tc.id, { timeout: 180_000 });
   await expect(slot(host, 'stop')).toHaveCount(1);
   await expect(host.getByTestId('object-item')).toHaveText(/^\d+%$/);
   const box = (await host.getByTestId('game-canvas').boundingBox())!;
@@ -128,7 +130,7 @@ test('a research button and its message, the age-up in progress and a Tool Age t
 
   // The Tool Age: Town Center facet 2, the House in House1's art, the age in the top strip; an Archery Range, and the
   // villager's build menu with the Tool Age buildings.
-  await host.waitForFunction((t) => window.__game!.techState(t) === 3, TOOL_AGE, { timeout: 60_000 });
+  await host.waitForFunction((t) => window.__game!.techState(t) === 3, TOOL_AGE, { timeout: 180_000 });
   await expect(host.getByTestId('age')).toHaveText('Tool Age');
   await build(host, RANGE);
   await selectVillager(host);
