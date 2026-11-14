@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js';
 import { createAssetProvider } from './assets';
 import { renderAssetsDebug, type DebugViewReport } from './assets/debug-view';
+import { startMultiplayer } from './multiplayer';
 import { GAME_TITLE } from './title';
 
 declare global {
@@ -29,7 +30,12 @@ async function main(): Promise<void> {
     });
     window.__assetsDebug = view;
     app.canvas.dataset.assetsSource = view.source;
+    return;
   }
+
+  const lobbyHost = document.getElementById('multiplayer');
+  if (!lobbyHost) throw new Error('missing #multiplayer element');
+  await startMultiplayer(lobbyHost, { debug: params.get('debug') === 'net', speed: Number(params.get('speed') ?? 1) || 1 });
 }
 
 void main();
