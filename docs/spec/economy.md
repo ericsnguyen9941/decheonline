@@ -396,8 +396,8 @@ foundation are therefore felled, not blocked, and a destroyed tree stays on
 the obstruction map until it is actually removed (the sim's fuzz test
 checks overlap among live objects only).
 
-Not ported: placement visibility (reason 5, the sim has no fog), slope (3,
-the map has no tile shapes yet) and per-master tile requirements (1; no type in
+Placement visibility (reason 5) is ported for the build command and trained
+units (visibility.md §5). Not ported: slope (3, the map has no tile shapes yet) and per-master tile requirements (1; no type in
 the table has any).
 
 ## 5. Training
@@ -712,7 +712,9 @@ Kept as behaviour (the target is the original game):
   action's states or RNG draws, so the sim does not port it. Whether idle
   animals move, and what they draw from the RNG, is **unknown**; in the sim they
   stand still until hunted or until they flee.
-- Not ported: the `fog_update` `rand()` at player creation; the civ effect;
+- The `fog_update` `rand()` at player creation and placement visibility are
+  ported (visibility.md §5, §6).
+- Not ported: the civ effect;
   per-civ masters (Gaia's records use other graphics and enabled flags, and
-  the Greek Granary other graphics); placement visibility, slope and tile
+  the Greek Granary other graphics); slope and tile
   requirements (§4.6); master-attribute effect codes other than 17; research.

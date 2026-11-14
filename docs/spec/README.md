@@ -53,6 +53,7 @@ in the clone; specs that depend on it say so.
 - `movement.md` — movement and pathing.
 - `economy.md` — gather, drop-off, build, train.
 - `combat.md` — attacks, damage, projectiles, line of sight.
+- `visibility.md` — explored/visible maps, LOS shapes and lifecycle, visible-unit records, fog rules.
 - `techs.md` — techs and the effect engine.
 - `effects-extra.md` — effect codes 100/101, attribute 29, cliff table.
 - `sprites.md` — sprite frame advance, attack damage frame, random start frame, damage overlays, death length.

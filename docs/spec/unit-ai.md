@@ -262,7 +262,8 @@ per update (guard at `:1120-1123`) and fills five global result buckets via
   change (`src/com_obj.cpp:438-451`, with the decomp's `@bug` note at
   `:443-446`). So both the radius filter and the distance use the tile at
   which the searcher's player **first** saw the object. A unit that walks
-  past under continuous vision is searched at its old tile.
+  past under continuous vision is searched at its old tile. The port keeps
+  the records in `visibility.ts` (visibility.md §4, vectors V8, V9).
 
 Distance table `d[dy][dx]` (|dy|, |dx| in tiles; `-` = beyond 16; derived
 from `src/visible.cpp:11-136` with the `src/vis_unit.cpp:87-116` rule

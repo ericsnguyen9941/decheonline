@@ -10,6 +10,7 @@ import { typeOf, type PlayerMasters } from './masters';
 import type { CrtRand } from './rng';
 import { newSprite, type SpriteContext } from './sprites';
 import { atan2, cos, sin } from './trig';
+import { exploreObject, unexploreObject, type VisibilityContext } from './visibility';
 import { spriteInfo, type SpriteInfo, type UnitType } from './units';
 
 const TWO_PI_F = f32(6.2831855);
@@ -139,7 +140,7 @@ export function copyMover(m: Mover): Mover {
 }
 
 /** What a moving unit needs from the world while it updates. */
-export interface MoveContext extends PlayerMasters {
+export interface MoveContext extends PlayerMasters, VisibilityContext {
   map: TileMap;
   entities: EntityStore;
   pathing: PathingSystem;
@@ -222,16 +223,28 @@ function length32(dx: number, dy: number): number {
 
 /**
  * `teleport`: unstamp, clamp to the map, move, restamp (movement.md §4). The map is flat (no elevation drawing or
- * slope heights yet), so z is kept as given.
+ * slope heights yet), so z is kept as given. `new_location` moves the line of sight (visibility.md §3.2): on a new
+ * tile it is removed at the old position, then added at the new one if the object is active. `placed` is the first
+ * placement of a new object, which has no old position.
  */
-export function teleport(ctx: MoveContext, e: Entity, t: UnitType, x: number, y: number, z: number): void {
+export function teleport(ctx: MoveContext, e: Entity, t: UnitType, x: number, y: number, z: number, placed = false): void {
   ctx.pathing.unstamp(e, t);
   const maxX = sub32(ctx.map.width, MAP_EDGE);
   const maxY = sub32(ctx.map.height, MAP_EDGE);
-  e.x = f32(Math.min(Math.max(x, 0), maxX));
-  e.y = f32(Math.min(Math.max(y, 0), maxY));
+  const nx = f32(Math.min(Math.max(x, 0), maxX));
+  const ny = f32(Math.min(Math.max(y, 0), maxY));
+  const moved = placed || tileOf(nx, ctx.map.width) !== tileOf(e.x, ctx.map.width) || tileOf(ny, ctx.map.height) !== tileOf(e.y, ctx.map.height);
+  if (moved && !placed) unexploreObject(ctx, e, t, false);
+  e.x = nx;
+  e.y = ny;
   e.z = f32(z);
+  if (moved && e.state === ObjectState.Active) exploreObject(ctx, e, t, false);
   ctx.pathing.stamp(e, t);
+}
+
+/** The tile index of a coordinate, clamped to the map (src/stat_obj.cpp:1503-1511). */
+function tileOf(v: number, size: number): number {
+  return Math.min(Math.max(toInt(v), 0), size - 1);
 }
 
 function pathingAllowed(ctx: MoveContext, m: Mover): boolean {

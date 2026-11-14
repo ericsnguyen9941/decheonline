@@ -9,13 +9,23 @@ test('rand() matches the core.md §4.3 worked example (seed 14 -> 84, 27125, ...
 });
 
 test('world steps carry random_seed as in core.md §4.3 (14 -> 312 -> 3490 -> 4612)', () => {
-  const world = new World({ players: 3, randomSeed: 14 });
+  const world = new World({ players: 1, randomSeed: 14 });
   const seeds: number[] = [];
   for (let i = 0; i < 3; i++) {
     world.runTurn();
     seeds.push(world.randomSeed);
   }
   expect(seeds).toEqual([312, 3490, 4612]);
+});
+
+test('each player but Gaia fences the end of its update (core.md §4.3, 3 players: 14 -> 3490 -> 16577 -> 14304)', () => {
+  const world = new World({ players: 3, randomSeed: 14 });
+  const seeds: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    world.runTurn();
+    seeds.push(world.randomSeed);
+  }
+  expect(seeds).toEqual([3490, 16577, 14304]);
 });
 
 test('rand() stays in 0..32767 and wraps the 32-bit state', () => {

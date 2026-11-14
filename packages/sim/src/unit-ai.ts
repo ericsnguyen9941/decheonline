@@ -11,11 +11,12 @@ import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { aiWork, deleteActions, workMoveTo, ACTION_ATTACK, ACTION_GATHER, ACTION_HUNT, ACTION_MOVE } from './gather';
 import { ACTION_BUILD } from './build';
-import { hasMaster, typeOf, type PlayerMasters } from './masters';
+import { typeOf, type PlayerMasters } from './masters';
 import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { newSprite } from './sprites';
 import type { UnitType } from './units';
+import { TILE_VISIBLE } from './visibility';
 
 /** Unit AI actions (`UNIT_AI_ACTION_*`, include/stat_obj.h). */
 export const AI_ACTION_ATTACK = 0x258;
@@ -75,10 +76,10 @@ export const AiClass = {
 } as const;
 
 const GROUP_ARTIFACT = 1;
-const GROUP_BUILDING = 3;
+export const GROUP_BUILDING = 3;
 const GROUP_CIVILIAN = 4;
 const GROUP_PREDATOR = 10;
-const GROUP_WALL = 27;
+export const GROUP_WALL = 27;
 const SCOUT = 299;
 const CATAPULTS = [35, 36];
 const TOWERS = [79, 199, 69, 278, 383, 380];
@@ -105,7 +106,7 @@ const IMPORTANT: Partial<Record<number, readonly number[]>> = {
  * The visible-unit distance `d[dy][dx]` (unit-ai.md §3.2): the smallest LOS radius whose fog-of-war shape
  * (`NormalLOS`, src/visible.cpp:11-136, ref aoe1-decomp@6d6d8b1) contains the cell; 99 beyond radius 16.
  */
-const VISIBLE_DISTANCE: readonly (readonly number[])[] = [
+export const VISIBLE_DISTANCE: readonly (readonly number[])[] = [
   [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   [1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   [2, 2, 3, 4, 5, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -570,40 +571,38 @@ function bucketOf(searcher: number, owner: number): number {
 }
 
 /**
- * `search` / `GetVisibleUnits` (unit-ai.md §3.2) around the unit's tile with radius (int) LOS (doubled for the builder,
- * clamped to 15): the combat objects of each important group, in group order, bucketed by diplomacy, at most 256 a
- * bucket.
+ * `search` / `GetVisibleUnits` (unit-ai.md §3.2, visibility.md §4.2) around the unit's tile with radius (int) LOS (doubled
+ * for the builder, clamped to 15): the searching player's visible-unit records of each important group, in group order
+ * and list order, each at the tile and owner it had when the player started seeing it, bucketed by diplomacy, at most
+ * 256 a bucket.
  */
 function search(ctx: GameContext, e: Entity): Seen[][] {
   const buckets: Seen[][] = [[], [], [], [], []];
   const groups = IMPORTANT[e.ai!.kind];
-  if (!groups) return buckets;
+  const v = ctx.visibility;
+  if (!groups || !v || e.owner >= v.players) return buckets;
   const t = typeOf(ctx, e);
   let radius = toInt(t.los);
   if (t.id === 118) radius += radius;
   if (radius > 15) radius = 15;
   const cx = toInt(e.x);
   const cy = toInt(e.y);
-  const all = [...ctx.entities.all()].filter((o) => {
-    // `test` probe objects are not game objects.
-    const ot = hasMaster(ctx, o.owner, o.type) ? typeOf(ctx, o) : undefined;
-    if (!ot) return false;
-    return ot.masterType >= 50 && ot.masterType <= 80 && o.state < ObjectState.PendingRemoval;
-  });
   for (const group of groups) {
-    for (const o of all) {
-      if (typeOf(ctx, o).group !== group) continue;
-      const ox = toInt(o.x);
-      const oy = toInt(o.y);
-      if (ox > cx + radius || ox < cx - radius || oy > cy + radius || oy < cy - radius) continue;
-      const d = VISIBLE_DISTANCE[Math.abs(oy - cy) & 15]![Math.abs(ox - cx) & 15]!;
+    for (const r of v.recordsOf(e.owner, group)) {
+      if (r.x > cx + radius || r.x < cx - radius || r.y > cy + radius || r.y < cy - radius) continue;
+      const d = VISIBLE_DISTANCE[Math.abs(r.y - cy) & 15]![Math.abs(r.x - cx) & 15]!;
       if (d > radius) continue;
-      const list = buckets[bucketOf(e.owner, o.owner)]!;
+      const list = buckets[bucketOf(e.owner, r.owner)]!;
       if (list.length >= 0x100) continue;
-      list.push({ id: o.id, distance: d });
+      list.push({ id: r.id, distance: d });
     }
   }
   return buckets;
+}
+
+/** `visibleStatus(...) == 0x0F` at the object's tile for `player` (src/aiuaimod.cpp:2408). */
+function tileVisible(ctx: GameContext, player: number, o: Entity): boolean {
+  return !ctx.visibility || ctx.visibility.get(player, toInt(o.x), toInt(o.y)) === TILE_VISIBLE;
 }
 
 /** `damageCapability(ctx, )` (src/com_obj.cpp:859): the sum of the positive weapon values. */
@@ -673,8 +672,11 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
   let bestScore = 0;
   let bestIsBuilding = false;
   if (current && !quickCheck && ai.action === AI_ACTION_ATTACK) {
-    // With every object visible, the visibility gate on a current wall target always passes.
-    const blocked = nonCurrent !== 0 && !inAttackRange(ctx, e, current) && !canPath(ctx, e, current, weaponRange(ctx, e));
+    // With other candidates, the current target must stand on a tile the unit's player sees and be in reach
+    // (src/aiuaimod.cpp:1289-1300).
+    const blocked =
+      nonCurrent !== 0 &&
+      (!tileVisible(ctx, e.owner, current) || (!inAttackRange(ctx, e, current) && !canPath(ctx, e, current, weaponRange(ctx, e))));
     if (!blocked && current.state === ObjectState.Active && current.owner !== e.owner) {
       if (current.type === 276) return current.id;
       best = current.id;

@@ -13,6 +13,7 @@ const UNIT: UnitType = {
   name: 'example',
   hitPoints: 1,
   los: 0,
+  fogFlag: 0,
   speed: f32(1.2),
   radiusX: f32(0.2),
   radiusY: f32(0.2),

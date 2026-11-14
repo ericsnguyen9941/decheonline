@@ -21,5 +21,6 @@ export * from './research';
 export * from './objects';
 export * from './commands';
 export * from './hash';
+export * from './visibility';
 export * from './world';
 export * from './replay';

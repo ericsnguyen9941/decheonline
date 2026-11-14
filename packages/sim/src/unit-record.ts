@@ -16,6 +16,8 @@ export interface SimUnitRecord {
   hitPoints: number;
   /** `line_of_sight`, tiles. */
   los: number;
+  /** `fog_flag`: 1 if an attacker may still hit it on a fogged tile. */
+  fogFlag: number;
   speed: number;
   radius: [number, number, number];
   clearance: [number, number];

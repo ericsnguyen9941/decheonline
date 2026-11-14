@@ -1,7 +1,7 @@
 /**
  * Attacking (docs/spec/combat.md §2-§5, sprites.md §5): the attack action (a hunt's sub-action or a unit's own), the
  * hit roll, damage to units, buildings and other objects, missiles and the attack flare. Every float store is rounded
- * to float32; trig goes through `trig.ts`. Fog of war is not ported, so `ready_to_attack` skips its visibility test.
+ * to float32; trig goes through `trig.ts`.
  */
 import { isBuilding } from './buildings';
 import type { GameContext } from './context';
@@ -12,8 +12,9 @@ import { ActionResult, currentSprite, endAction, facetOf, maximumSpeed, startMov
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
 import { framePassed, newSprite } from './sprites';
 import { atan2, cos, sin } from './trig';
-import { AI_ACTION_ATTACK, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
+import { AI_ACTION_ATTACK, GROUP_BUILDING, GROUP_WALL, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
 import { spriteInfo, type SpriteInfo } from './units';
+import { TILE_BLACK, TILE_FOGGED } from './visibility';
 
 /** `RGE_Action_Attack` states (combat.md §3.2). */
 export const ATTACK_DONE = 1;
@@ -211,11 +212,25 @@ export function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, sta
   }
 }
 
-/** `ready_to_attack` (combat.md §3.4) for a unit target owned by Gaia (no visibility test). */
+/**
+ * `ready_to_attack` (combat.md §3.4). A target owned by a player, other than a building or wall, must stand on a tile
+ * the attacker's player sees, or on a fogged one if its master's `fog_flag` is set; else the attack fails
+ * (src/act_atak.cpp:465-477, visibility.md §5).
+ */
 function readyToAttack(ctx: GameContext, e: Entity, a: AttackAction): boolean {
   const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
   if (!turnTowards(ctx, e, target ? target.x : a.x, target ? target.y : a.y)) return false;
   const t = typeOf(ctx, e);
+  if (target && target.owner > 0 && ctx.visibility) {
+    const tt = typeOf(ctx, target);
+    if (tt.group !== GROUP_BUILDING && tt.group !== GROUP_WALL) {
+      const seen = ctx.visibility.get(e.owner, toInt(target.x), toInt(target.y));
+      if (seen === TILE_BLACK || (seen === TILE_FOGGED && tt.fogFlag === 0)) {
+        setAttackState(ctx, e, a, ATTACK_FAILED);
+        return false;
+      }
+    }
+  }
   const reach = sub32(add32(length32(t.radiusX, t.radiusY), a.range), RANGE_SLACK);
   let ready = false;
   if (!target) {

@@ -16,6 +16,7 @@ import { updateResearch } from './research';
 import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
 import { updateUnitAI } from './unit-ai';
+import { refreshSighting, stateChanged } from './visibility';
 import { spriteInfo, type UnitType } from './units';
 
 /** Master types (`master_type`): 20 animated, 30 moving, 40 action, 50 combat, 60 missile, 70 unit, 80 building. */
@@ -46,7 +47,8 @@ export function giveStorages(attributes: number[], t: UnitType, sign: 1 | -1, fl
 const AGE_TECHS = [74, 75, 76];
 
 /**
- * `set_object_state` side effects the sim keeps: a unit starting to die returns its flag-2 storages. A built building
+ * `set_object_state` side effects the sim keeps: a unit starting to die returns its flag-2 storages; line of sight
+ * moves as visibility.md §3.3 says. A built building
  * going from active to dying also takes back its flag-4 storages; when the owner has no other active building of its
  * kind, its tech and the age techs are undone (`TRIBE_Building_Object::set_object_state`, `src/t_b_obj.cpp:303-327`).
  */
@@ -56,6 +58,7 @@ function setObjectState(ctx: GameContext, e: Entity, state: number): void {
   const lost = isBuilding(t) && state === ObjectState.Dying && e.state === ObjectState.Active;
   if (lost) giveBuiltStorages(ctx, e, t, -1);
   if (state >= ObjectState.Dying && e.state < ObjectState.Dying) giveStorages(ctx.attributes[e.owner]!, t, -1, [2]);
+  stateChanged(ctx, e, t, state);
   e.state = state;
   if (lost && !ctx.objectsOf(e.owner).some((o) => o.type === e.type && o.state === ObjectState.Active)) {
     if (t.building!.techId > -1) undoTech(ctx, e.owner, t.building!.techId);
@@ -97,6 +100,7 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   if (e.state > ObjectState.Active) {
     deleteActions(ctx, e);
     e.missile = null;
+    if (t.masterType >= 50) refreshSighting(ctx, e, t);
     return remove;
   }
   if (e.research) {
@@ -113,7 +117,9 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     const r = updateMover(ctx, e);
     if (r === ActionResult.Failed || r === ActionResult.Remove) endAction(e.mover);
   }
-  // `RGE_Combat_Object::update` ends with the unit AI, on the owner's turn only, with the owner's accumulated time.
+  // `RGE_Combat_Object::update` refreshes the object's visible-unit records, then ends with the unit AI, on the owner's
+  // turn only, with the owner's accumulated time.
+  if (t.masterType >= 50) refreshSighting(ctx, e, t);
   if (e.ai && ctx.playerTurn === e.owner) updateUnitAI(ctx, e, ctx.playerTimeDelta[e.owner]!);
   return remove;
 }

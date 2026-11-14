@@ -27,6 +27,7 @@ import { CrtRand } from './rng';
 import { newSprite } from './sprites';
 import { checkForNewTech, doEffect, newResearchDone, newTechStates } from './techs';
 import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState } from './unit-ai';
+import { forgetSighting, stateChanged, Visibility, type VisibilitySnapshot } from './visibility';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
 
 /** Default base time per step: the network frame granularity `G` (src/com_spd.cpp:11-25). Never wall time. */
@@ -154,7 +155,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 8;
+  version: 9;
   players: number;
   turn: number;
   granularity: number;
@@ -186,6 +187,9 @@ export interface Snapshot {
   civs: number[];
   /** Each player's masters by unit id. */
   masters: Record<number, UnitType>[];
+  /** Each player's `fog_update`. */
+  fogUpdate: number[];
+  visibility: VisibilitySnapshot;
 }
 
 const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9 };
@@ -241,6 +245,13 @@ export class World {
   readonly civs: readonly number[];
   /** Each player's master objects (`RGE_Player::master_objects`): copies of its civ's records the techs change. */
   masters: Record<number, UnitType>[];
+  /**
+   * Each player's `TRIBE_Player::fog_update` (3 + rand() * 3 / 0x7fff at creation, src/tplayer.cpp:265). Nothing reads
+   * it; it is kept for the draw that sets it.
+   */
+  fogUpdate: number[];
+  /** Fog of war: each player's explored and visible tiles and the visible-unit records (docs/spec/visibility.md). */
+  visibility: Visibility;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
   private mastersDigest: (number | undefined)[] = [];
   private queue = new CommandQueue();
@@ -258,10 +269,12 @@ export class World {
     this.awake = Array.from({ length: this.players }, () => []);
     this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) }, (e) => typeOf(this, e));
     this.pathing.iterations = options.pathingIterations ?? DEFAULT_PATHING_ITERATIONS;
-    // Player creation copies the civ's masters and runs its tech tree's first `check_for_new_tech` (techs.md §3.7):
-    // the zero-time start techs complete, Gaia's too. The fog-of-war draw of player creation is not ported (no fog of
-    // war yet).
+    this.visibility = new Visibility(this.map.width, this.map.height, this.players);
+    // Player creation copies the civ's masters, draws its `fog_update` and runs its tech tree's first
+    // `check_for_new_tech` (techs.md §3.7): the zero-time start techs complete, Gaia's too. The draw comes before the
+    // setup seed below: `randomSeed` stands for the stream after player creation (visibility.md §6).
     this.masters = this.civs.map((c) => newMasters(c));
+    this.fogUpdate = this.civs.map(() => Math.trunc((this.rng.rand() * 3) / 0x7fff) + 3);
     this.techs = Array.from({ length: this.players }, () => newTechStates());
     this.researchDone = Array.from({ length: this.players }, () => newResearchDone());
     for (let p = 0; p < this.players; p++) checkForNewTech(this.gameContext(), p);
@@ -302,6 +315,7 @@ export class World {
   private destroyObject(o: Entity): void {
     if (o.state >= ObjectState.PendingRemoval) return;
     this.wake(o);
+    stateChanged(this, o, typeOf(this, o), ObjectState.PendingRemoval);
     o.state = ObjectState.PendingRemoval;
   }
 
@@ -333,7 +347,7 @@ export class World {
     });
     if (t.combat) e.attackTimer = 0;
     if (isMoving(t)) e.turnTowardsTime = 0;
-    teleport(this.gameContext(), e, t, e.x, e.y, e.z);
+    teleport(this.gameContext(), e, t, e.x, e.y, e.z, true);
     newSprite(this.gameContext(), e, null);
     giveStorages(this.attributes[owner]!, t, 1, [1, 2]);
     this.rng.srand(this.rng.rand());
@@ -357,6 +371,7 @@ export class World {
       techs: this.techs,
       researchDone: this.researchDone,
       masters: this.masters,
+      visibility: this.visibility,
       worldTime: this.worldTime,
       playerTurn: this.playerTurn,
       playerTimeDelta: this.playerTimeDelta,
@@ -372,7 +387,9 @@ export class World {
 
   /** Remove an object that is ready (`recycle_out_of_game`): off the obstruction map, the lists and the store. */
   private removeObject(e: Entity): void {
-    this.pathing.unstamp(e, typeOf(this, e));
+    const t = typeOf(this, e);
+    this.pathing.unstamp(e, t);
+    if (t.masterType >= 50) forgetSighting(this, e, t);
     const list = this.awake[e.owner]!;
     const i = list.indexOf(e.id);
     if (i !== -1) list.splice(i, 1);
@@ -452,6 +469,9 @@ export class World {
           const e = this.entities.get(id);
           if (e && updateObject(ctx, e)) this.removeObject(e);
         }
+        // `TRIBE_Player::update` ends by fencing its computer-player AI off the stream (src/tplayer.cpp:607-631): one
+        // draw becomes the seed. Gaia's update (`TRIBE_Gaia::update`) has no fence.
+        if (i > 0) rng.srand(rng.rand());
       }
       // Fog ghost updates draw from the RNG on each peer's local view; the original fences them so the
       // stream afterwards depends only on this draw (src/world.cpp:1283-1294).
@@ -604,7 +624,7 @@ export class World {
     const x = f32(command.x);
     const y = f32(command.y);
     const ctx = this.gameContext();
-    if (checkPlacement(ctx, t, x, y, true, true) !== 0) return;
+    if (checkPlacement(ctx, t, x, y, true, true, player) !== 0) return;
     if (!payObjCost(ctx, player, t.id, 1, false)) return;
     const building = this.createObject(player, t.id, x, y, 0);
     for (const id of command.units) {
@@ -671,6 +691,14 @@ export class World {
     }
   }
 
+  /**
+   * What `player` knows of tile (col, row) (`get_visible`): `TILE_VISIBLE` (0x0F) while seen, `TILE_FOGGED` (0x80) once
+   * explored, `TILE_BLACK` (0) before. For the client's fog drawing and minimap.
+   */
+  tileVisibility(player: number, col: number, row: number): number {
+    return this.visibility.get(player, col, row);
+  }
+
   /** 32-bit hash of the whole state; equal on every peer while they are in sync. */
   hash(): number {
     const h = new Hasher()
@@ -695,6 +723,8 @@ export class World {
     hashValue(h, this.researchDone);
     hashValue(h, this.civs);
     for (let p = 0; p < this.players; p++) h.u32((this.mastersDigest[p] ??= digest(this.masters[p])));
+    for (const f of this.fogUpdate) h.u32(f);
+    this.visibility.hashInto(h);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -718,7 +748,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 8,
+      version: 9,
       players: this.players,
       turn: this.turn,
       granularity: this.granularity,
@@ -743,11 +773,13 @@ export class World {
       researchDone: this.researchDone.map((a) => [...a]),
       civs: [...this.civs],
       masters: copyMasters(this.masters),
+      fogUpdate: [...this.fogUpdate],
+      visibility: this.visibility.toJSON(),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 8) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 9) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -775,6 +807,8 @@ export class World {
     w.researchDone = s.researchDone.map((a) => [...a]);
     w.masters = copyMasters(s.masters);
     w.mastersDigest = [];
+    w.fogUpdate = [...s.fogUpdate];
+    w.visibility = Visibility.fromJSON(s.visibility);
     return w;
   }
 }

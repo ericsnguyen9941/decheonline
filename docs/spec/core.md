@@ -66,6 +66,9 @@ In order:
       (`src/player.cpp:870`, M) updates the player's object list
       (`RGE_Object_List::update`, `src/obj_list.cpp:226`), selection, victory
       conditions and visibility tiles. AI and unit behaviour run inside this.
+      `TRIBE_Player::update` (players ≥ 1, not Gaia's `TRIBE_Gaia::update`)
+      ends with a fence around the computer-player AI: `r = rand()`, AI
+      update, `srand(r)` (`src/tplayer.cpp:607-631`; visibility.md §6).
    5. **RNG fence around fog "ghost" objects**: draw `r = rand()`
       (`src/world.cpp:1283`), update every player's doppelganger objects and
       creator checks (`src/world.cpp:1284-1293`), then `srand(r)`
@@ -295,8 +298,9 @@ simulation (project rule).
 
 ### 4.3 Worked example
 
-Start of a step with `random_seed = 14` and, for illustration, no random draws
-by commands, scenario or players:
+Start of a step with `random_seed = 14`, a world of Gaia alone (no player
+fence, §1.2 step 7.4) and, for illustration, no random draws by commands,
+scenario or objects:
 
 | action | state after (32-bit) | returned |
 | --- | --- | --- |
@@ -310,5 +314,8 @@ gives 312 → (1057) → 3490, then 3490 → (11435) → 4612. For reference, th
 raw stream after `srand(14)` is 84, 27125, 9192, 11643, 22187 (state wraps
 mod 2^32 from the second draw: 5 527 193 × 214013 + 2531011 mod 2^32 =
 1 777 680 120 → 27125).
+
+With Gaia and two players, each player's fence adds `srand(rand())` before
+step 7.5: from 14 the stored seeds are 3490, 16577, 14304.
 
 **Implication for the port:** a golden test can check this table directly.

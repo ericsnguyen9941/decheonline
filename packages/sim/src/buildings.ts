@@ -11,6 +11,7 @@ import { newSprite } from './sprites';
 import { buildingFacet, doTech } from './techs';
 import { hasMaster, master, typeOf } from './masters';
 import { spriteInfo, type UnitType } from './units';
+import { exploreObject, TILE_BLACK, unexploreObject } from './visibility';
 
 /** One production queue record: a unit type and how many are paid for. */
 export interface QueueRecord {
@@ -85,12 +86,20 @@ function searchBox(ctx: GameContext, col: number, row: number): [number, number,
 
 /**
  * `RGE_Master_Static_Object::check_placement` (`src/m_s_obj.cpp:843`): 0 when `t` fits at (col, row), else the
- * reason: 7 off the map, 2 terrain, 6 an object in the way. `construction` uses the construction radius;
- * `builtOn` ignores objects that can be built on. Visibility (5) is not checked: the sim has no fog of war, so every
- * tile counts as seen. Slope (3) is not checked: the map has no tile shapes yet, so every tile counts as flat. No
- * type in the sim's table has tile requirements (1).
+ * reason: 7 off the map, 2 terrain, 5 not seen, 6 an object in the way. `construction` uses the construction radius;
+ * `builtOn` ignores objects that can be built on. With `visibleTo` (`check_vis`, visibility.md §5) one tile under the
+ * object must be explored or seen by that player. Slope (3) is not checked: the map has no tile shapes yet, so every
+ * tile counts as flat. No type in the sim's table has tile requirements (1).
  */
-export function checkPlacement(ctx: GameContext, t: UnitType, col: number, row: number, construction: boolean, builtOn: boolean): number {
+export function checkPlacement(
+  ctx: GameContext,
+  t: UnitType,
+  col: number,
+  row: number,
+  construction: boolean,
+  builtOn: boolean,
+  visibleTo = -1,
+): number {
   const rx = construction ? t.clearanceX : t.radiusX;
   const ry = construction ? t.clearanceY : t.radiusY;
   const minX = sub32(col, rx);
@@ -98,9 +107,14 @@ export function checkPlacement(ctx: GameContext, t: UnitType, col: number, row: 
   const minY = sub32(row, ry);
   const maxY = sub32(add32(row, ry), COORDINATE_EPSILON);
   if (!(minX >= 0) || !(maxX < ctx.map.width) || !(minY >= 0) || !(maxY < ctx.map.height)) return 7;
+  let seen = false;
   for (let x = Math.trunc(minX); x <= Math.trunc(maxX); x++) {
-    for (let y = Math.trunc(minY); y <= Math.trunc(maxY); y++) if (!((t.terrainTable[ctx.map.terrainAt(x, y)] ?? 0) > 0)) return 2;
+    for (let y = Math.trunc(minY); y <= Math.trunc(maxY); y++) {
+      if (!((t.terrainTable[ctx.map.terrainAt(x, y)] ?? 0) > 0)) return 2;
+      if (visibleTo >= 0 && ctx.visibility && ctx.visibility.get(visibleTo, x, y) !== TILE_BLACK) seen = true;
+    }
   }
+  if (visibleTo >= 0 && ctx.visibility && !seen) return 5;
   if (!(rx > 0) && !(ry > 0)) return 0;
   if (!builtOn && !(t.radiusZ > 0)) return 0;
   const [x0, y0, x1, y1] = searchBox(ctx, col, row);
@@ -190,6 +204,9 @@ function complete(ctx: GameContext, e: Entity, t: UnitType): void {
     ctx.wake(e);
     e.hp = 0;
   } else {
+    // The foundation's footprint gives way to the building's line of sight (src/t_b_obj.cpp:253-254).
+    unexploreObject(ctx, e, t, true);
+    exploreObject(ctx, e, t, false);
     newSprite(ctx, e, t.standing);
     e.facet = buildingFacet(ctx, e.owner, t.id);
   }
@@ -417,7 +434,7 @@ export function placeUnit(ctx: GameContext, e: Entity, unit: number): Entity | n
           x = add32(e.x, offset(rx2, rx));
           break;
       }
-      if (checkPlacement(ctx, proto, x, y, false, false) === 0) return ctx.create(e.owner, unit, x, y, e.z);
+      if (checkPlacement(ctx, proto, x, y, false, false, e.owner) === 0) return ctx.create(e.owner, unit, x, y, e.z);
       tries++;
     }
     rx = add32(rx, add32(proto.radiusX, proto.radiusX));

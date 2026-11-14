@@ -4,12 +4,13 @@
  * `cancel_research`, `research`), and the effect engine on the player's own masters (§4). The building's research
  * action is in `research.ts`.
  */
-import type { Entity } from './entities';
+import { ObjectState, type Entity } from './entities';
 import { copyUnitType, EFFECTS, TECHS, type EffectCommand, type UnitType } from './units';
 import { add32, div32, f32, i16, mul32, sub32, toInt, u8 } from './num';
 import type { PlayerMasters } from './masters';
 import type { CrtRand } from './rng';
 import { newSprite } from './sprites';
+import { exploreObject, unexploreObject, type VisibilityContext } from './visibility';
 
 /** Tech states (`Tech_Player_Tree::state`, techs.md §2.3). */
 export const TECH_DISABLED = -1;
@@ -42,7 +43,7 @@ export interface TechPlayers extends PlayerMasters {
 }
 
 /** What an effect needs beyond the players' state: the objects it changes, and the RNG their new sprites draw from. */
-export interface TechContext extends TechPlayers {
+export interface TechContext extends TechPlayers, VisibilityContext {
   rng: CrtRand;
   /** The player's object list in update order (`RGE_Player::objects`). */
   objectsOf(owner: number): Entity[];
@@ -240,10 +241,15 @@ function modifyTobj(ctx: TechContext, player: number, c: EffectCommand): void {
 /**
  * Instance side (techs.md §4.4): hit points keep their ratio to the old master's (truncated to an integer); a set
  * facet (code 17) turns a building; code 101 moves the owner's headroom, population and unit count. Line of sight
- * (code 1) re-explores the map, which has no fog of war yet.
+ * (code 1) re-explores an active object with the new radius (`modify`, `modify_delta`, `modify_percent` flag 1,
+ * src/stat_obj.cpp:1728-1774, visibility.md §3.5).
  */
 function modifyObject(ctx: TechContext, e: Entity, old: UnitType, type: number, code: number, d: number): void {
-  if (code === 0) {
+  if (code === 1) {
+    if (e.state !== ObjectState.Active) return;
+    unexploreObject(ctx, e, old, false);
+    exploreObject(ctx, e, old, false, toInt(type === 0 ? d : type === 4 ? add32(old.los, d) : mul32(old.los, d)));
+  } else if (code === 0) {
     const max = old.hitPoints;
     if (type === 0) e.hp = f32(i16(toInt(div32(mul32(d, e.hp), max))));
     else if (type === 4) e.hp = f32(i16(toInt(div32(mul32(add32(d, max), e.hp), max))));
@@ -373,7 +379,8 @@ function copyObj(ctx: TechContext, player: number, dest: number, source: number)
 /**
  * The object side of an upgrade, layer by layer as the original calls them (building, combat, moving, static): a
  * sprite that is the old master's construction, fight, walking, standing or dying sprite becomes the source's.
- * `check_damage_sprites` is not ported (the sim has no damage sprites); nor is the re-explore with the new line of sight.
+ * `check_damage_sprites` is not ported (the sim has no damage sprites). The static layer re-explores an active object
+ * with the source's line of sight (src/stat_obj.cpp:1808-1812).
  */
 function copyObject(ctx: TechContext, e: Entity, old: UnitType, src: UnitType): void {
   const shows = (s: { graphic: number } | null | undefined) => !!s && e.sprite?.graphic === s.graphic;
@@ -383,6 +390,10 @@ function copyObject(ctx: TechContext, e: Entity, old: UnitType, src: UnitType): 
   if (old.masterType === 80) swap(old.building?.construction, src.building?.construction);
   if (old.masterType >= 50) swap(old.combat?.attackSprite, src.combat?.attackSprite);
   if (old.masterType >= 30) swap(old.walking, src.walking);
+  if (e.state === ObjectState.Active) {
+    unexploreObject(ctx, e, old, false);
+    exploreObject(ctx, e, old, false, toInt(src.los));
+  }
   const ratio = div32(e.hp, old.hitPoints);
   const next = shows(old.standing) ? src.standing : shows(old.dying) ? src.dying : null;
   e.hp = mul32(src.hitPoints, ratio);

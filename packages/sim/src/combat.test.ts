@@ -17,7 +17,9 @@ import {
   updateUnitAI,
 } from './unit-ai';
 import { BARRACKS, BOWMAN, CLUBMAN, FLARE, GAZELLE, HOUSE, unitType, VILLAGER } from './units';
+import { refreshSighting } from './visibility';
 import { World, type StartUnit } from './world';
+import { typeOf } from './masters';
 
 const ATTR_KILLS = 20;
 const ATTR_RAZINGS = 43;
@@ -36,6 +38,11 @@ function runUntil(world: World, done: () => boolean, limit = 400): void {
 /** A world of Gaia and two players with these units; ids follow the list order from 1. */
 function world(...units: StartUnit[]): World {
   return new World({ players: 3, units });
+}
+
+/** Each combat object's first update records what its player sees (visibility.md §4.1), as before any unit AI runs. */
+function seeAll(w: World): void {
+  for (const e of w.entities.all()) if (typeOf(w, e).masterType >= 50) refreshSighting(w, e, typeOf(w, e));
 }
 
 /** The context the combat.md vectors step with: 50 ms steps. */
@@ -267,6 +274,7 @@ describe('unit-ai.md §7 Example 2(a): idle target choice', () => {
       { owner: 2, type: VILLAGER, x: 13.5, y: 10.5 },
       { owner: 2, type: BOWMAN, x: 10.5, y: 8 },
     );
+    seeAll(w);
     expect(bestUnitToAttack(w.gameContext(), w.entities.get(1)!, true, false)).toBe(3);
   });
 });
@@ -338,6 +346,7 @@ describe('retaliation and help (unit-ai.md §4.2, §4.4)', () => {
       { owner: 2, type: BOWMAN, x: 15.5, y: 10.5 },
     );
     const helper = w.entities.get(2)!;
+    seeAll(w);
     const ctx = w.gameContext();
     notifyObject(ctx, w.entities.get(1)!, 3, NOTIFY_ATTACKED, 3, 37);
     updateUnitAI(ctx, w.entities.get(1)!, 270);

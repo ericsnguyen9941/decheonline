@@ -14,6 +14,7 @@ import { dropResearch } from './research';
 import { newSprite } from './sprites';
 import { aiStateForAction, setAiState } from './unit-ai';
 import type { SpriteInfo, Task, UnitType } from './units';
+import { exploreObject, unexploreObject } from './visibility';
 
 export const ACTION_GATHER = 5;
 export const ACTION_HUNT = 110;
@@ -125,14 +126,17 @@ function targetTask(ctx: PlayerMasters, t: UnitType, e: Entity, target: Entity |
 }
 
 /**
- * `transform` (src/stat_obj.cpp:1778, src/move_obj.cpp:318, src/act_obj.cpp:91): the unit becomes `next`. Footprint
- * re-stamped, standing sprite, hp scaled to the new maximum, active again, turning state reset, actions deleted.
+ * `transform` (src/stat_obj.cpp:1778, src/move_obj.cpp:318, src/act_obj.cpp:91): the unit becomes `next`. Line of
+ * sight and footprint re-done, standing sprite, hp scaled to the new maximum, active again, turning state reset, actions deleted.
  */
 export function transform(ctx: GameContext, e: Entity, next: UnitType): void {
   const old = typeOf(ctx, e);
   const ratio = div32(e.hp, old.hitPoints);
+  // The line of sight moves to the new master's, active or not (src/stat_obj.cpp:1782-1793).
+  unexploreObject(ctx, e, old, false);
   ctx.pathing.unstamp(e, old);
   e.type = next.id;
+  exploreObject(ctx, e, next, false);
   ctx.pathing.stamp(e, next);
   newSprite(ctx, e, next.standing);
   e.hp = mul32(next.hitPoints, ratio);

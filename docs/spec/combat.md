@@ -463,6 +463,9 @@ died before impact.
 
 ## 6. Line of sight and fog
 
+The port's rules, lifecycle call sites and vectors are in visibility.md;
+this section is the first reading.
+
 ### 6.1 Per-player visible map
 
 Each player has an `RGE_Visible_Map` with one byte per tile

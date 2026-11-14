@@ -130,6 +130,8 @@ export interface UnitType {
   hitPoints: number;
   /** `line_of_sight`, tiles: the unit AI's search radius. */
   los: number;
+  /** `fog_flag`: an attacker may still hit it while its tile is only fogged (combat.md §3.4). */
+  fogFlag: number;
   /** Tiles per second. */
   speed: number;
   radiusX: number;
@@ -278,6 +280,7 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     group: r.group,
     hitPoints: r.hitPoints,
     los: r.los,
+    fogFlag: r.fogFlag,
     speed: r.speed,
     radiusX: r.radius[0],
     radiusY: r.radius[1],

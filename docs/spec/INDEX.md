@@ -105,8 +105,8 @@ Spec: [combat.md](combat.md); sprite animation state, attack damage frame, rando
 | `src/act_misl.cpp` | 5/0/2/0 | `RGE_Action_Missile::update` :154 [L], `intercept` [M] | R2 |
 | `src/misl_obj.cpp` | 10/0/1/0 | `RGE_Missile_Object::update` :56 [M], `missile_move` :77 [L] | R2 |
 | `src/m_mi_obj.cpp` | 14/0/0/0 | `RGE_Master_Missile_Object` | R2 |
-| `src/visible.cpp` | 21/1/4/1 | `RGE_Visible_Map::explore_terrain` :397 [L], `unexplore_terrain` [L], `checksumVisible` :863 [D] | R2 |
-| `src/vis_unit.cpp` | 10/1/2/0 | `Visible_Unit_Manager`, `Visible_Resource_Manager` | R2 |
+| `src/visible.cpp` | 21/1/4/1 | `RGE_Visible_Map::explore_terrain` :397 [L], `unexplore_terrain` [L], `checksumVisible` :863 [D] | visibility.md |
+| `src/vis_unit.cpp` | 10/1/2/0 | `Visible_Unit_Manager`, `Visible_Resource_Manager` | visibility.md |
 | `src/map.cpp` | 54/2/6/2 | `RGE_Map` tiles, terrain, elevation | R2 |
 
 ## Techs, effects
