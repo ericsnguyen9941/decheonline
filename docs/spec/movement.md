@@ -175,6 +175,32 @@ current action:
 4. A negative goal coordinate wraps to 255 when truncated to a byte (decomp
    note at `src/act_move.cpp:154-156`).
 
+### 5.1 Move command (`RGE_Command::do_command_move`, `src/Command.cpp:322`)
+
+Runs after the one `rand()` every command draws (`core.md` §2.4). Objects are
+looked up by id only; no owner check (`src/Command.cpp:60-65`).
+
+- More than one unit listed: over the units that exist, track min/max of x
+  and y starting from 10000 / 0 with an `else if` (a value only updates the
+  max when it did not update the min, `src/Command.cpp:327-353`) and sum x, y
+  in float. If either span exceeds 8.0 tiles, use the single-point order
+  below. Else divide the sums by the listed count (missing ids included,
+  `:358-359`) and send each unit to `(x − avgX) + order.x` (same for y); a
+  result below 0 becomes 1.0, one at or past the map size becomes size − 1.0
+  (`:378-394`). The layout of the group is kept around the clicked point.
+- Otherwise every unit goes to the order point (`:421-442`).
+- Each unit first gets a pathing group of all the *other* listed ids (in
+  list order, `:366-376`, `:429-440`) and `waitingToMove = 1`.
+- `move_to` (`src/act_obj.cpp:111`) offers the order to the current action
+  first; without one it makes `RGE_Action_Move_To(range 0.4)` and makes it
+  the only action. The old action's destructor clears the user waypoints and
+  sets speed 0 (`src/act_move.cpp:75-78`); `first_in_stack` then picks state
+  3 or 13 (§5).
+- `removeAllUserDefinedWaypoints` does not reset `finalUserDefinedWaypoint`
+  (`src/move_obj.cpp:2001-2009`); only `addUserDefinedWaypoint` does. So once
+  a unit's first move has pushed its final waypoint, later plain moves skip
+  §5 step 2's push and search straight to `int(goal)` with no user waypoint.
+
 ## 6. `findPath` (`src/move_obj.cpp:557`, M)
 
 1. `radius_z ≤ 0` (non-colliding): path = [start, goal] without search,
@@ -465,7 +491,13 @@ step from movement, since both draw sites return immediately.
 ## 12. Timing in sim steps
 
 - Everything here runs inside the owning player's object update, once per
-  world step with `world_time_delta > 0` (`core.md` §1.2).
+  world step with `world_time_delta > 0` (`core.md` §1.2). The object list
+  prepends new objects (`RGE_Object_List::add_node`, `src/obj_list.cpp:57-70`)
+  and `update` walks it from the head (`:226-247`), so a player's objects
+  update **newest first**; that order decides who gets the 2 path searches
+  and the order of RNG draws.
+- Creating a moving object draws twice: the static setup draws `r` and
+  reseeds with it (`src/stat_obj.cpp:279-286`), then the facing draw of §9.
 - Distance per step = `world_time_delta × 0.001 × speed`. At the default
   multiplayer step (`core.md` §2.2) and game speed the step length is fixed;
   at higher game speed `world_time_delta` grows, so each step moves farther

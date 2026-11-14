@@ -10,5 +10,8 @@
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "test:golden": "vitest run golden --reporter=verbose"
+  },
+  "devDependencies": {
+    "@aoe/sim": "*"
   }
 }

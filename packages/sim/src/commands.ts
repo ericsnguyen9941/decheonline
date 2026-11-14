@@ -10,7 +10,7 @@ export interface NoopCommand {
 
 /**
  * Determinism probe, not a game rule: spawns an entity owned by the sender at (x, y) with hit points
- * drawn from the RNG, then moves each of the sender's entities one float32 unit step toward (x, y).
+ * drawn from the RNG, then moves each of the sender's non-unit entities one float32 unit step toward (x, y).
  */
 export interface TestCommand {
   type: 'test';
@@ -18,7 +18,21 @@ export interface TestCommand {
   y: number;
 }
 
-export type Command = NoopCommand | TestCommand;
+/**
+ * Move order (`RGE_Command::do_command_move`, docs/spec/movement.md §5.1): the listed units of the sender walk to map
+ * point (x, y), in tiles.
+ */
+export interface MoveCommand {
+  type: 'move';
+  units: number[];
+  x: number;
+  y: number;
+}
+
+/** Most units one move command may list. */
+export const MAX_ORDER_UNITS = 255;
+
+export type Command = NoopCommand | TestCommand | MoveCommand;
 
 /** Validate untrusted input (from the wire). Returns a fresh object with only known fields, or null. */
 export function parseCommand(v: unknown): Command | null {
@@ -31,6 +45,13 @@ export function parseCommand(v: unknown): Command | null {
       const { x, y } = o;
       if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
       return { type: 'test', x, y };
+    }
+    case 'move': {
+      const { units, x, y } = o;
+      if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS) return null;
+      if (!units.every((id) => Number.isInteger(id) && id > 0 && id <= 0x7fffffff)) return null;
+      return { type: 'move', units: [...(units as number[])], x, y };
     }
     default:
       return null;
@@ -78,12 +99,16 @@ export class CommandQueue {
   }
 
   toJSON(): QueuedCommand[] {
-    return this.items.map((item) => ({ ...item, command: { ...item.command } }));
+    return this.items.map((item) => ({ ...item, command: copyCommand(item.command) }));
   }
 
   static fromJSON(items: QueuedCommand[]): CommandQueue {
     const queue = new CommandQueue();
-    queue.items = items.map((item) => ({ ...item, command: { ...item.command } }));
+    queue.items = items.map((item) => ({ ...item, command: copyCommand(item.command) }));
     return queue;
   }
+}
+
+function copyCommand(c: Command): Command {
+  return c.type === 'move' ? { ...c, units: [...c.units] } : { ...c };
 }

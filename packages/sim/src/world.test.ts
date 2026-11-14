@@ -17,7 +17,7 @@ test('snapshot round-trip through JSON restores the same state and the same futu
   const full = runReplay(log);
 
   const half = { ...log, turns: log.turns / 2 };
-  const world = new World({ players: log.players, randomSeed: log.randomSeed });
+  const world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units });
   runReplay(half, world);
   const snapshot = JSON.parse(JSON.stringify(world.snapshot())) as Snapshot;
   const restored = World.restore(snapshot);

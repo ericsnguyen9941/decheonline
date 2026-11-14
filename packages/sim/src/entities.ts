@@ -1,3 +1,4 @@
+import { copyMover, type Mover } from './movement';
 import { f32 } from './num';
 
 /** Simulation object. Float fields hold float32 values (`f32`); ids and integers are 32-bit. */
@@ -11,6 +12,8 @@ export interface Entity {
   y: number;
   z: number;
   hp: number;
+  /** Movement state of a moving unit; absent for other objects. */
+  mover?: Mover;
 }
 
 export type EntityInit = Omit<Entity, 'id'>;
@@ -41,6 +44,7 @@ export class EntityStore {
       z: f32(init.z),
       hp: f32(init.hp),
     };
+    if (init.mover) e.mover = copyMover(init.mover);
     this.byId.set(e.id, e);
     return e;
   }
@@ -63,14 +67,20 @@ export class EntityStore {
   }
 
   toJSON(): { nextId: number; entities: Entity[] } {
-    return { nextId: this.nextId, entities: [...this.byId.values()].map((e) => ({ ...e })) };
+    return { nextId: this.nextId, entities: [...this.byId.values()].map(copyEntity) };
   }
 
   static fromJSON(data: { nextId: number; entities: Entity[] }): EntityStore {
     const store = new EntityStore();
     const sorted = [...data.entities].sort((a, b) => a.id - b.id);
-    for (const e of sorted) store.byId.set(e.id, { ...e });
+    for (const e of sorted) store.byId.set(e.id, copyEntity(e));
     store.nextId = data.nextId;
     return store;
   }
+}
+
+function copyEntity(e: Entity): Entity {
+  const copy = { ...e };
+  if (e.mover) copy.mover = copyMover(e.mover);
+  return copy;
 }
