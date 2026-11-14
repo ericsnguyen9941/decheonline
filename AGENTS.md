@@ -3,11 +3,11 @@
 Browser remake of Age of Empires 1 (target: AoE1 + Rise of Rome 1.0a), deterministic lockstep, 2-player rooms by invite code. npm-workspaces TypeScript monorepo, Node >= 24.
 
 ## Layout
-- `packages/sim` pure deterministic rules: no DOM, no Node, no deps.
+- `packages/sim` pure deterministic rules: no DOM, no Node, no deps. Units: `units.ts` (dat numbers per unit type, checked against the real dat by `packages/data/src/units.golden.test.ts`), `movement.ts` + `pathing.ts` (docs/spec/movement.md; §13 vectors in `movement.test.ts`), `trig.ts` (deterministic atan2/sin/cos); `world.ts` `startingUnits` places 3 Villagers per player.
 - `packages/data` dat reader and typed rule set.
 - `packages/protocol` client/server messages (`messages.ts` types, `codec.ts` validation).
 - `packages/formats` DRS / SLP / palette decoders.
-- `apps/client` Vite + PixiJS (`src/net` relay link, `src/lobby` lobby session + DOM, `src/lockstep` turn loop over `@aoe/sim`, `src/map` isometric map renderer over `@aoe/sim` `TileMap` (`?debug=map&col=&row=` draws the fixed test map without a lobby; `window.__map`), `src/multiplayer.ts` wiring; `?debug=net&speed=20` exposes `window.__game` and `window.__map`; Vite proxies `/ws` and `/assets`). `apps/server` Node + `ws` (`/health`; relay on WebSocket `/ws`, rooms in `src/rooms.ts`).
+- `apps/client` Vite + PixiJS (`src/net` relay link, `src/lobby` lobby session + DOM, `src/lockstep` turn loop over `@aoe/sim`, `src/map` isometric map renderer over `@aoe/sim` `TileMap` (`?debug=map&col=&row=` draws the fixed test map without a lobby; `window.__map`; middle-button drag scrolls), `src/units` unit sprites, selection (left click / box) and right-click move orders, `src/multiplayer.ts` wiring; `?debug=net&speed=20` exposes `window.__game` (units, `issueMove`, selection) and `window.__map`; Vite proxies `/ws` and `/assets`). `apps/server` Node + `ws` (`/health`; relay on WebSocket `/ws`, rooms in `src/rooms.ts`).
 - `tools/` repo scripts (`check-tracked-files.mjs`); `tools/assets-import` (`@aoe/assets-import`) turns an install into the pack in `assets-local/pack/` (format: `src/manifest.ts`; PNG atlas per SLP, one per player owner when it has player colour; `empires.dat` copied). Server serves it at `/assets/*` (env `ASSETS_DIR`), client `src/assets/` loads it (`?debug=assets`). `docs/spec/` reverse-engineering specs. `e2e/` Playwright. `assets-local/` gitignored game files.
 
 Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there is no per-package build step. The client is built by Vite, the server bundled by esbuild into `apps/server/dist/`.

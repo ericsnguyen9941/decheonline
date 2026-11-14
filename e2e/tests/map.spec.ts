@@ -44,9 +44,9 @@ test('the camera scrolls by dragging, by keys and at the screen edge, and stays 
 
   // Drag the map left and up: the camera moves right and down by the same distance.
   await page.mouse.move(box.x + 400, box.y + 225);
-  await page.mouse.down();
+  await page.mouse.down({ button: 'middle' });
   await page.mouse.move(box.x + 300, box.y + 175, { steps: 5 });
-  await page.mouse.up();
+  await page.mouse.up({ button: 'middle' });
   expect(await camera(page)).toEqual({ x: start.x + 100, y: start.y + 50 });
 
   // Keys.

@@ -53,8 +53,8 @@ const KEY_DIRECTIONS: Record<string, [number, number]> = {
 };
 
 /**
- * Camera input: arrow / WASD keys, the pointer at a canvas edge, and dragging with any button (selection and
- * commands will take the buttons they need later). `update` applies the held input; it returns whether the camera moved.
+ * Camera input: arrow / WASD keys, the pointer at a canvas edge, and dragging with the middle button (left selects,
+ * right gives orders). `update` applies the held input; it returns whether the camera moved.
  */
 export class CameraControls {
   private readonly keys = new Set<string>();
@@ -92,6 +92,8 @@ export class CameraControls {
     });
     on(canvas, 'pointerleave', () => (this.pointer = null));
     on(canvas, 'pointerdown', (e: PointerEvent) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
       this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
       canvas.setPointerCapture(e.pointerId);
     });

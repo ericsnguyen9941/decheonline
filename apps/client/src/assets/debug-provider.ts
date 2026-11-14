@@ -1,5 +1,5 @@
 import { Texture } from 'pixi.js';
-import type { AssetProvider, SpriteFrame } from './provider';
+import type { AssetProvider, GraphicInfo, SpriteFrame } from './provider';
 
 const OWNER_COLOURS = ['#808080', '#3b6fd8', '#d83b3b', '#3bb54a', '#d8c43b', '#3bc4c4', '#a43bd8', '#8a8a8a', '#e8892b'];
 
@@ -17,6 +17,10 @@ export class DebugProvider implements AssetProvider {
 
   unitStandingGraphic(unitId: number): number | null {
     return unitId;
+  }
+
+  graphicInfo(): GraphicInfo | null {
+    return null;
   }
 
   async graphicFrames(_graphicId: number, owner = 1): Promise<SpriteFrame[]> {

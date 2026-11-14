@@ -17,6 +17,12 @@ interface Window {
     hash(turn: number): number | undefined;
     applied(): { type: string }[][];
     entityOwners(): number[];
+    player(): number;
+    units(): { id: number; owner: number; type: number; x: number; y: number; col: number; row: number; facet: number; moving: boolean }[];
+    issueMove(units: number[], x: number, y: number): void;
+    selection(): number[] | null;
+    unitScreenPos(id: number): { x: number; y: number } | null;
+    packSprites(): number;
   };
 }
 

@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
 import { slpImagePath, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
-import type { AssetProvider, SpriteFrame } from './provider';
+import type { AssetProvider, GraphicInfo, SpriteFrame } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -28,6 +28,12 @@ class PackProvider implements AssetProvider {
 
   unitStandingGraphic(unitId: number): number | null {
     return this.manifest.units[unitId]?.standingGraphic ?? null;
+  }
+
+  graphicInfo(graphicId: number): GraphicInfo | null {
+    const g = this.manifest.graphics[graphicId];
+    if (!g?.slp) return null;
+    return { frameCount: g.frameCount, angleCount: g.angleCount, mirroringMode: g.mirroringMode, frameDuration: g.frameDuration };
   }
 
   async graphicFrames(graphicId: number, owner = 1): Promise<SpriteFrame[]> {

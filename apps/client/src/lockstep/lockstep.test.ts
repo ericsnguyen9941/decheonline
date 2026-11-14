@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { ClientMessage, ServerMessage } from '@aoe/protocol';
 import { TURN_MS } from '@aoe/protocol';
-import { World } from '@aoe/sim';
+import { startingUnits, World } from '@aoe/sim';
 import type { Link } from '../net/link';
 import { Lockstep, type Timers } from './lockstep';
 
@@ -84,7 +84,7 @@ describe('lockstep', () => {
 
   test('applies both batches like a World fed the same input', () => {
     const { link, timers, lockstep } = setup();
-    const reference = new World({ players: 3, randomSeed: start.seed });
+    const reference = new World({ players: 3, randomSeed: start.seed, units: startingUnits(3) });
     const test = { type: 'test', x: 5, y: 6 } as const;
     for (let turn = 0; turn < 12; turn++) {
       const batches = [
@@ -98,7 +98,7 @@ describe('lockstep', () => {
       timers.fire();
     }
     expect(lockstep.applied.map((c) => c.length)).toEqual([1, 1]);
-    expect([...lockstep.world.entities.all()].map((e) => e.owner)).toEqual([1, 2]);
+    expect([...lockstep.world.entities.all()].filter((e) => !e.mover).map((e) => e.owner)).toEqual([1, 2]);
   });
 
   test('desync and ended stop the loop and notify', () => {

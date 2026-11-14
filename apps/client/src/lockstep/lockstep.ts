@@ -1,4 +1,4 @@
-import { COMMAND_DELAY_TURNS, STEP_MS, stepsInTurn, World, type Command } from '@aoe/sim';
+import { COMMAND_DELAY_TURNS, STEP_MS, startingUnits, stepsInTurn, World, type Command } from '@aoe/sim';
 import { TURN_MS, type EndReason, type TurnBatch } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
@@ -61,7 +61,8 @@ export class Lockstep {
     this.link = link;
     this.timers = timers;
     this.paceScale = start.turnMs / TURN_MS / speed;
-    this.world = new World({ players: start.playerCount + 1, randomSeed: start.seed });
+    const players = start.playerCount + 1;
+    this.world = new World({ players, randomSeed: start.seed, units: startingUnits(players) });
     this.unsubscribe = link.onMessage((m) => {
       if (this.stopped) return;
       if (m.t === 'turn') {
@@ -86,6 +87,11 @@ export class Lockstep {
   /** Turn the next executed turn will be. */
   get turn(): number {
     return this.world.turn;
+  }
+
+  /** Wall time the loop spends on `turn` before running the next one. */
+  turnMs(turn: number): number {
+    return stepsInTurn(turn) * STEP_MS * this.paceScale;
   }
 
   /** Queue a command; it goes out in the next batch and executes COMMAND_DELAY_TURNS later on both clients. */
@@ -122,6 +128,6 @@ export class Lockstep {
       this.timer = undefined;
       this.gateOpen = true;
       this.pump();
-    }, stepsInTurn(turn) * STEP_MS * this.paceScale);
+    }, this.turnMs(turn));
   }
 }
