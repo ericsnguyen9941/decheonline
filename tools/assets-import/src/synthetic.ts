@@ -18,12 +18,12 @@ export const SYNTHETIC = {
   playerValue: 2,
   /** Graphic 2 has no SLP in the install. */
   missingGraphic: 2,
-  /** Terrain 0 and 1: 2 frames of 16x8, one palette index each. */
+  /** Terrain 0 and 1: 2 diamond frames of 64x32 (the real tile size), one palette index each. Terrain 0 is a 1x2 variant grid. */
   terrains: [
     { slp: 15000, index: 60 },
     { slp: 15001, index: 90 },
   ],
-  terrainFrame: [16, 8],
+  terrainFrame: [64, 32],
 } as const;
 
 const fillRow = (...commands: number[]) => ({ left: 0, right: 0, commands: [...commands, 0x0f] });
@@ -40,12 +40,18 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
       ]),
     },
   ]);
-  const terrainRow = (index: number) => Array.from({ length: 8 }, () => fillRow(0x07, 16, index));
+  const [tileW, tileH] = SYNTHETIC.terrainFrame;
+  const terrainRows = (index: number) =>
+    Array.from({ length: tileH }, (_, y) => {
+      const w = 4 * (y < tileH / 2 ? y + 1 : tileH - y);
+      const edge = (tileW - w) / 2;
+      return { left: edge, right: edge, commands: [0x07, w, index, 0x0f] };
+    });
   const terrain = buildDrs(
     SYNTHETIC.terrains.map(({ slp, index }) => ({
       type: 'slp',
       id: slp,
-      data: buildSlp([{ width: 16, rows: terrainRow(index) }, { width: 16, rows: terrainRow(index + 1) }]),
+      data: buildSlp([{ width: tileW, rows: terrainRows(index) }, { width: tileW, rows: terrainRows(index + 1) }]),
     })),
   );
   const interfac = buildDrs([{ type: 'bina', id: 50500, data: syntheticPalette() }]);
@@ -55,5 +61,7 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'data', 'graphics.drs'), graphics);
   await writeFile(join(dir, 'data', 'Terrain.drs'), terrain);
   await writeFile(join(dir, 'data', 'Interfac.drs'), interfac);
-  await writeFile(join(dir, 'data2', 'empires.dat'), writeDat(buildSyntheticDat()));
+  const dat = buildSyntheticDat();
+  dat.terrainBlock.terrains[0]!.terrainDimensions = [1, 2];
+  await writeFile(join(dir, 'data2', 'empires.dat'), writeDat(dat));
 }

@@ -32,6 +32,10 @@ export class DebugProvider implements AssetProvider {
     return [{ texture, hotspotX: 10, hotspotY: 32 }];
   }
 
+  terrainLayout(): { rows: number; cols: number } {
+    return { rows: 1, cols: 1 };
+  }
+
   async terrainFrames(terrainId: number): Promise<SpriteFrame[]> {
     const texture = draw(65, 33, (g) => {
       g.fillStyle = `hsl(${(terrainId * 47) % 360} 45% 38%)`;
@@ -43,6 +47,6 @@ export class DebugProvider implements AssetProvider {
       g.closePath();
       g.fill();
     });
-    return [{ texture, hotspotX: 32, hotspotY: 16 }];
+    return [{ texture, hotspotX: 0, hotspotY: 0 }];
   }
 }

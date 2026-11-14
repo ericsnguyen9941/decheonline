@@ -90,3 +90,16 @@ test('the other player sees "Opponent left" when someone leaves mid-game', async
   await expect(host.getByTestId('opponent-left')).toBeVisible();
   await expect(host.getByTestId('opponent-left')).toContainText('Opponent left');
 });
+
+test('both players see the same map, and it is part of the synced hash', async ({ browser }) => {
+  const [host, guest] = await startGame(browser);
+  for (const page of [host, guest]) await page.waitForFunction(() => window.__map !== undefined && window.__map.drawnTiles() > 0);
+  const maps = await Promise.all([host, guest].map((p) => p.evaluate(() => ({ ...window.__map!, camera: window.__map!.camera() }))));
+  expect(maps[0]!.mapHash).toBe(maps[1]!.mapHash);
+  expect([maps[0]!.width, maps[0]!.height]).toEqual([maps[1]!.width, maps[1]!.height]);
+  expect(maps[0]!.camera).toEqual(maps[1]!.camera);
+  for (const page of [host, guest]) await page.waitForFunction(() => window.__game!.turn() > 10);
+  const hashes = await Promise.all([host, guest].map((p) => p.evaluate(() => window.__game!.hash(10))));
+  expect(hashes[0]).toBeDefined();
+  expect(hashes[0]).toBe(hashes[1]);
+});

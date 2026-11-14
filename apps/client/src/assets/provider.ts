@@ -16,4 +16,6 @@ export interface AssetProvider {
   graphicFrames(graphicId: number, owner?: number): Promise<SpriteFrame[]>;
   /** Every frame (tile variant) of a dat terrain's tile set. */
   terrainFrames(terrainId: number): Promise<SpriteFrame[]>;
+  /** Flat-tile variants of a terrain: a `rows` x `cols` grid at the start of its frames (RGE_View::get_tile_picture). */
+  terrainLayout(terrainId: number): { rows: number; cols: number };
 }

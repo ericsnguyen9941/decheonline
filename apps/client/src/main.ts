@@ -1,7 +1,9 @@
 import { Application } from 'pixi.js';
 import { createAssetProvider } from './assets';
 import { renderAssetsDebug, type DebugViewReport } from './assets/debug-view';
+import { exposeMapDebug, MapView } from './map';
 import { startMultiplayer } from './multiplayer';
+import { createTestMap } from '@aoe/sim';
 import { GAME_TITLE } from './title';
 
 declare global {
@@ -33,9 +35,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (params.get('debug') === 'map') {
+    // The fixed test map without a lobby; `col` and `row` pick the tile in the middle of the view.
+    const view = await MapView.create(app, createTestMap(), await createAssetProvider());
+    const debug = exposeMapDebug(view);
+    if (params.has('col') && params.has('row')) debug.centerOnTile(Number(params.get('col')), Number(params.get('row')));
+    app.canvas.dataset.assetsSource = view.source;
+    return;
+  }
+
   const lobbyHost = document.getElementById('multiplayer');
   if (!lobbyHost) throw new Error('missing #multiplayer element');
-  await startMultiplayer(lobbyHost, { debug: params.get('debug') === 'net', speed: Number(params.get('speed') ?? 1) || 1 });
+  await startMultiplayer(lobbyHost, app, { debug: params.get('debug') === 'net', speed: Number(params.get('speed') ?? 1) || 1 });
 }
 
 void main();

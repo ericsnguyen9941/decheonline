@@ -1,5 +1,8 @@
+import type { Application } from 'pixi.js';
+import { createAssetProvider } from './assets';
 import { Lockstep, showEndDialog } from './lockstep';
 import { LobbyView, Session } from './lobby';
+import { exposeMapDebug, MapView } from './map';
 import { connect } from './net/link';
 
 /** What `?debug=net` exposes as `window.__game`, for tests and manual poking. */
@@ -28,8 +31,8 @@ export interface MultiplayerOptions {
   speed: number;
 }
 
-/** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts. */
-export async function startMultiplayer(host: HTMLElement, { debug, speed }: MultiplayerOptions): Promise<void> {
+/** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -37,12 +40,16 @@ export async function startMultiplayer(host: HTMLElement, { debug, speed }: Mult
 
   let lockstep: Lockstep | undefined;
   let panel: HTMLElement | undefined;
+  let mapView: MapView | undefined;
 
   const end = (kind: 'desync' | 'peer-left', detail: string) => {
     lockstep?.stop();
     lockstep = undefined;
     panel?.remove();
+    mapView?.destroy();
+    mapView = undefined;
     window.__game = undefined;
+    window.__map = undefined;
     session.finish();
     showEndDialog(kind, detail, () => undefined);
   };
@@ -57,6 +64,13 @@ export async function startMultiplayer(host: HTMLElement, { debug, speed }: Mult
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
     game.onEnded = () => end('peer-left', 'Your opponent left the game.');
     if (debug) panel = debugPanel(host, game);
+    void createAssetProvider()
+      .then((provider) => MapView.create(app, game.world.map, provider))
+      .then((view) => {
+        if (lockstep !== game) return view.destroy();
+        mapView = view;
+        if (debug) exposeMapDebug(view);
+      });
   };
 }
 

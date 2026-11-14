@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 1;
+export const PACK_VERSION = 2;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border';
@@ -43,6 +43,12 @@ export interface PackGraphic {
 export interface PackTerrain {
   name: string;
   slp: string | null;
+  /**
+   * Flat-tile variants form a `rows` x `cols` grid at the start of the SLP; the tile at map row r, column c
+   * uses frame `(r % rows) * cols + (c % cols)` (RGE_View::get_tile_picture, src/view.cpp:3535).
+   */
+  rows: number;
+  cols: number;
 }
 
 export interface PackUnit {

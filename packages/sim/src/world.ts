@@ -2,6 +2,7 @@ import { CommandQueue, type Command, type QueuedCommand } from './commands';
 import { EntityStore, type Entity } from './entities';
 import { Hasher } from './hash';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
+import { createTestMap, TileMap, type MapSnapshot } from './map';
 import { CrtRand } from './rng';
 
 /** Base time per step: the network frame granularity (src/com_spd.cpp:11-25). Never wall time. */
@@ -25,11 +26,13 @@ export interface WorldOptions {
   players: number;
   /** Stored seed the first step reseeds from. */
   randomSeed?: number;
+  /** The tile map; defaults to the fixed test map. */
+  map?: TileMap;
 }
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 1;
+  version: 2;
   players: number;
   turn: number;
   worldTime: number;
@@ -40,6 +43,7 @@ export interface Snapshot {
   deltaSeconds: number;
   entities: { nextId: number; entities: Entity[] };
   queue: QueuedCommand[];
+  map: MapSnapshot;
 }
 
 const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1 };
@@ -65,12 +69,14 @@ export class World {
    */
   deltaSeconds = 0;
   entities = new EntityStore();
+  map: TileMap;
   private queue = new CommandQueue();
   private readonly rng = new CrtRand();
 
   constructor(options: WorldOptions) {
     this.players = options.players;
     this.randomSeed = options.randomSeed ?? DEFAULT_RANDOM_SEED;
+    this.map = options.map ?? createTestMap();
     this.playerTimeDelta = new Array<number>(this.players).fill(0);
   }
 
@@ -147,6 +153,7 @@ export class World {
     for (const d of this.playerTimeDelta) h.u32(d);
     h.u32(this.entities.nextEntityId).u32(this.entities.size);
     for (const e of this.entities.all()) h.u32(e.id).u32(e.owner).u32(e.type).f32(e.x).f32(e.y).f32(e.z).f32(e.hp);
+    this.map.hashInto(h);
     const queued = this.queue.toJSON();
     h.u32(queued.length);
     for (const q of queued) {
@@ -158,7 +165,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 1,
+      version: 2,
       players: this.players,
       turn: this.turn,
       worldTime: this.worldTime,
@@ -169,12 +176,13 @@ export class World {
       deltaSeconds: this.deltaSeconds,
       entities: this.entities.toJSON(),
       queue: this.queue.toJSON(),
+      map: this.map.toJSON(),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 1) throw new Error(`unsupported snapshot version ${String(s.version)}`);
-    const w = new World({ players: s.players, randomSeed: s.randomSeed });
+    if (s.version !== 2) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    const w = new World({ players: s.players, randomSeed: s.randomSeed, map: TileMap.fromJSON(s.map) });
     w.turn = s.turn;
     w.worldTime = s.worldTime;
     w.gameSpeed = s.gameSpeed;

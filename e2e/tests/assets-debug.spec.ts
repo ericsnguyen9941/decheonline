@@ -31,8 +31,8 @@ test('debug view renders the sprites imported from a synthetic install', async (
   // Terrain 0, frames 0 and 1: solid palette indices 60 and 61.
   const [first, second] = view.terrainRects as Rect[];
   expect(first).toMatchObject({ width: SYNTHETIC.terrainFrame[0], height: SYNTHETIC.terrainFrame[1] });
-  expect(await sample(page, first!.x + 8, first!.y + 4)).toEqual(colour(SYNTHETIC.terrains[0].index));
-  expect(await sample(page, second!.x + 8, second!.y + 4)).toEqual(colour(SYNTHETIC.terrains[0].index + 1));
+  expect(await sample(page, first!.x + first!.width / 2, first!.y + first!.height / 2)).toEqual(colour(SYNTHETIC.terrains[0].index));
+  expect(await sample(page, second!.x + second!.width / 2, second!.y + second!.height / 2)).toEqual(colour(SYNTHETIC.terrains[0].index + 1));
 
   // The unit: left half palette index 100; right half player colour value 2 of owner 2 = index 34.
   const unit = view.unitRect as Rect;

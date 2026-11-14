@@ -9,6 +9,8 @@ const baseURL = `http://localhost:${clientPort}`;
 export default defineConfig({
   testDir: './tests',
   globalSetup: './global-setup.ts',
+  // One baseline per screenshot, not per OS: the synthetic art is flat colour, so engines agree.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: 'list',

@@ -25,6 +25,8 @@ test('maps graphics, terrains and units by their dat ids', () => {
   expect(manifest.graphics[SYNTHETIC.standingGraphic]).toMatchObject({ slp: key, frameCount: 10, angleCount: 2 });
   expect(manifest.graphics[SYNTHETIC.missingGraphic]?.slp).toBeNull();
   expect(manifest.terrains[0]?.slp).toBe(slpKey('terrain', 15000));
+  expect(manifest.terrains[0]).toMatchObject({ rows: 1, cols: 2 });
+  expect(manifest.terrains[1]).toMatchObject({ rows: 1, cols: 1 });
   expect(manifest.units[SYNTHETIC.unitId]?.standingGraphic).toBe(SYNTHETIC.standingGraphic);
 });
 

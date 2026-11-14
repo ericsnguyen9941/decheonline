@@ -155,7 +155,8 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>): PackManifes
   });
   dat.terrainBlock.terrains.slice(0, dat.terrainsUsed).forEach((t, id) => {
     const key = slpKey('terrain', t.slp);
-    manifest.terrains[id] = { name: t.name, slp: t.slp >= 0 && slps[key] ? key : null };
+    const [rows = 1, cols = 1] = t.terrainDimensions;
+    manifest.terrains[id] = { name: t.name, slp: t.slp >= 0 && slps[key] ? key : null, rows: Math.max(rows, 1), cols: Math.max(cols, 1) };
   });
   dat.civs[1]?.units.forEach((u, id) => {
     if (u) manifest.units[id] = { name: u.name, standingGraphic: u.standingGraphic };

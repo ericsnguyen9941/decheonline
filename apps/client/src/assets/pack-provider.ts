@@ -34,6 +34,11 @@ class PackProvider implements AssetProvider {
     return this.slpFrames(this.manifest.graphics[graphicId]?.slp ?? null, owner);
   }
 
+  terrainLayout(terrainId: number): { rows: number; cols: number } {
+    const t = this.manifest.terrains[terrainId];
+    return { rows: t?.rows ?? 1, cols: t?.cols ?? 1 };
+  }
+
   async terrainFrames(terrainId: number): Promise<SpriteFrame[]> {
     return this.slpFrames(this.manifest.terrains[terrainId]?.slp ?? null, 1);
   }
