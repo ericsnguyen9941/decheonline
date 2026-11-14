@@ -59,6 +59,8 @@ core.md §3.
 
 ## Movement, pathing
 
+Spec: [movement.md](movement.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/move_obj.cpp` | 47/2/2/0 | `RGE_Moving_Object::findPath` :557 [M] (48 `RGE_Moving_Object` methods) | R2 |
