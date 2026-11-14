@@ -1,13 +1,17 @@
 /**
- * Attacking, as far as hunting needs it (docs/spec/combat.md §2-§5, sprites.md §5): the attack action, the hit roll,
- * damage, and missiles. Every float store is rounded to float32; trig goes through `trig.ts`.
+ * Attacking (docs/spec/combat.md §2-§5, sprites.md §5): the attack action (a hunt's sub-action or a unit's own), the
+ * hit roll, damage to units, buildings and other objects, missiles and the attack flare. Every float store is rounded
+ * to float32; trig goes through `trig.ts`. Fog of war is not ported, so `ready_to_attack` skips its visibility test.
  */
+import { isBuilding } from './buildings';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
+import { deleteActions, transform } from './gather';
 import { ActionResult, currentSprite, endAction, facetOf, maximumSpeed, startMoveTo, updateMover } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
 import { framePassed, newSprite } from './sprites';
 import { atan2, cos, sin } from './trig';
+import { AI_ACTION_ATTACK, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
 import { spriteInfo, unitType, type SpriteInfo } from './units';
 
 /** `RGE_Action_Attack` states (combat.md §3.2). */
@@ -68,8 +72,17 @@ const MISSILE_SPAN = f32(3);
 const MISSILE_DZ = f32(-0.1);
 /** `OBJECT_GROUP_CIVILIAN`: the only killers whose kills keep their food (`produceWhenKilledBy`). */
 const GROUP_CIVILIAN = 4;
-/** Player attribute 0x14: kills. */
+/** Player attribute 0x14: kills; 0x2B: razings. */
 const ATTR_KILLS = 20;
+const ATTR_RAZINGS = 43;
+/** `MASTER_OBJECT_MAN`: what a civilian becomes to attack (src/com_obj.cpp:548). */
+const MAN = 83;
+/** `MASTER_OBJECT_FLARE`: the minimap flare a ranged attack shows its target's owner. */
+const FLARE = 112;
+/** Archer groups and tower ids that take a building down 0.1 hp a hit at the least (src/t_b_obj.cpp:784-793). */
+const ARCHER_GROUPS = [0, 23, 26, 36];
+const TOWERS = [79, 69, 199, 383, 380];
+const BUILDING_MIN_LOSS_ARCHER = f32(0.1);
 
 function length32(dx: number, dy: number): number {
   return sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));
@@ -164,7 +177,7 @@ export function startAttack(
 }
 
 /** `RGE_Action_Attack::set_state` (src/act_atak.cpp:195): every change first deletes the sub-action. */
-function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, state: number): void {
+export function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, state: number): void {
   if (e.mover?.action) endAction(e.mover);
   a.state = state;
   const c = unitType(e.type).combat!;
@@ -261,6 +274,7 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
     case ATTACK_TARGET_LOST:
       if (e.sprite?.looped) {
         a.target = -1;
+        if (!a.sub) notifyObject(ctx, e, e.id, NOTIFY_ACTION_COMPLETED, AI_ACTION_ATTACK);
         setAttackState(ctx, e, a, ATTACK_DONE);
         return a.sub ? ActionResult.TargetLost : ActionResult.Completed;
       }
@@ -273,9 +287,11 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
           return ActionResult.Continue;
         case ActionResult.Failed:
           setAttackState(ctx, e, a, ATTACK_FAILED);
+          if (!a.sub) notifyObject(ctx, e, e.id, NOTIFY_ACTION_FAILED, AI_ACTION_ATTACK);
           return ActionResult.Failed;
         case ActionResult.TargetInvalid:
           setAttackState(ctx, e, a, ATTACK_INVALID);
+          if (!a.sub) notifyObject(ctx, e, e.id, NOTIFY_TARGET_INVALID, AI_ACTION_ATTACK);
           return ActionResult.TargetInvalid;
         default:
           return ActionResult.Continue;
@@ -316,16 +332,23 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
       return ActionResult.Continue;
     }
     case ATTACK_FAILED:
+      // Every update in state 13 tells the unit, sub-action or not (src/act_atak.cpp:399-401).
+      notifyObject(ctx, e, e.id, NOTIFY_ACTION_FAILED, AI_ACTION_ATTACK);
       return ActionResult.Failed;
     default:
       return ActionResult.Continue;
   }
 }
 
-/** `RGE_Combat_Object::attack(target, attacker)` (combat.md §4.2): melee hits now, a missile user throws. */
-function launch(ctx: GameContext, e: Entity, target: Entity): void {
+/**
+ * `TRIBE_Combat_Object::attack` then `RGE_Combat_Object::attack(target, attacker)` (combat.md §4.1-§4.2): a missile
+ * user aiming at a player's object first shows that player a flare at its own position; melee hits now, a missile user
+ * throws.
+ */
+export function launch(ctx: GameContext, e: Entity, target: Entity): void {
   const t = unitType(e.type);
   const c = t.combat!;
+  if (c.projectileUnitId >= 0 && target.owner > 0) ctx.create(target.owner, FLARE, e.x, e.y, e.z);
   if (c.projectileUnitId < 0) {
     doAttack(ctx, e, target);
     return;
@@ -358,7 +381,7 @@ function launch(ctx: GameContext, e: Entity, target: Entity): void {
 }
 
 /** `do_attack` (combat.md §4.3) without blast: one hit roll, then damage on a hit. */
-function doAttack(ctx: GameContext, attacker: Entity, target: Entity): void {
+export function doAttack(ctx: GameContext, attacker: Entity, target: Entity): void {
   const c = unitType(attacker.type).combat!;
   const chance = Math.trunc((ctx.rng.rand() * 100) / 0x7fff);
   if (chance > c.accuracy) return;
@@ -386,7 +409,11 @@ function armouredDamage(attacker: Entity, target: Entity, modifier: number): num
   return total;
 }
 
-/** `damage` on the target (combat.md §2.1; static objects `src/stat_obj.cpp:2161`). */
+/**
+ * `damage` on the target (combat.md §2.1): static objects (`src/stat_obj.cpp:2161`), buildings
+ * (`TRIBE_Building_Object::damage`, `src/t_b_obj.cpp:771`) and other combat objects (`TRIBE_Combat_Object::damage`,
+ * `src/t_c_obj.cpp:212`).
+ */
 function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: number): void {
   const tt = unitType(target.type);
   if (!tt.combat) {
@@ -401,15 +428,67 @@ function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: nu
     return;
   }
   const before = target.hp;
+  if (isBuilding(tt)) {
+    if (before <= 0) return;
+    combatDamage(ctx, target, attacker, modifier);
+    const at = unitType(attacker.type);
+    const least = ARCHER_GROUPS.includes(at.group) || TOWERS.includes(at.id) ? BUILDING_MIN_LOSS_ARCHER : 1;
+    if (sub32(before, target.hp) < least) target.hp = sub32(before, least);
+    if (target.owner > 0 && target.hp < 1) {
+      const razings = ctx.attributes[attacker.owner]!;
+      razings[ATTR_RAZINGS] = add32(razings[ATTR_RAZINGS]!, 1);
+    }
+    return;
+  }
   if (before < 1) return;
-  target.hp = sub32(target.hp, armouredDamage(attacker, target, modifier));
-  if (target.hp < 1) target.hp = 0;
+  combatDamage(ctx, target, attacker, modifier);
   if (target.hp < 1 && unitType(attacker.type).group !== GROUP_CIVILIAN) target.heldAmount = 0;
   if (sub32(before, target.hp) < 1) target.hp = sub32(before, 1);
   if (target.owner > 0 && target.hp < 1) {
     const kills = ctx.attributes[attacker.owner]!;
     kills[ATTR_KILLS] = add32(kills[ATTR_KILLS]!, 1);
   }
+}
+
+/**
+ * `RGE_Combat_Object::damage` (src/com_obj.cpp:292): take the armoured damage, tell the target's unit AI who hit it and
+ * the hp left (as an int, before the clamp), then clamp below 1 to 0.
+ */
+function combatDamage(ctx: GameContext, target: Entity, attacker: Entity, modifier: number): void {
+  target.hp = sub32(target.hp, armouredDamage(attacker, target, modifier));
+  notifyObject(ctx, target, attacker.id, NOTIFY_ATTACKED, attacker.id, Math.trunc(target.hp));
+  if (target.hp < 1) target.hp = 0;
+}
+
+/**
+ * `RGE_Combat_Object::attack(targetID, unconditional)` (src/com_obj.cpp:520), the unit AI's way in: keep an attack
+ * already on the target, else a civilian becomes a Villager (`MASTER_OBJECT_MAN`) and a new attack with the weapon range
+ * replaces every action. False without a target.
+ */
+export function combatAttack(ctx: GameContext, e: Entity, target: Entity, unconditional: boolean): boolean {
+  const top = e.attack && !e.work ? e.attack : null;
+  if (top && top.target === target.id) {
+    if (!unconditional) return true;
+    return attackWork(ctx, e, target);
+  }
+  if (!e.mover || !unitType(e.type).combat) return false;
+  if (unitType(e.type).group === GROUP_CIVILIAN) transform(ctx, e, unitType(MAN));
+  const c = unitType(e.type).combat!;
+  deleteActions(e);
+  startAttack(ctx, e, target, null, null, c.range, false);
+  return true;
+}
+
+/** `RGE_Action_Attack::work` (src/act_atak.cpp:405): the same target keeps a running attack; any other is chased. */
+export function attackWork(ctx: GameContext, e: Entity, target: Entity): boolean {
+  const a = e.attack!;
+  if (target.id === a.target && (a.state === ATTACK_MOVING || a.state === ATTACK_WAITING || a.state === ATTACK_ATTACKING)) return true;
+  a.target = target.id;
+  a.x = target.x;
+  a.y = target.y;
+  a.z = target.z;
+  setAttackState(ctx, e, a, ATTACK_MOVING);
+  return true;
 }
 
 /** `RGE_Action_Missile::set_state(3)` (combat.md §5.2): aim at the target and fly (state 4). */

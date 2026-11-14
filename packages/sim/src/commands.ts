@@ -73,10 +73,20 @@ export interface CancelCommand {
   target: number;
 }
 
+/**
+ * Attack order: the listed units of the sender attack object `target` (the right-click on an enemy; the original sends
+ * it as a work order, `do_command_work`, at the target's position).
+ */
+export interface AttackCommand {
+  type: 'attack';
+  units: number[];
+  target: number;
+}
+
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand;
+export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand;
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
@@ -130,6 +140,12 @@ export function parseCommand(v: unknown): Command | null {
       const { target } = o;
       if (!isId(target)) return null;
       return { type: 'cancel', target };
+    }
+    case 'attack': {
+      const { units, target } = o;
+      if (!isId(target)) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'attack', units: [...(units as number[])], target };
     }
     default:
       return null;

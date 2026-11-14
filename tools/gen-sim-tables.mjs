@@ -18,7 +18,7 @@ register('data:text/javascript,' + encodeURIComponent(hook), import.meta.url);
  * Unit types the sim runs; the dead objects and projectiles they spawn are added. Villager task types, Town Center,
  * Barracks, House, Granary, Storage Pit, Clubman, spear, gazelle, elephant, mines, forage, trees.
  */
-const ROOTS = [83, 118, 119, 120, 122, 123, 124, 251, 259, 109, 12, 70, 68, 103, 73, 100, 65, 48, 66, 102, 59, 134, 141, 143];
+const ROOTS = [83, 118, 119, 120, 122, 123, 124, 251, 259, 109, 12, 70, 68, 103, 73, 4, 299, 112, 100, 65, 48, 66, 102, 59, 134, 141, 143];
 
 const dir = process.env.AOE1_DIR;
 if (!dir) {

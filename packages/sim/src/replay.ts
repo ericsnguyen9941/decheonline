@@ -1,6 +1,6 @@
 import type { Command } from './commands';
 import { CrtRand } from './rng';
-import { BARRACKS, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
+import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
 import { startingObjects, World, type StartUnit } from './world';
 
 /** Everything needed to rerun a game: start state plus every batch, keyed by the turn it was issued on. */
@@ -27,21 +27,36 @@ export function runReplay(
   return hashes;
 }
 
+/** Two Clubmen and a Bowman per player, facing each other across the middle of the test map, after the starting objects. */
+const SKIRMISH: readonly StartUnit[] = [
+  { owner: 1, type: CLUBMAN, x: 18.5, y: 18.5 },
+  { owner: 1, type: CLUBMAN, x: 19.5, y: 18.5 },
+  { owner: 1, type: BOWMAN, x: 18.5, y: 17.5 },
+  { owner: 2, type: CLUBMAN, x: 21.5, y: 20.5 },
+  { owner: 2, type: CLUBMAN, x: 22.5, y: 20.5 },
+  { owner: 2, type: BOWMAN, x: 22.5, y: 21.5 },
+];
+
 /**
- * A fixed log for determinism tests: Gaia plus two players with the test map's starting objects (`startingObjects`),
+ * A fixed log for determinism tests: Gaia plus two players with the test map's starting objects (`startingObjects`)
+ * and a skirmish of two Clubmen and a Bowman each in the middle of the map, close enough to find each other,
  * each issuing 0-3 `test` commands per turn at coordinates that are not exact float32 values, so every step exercises
  * float32 rounding. Now and then, spaced so gatherers fill up and drop off, builders finish and units train between
  * orders: a `move` of some of their Villagers (and sometimes one of the other side's, which is ignored) to a random
  * point of the map, water included; a `work` order, mostly on a resource near their base, else on a random starting
  * object (resources, either Town Center, the other side's units) or a missing one; a `build` of a House or Barracks near their Town Center (some spots are taken);
- * a `queue` of Villagers (or a Clubman, or an unqueue) at their Town Center or now and then the other's; and rarely a
- * `cancel` of an object made during the game.
+ * a `queue` of Villagers (or a Clubman, or an unqueue) at their Town Center or now and then the other's; an `attack` by
+ * some of their Villagers and of the units made during the game on one of the other side's Villagers, mostly, else its
+ * Town Center or a unit made during the game (drawn from a second generator, so the other orders stay as they were);
+ * and rarely a `cancel` of an object made during the game.
  */
 export function sampleReplay(turns = 120, seed = 20260101): ReplayLog {
   const players = 3;
-  const units = startingObjects(players);
+  const units = [...startingObjects(players), ...SKIRMISH];
   const gen = new CrtRand();
   gen.srand(seed);
+  const war = new CrtRand();
+  war.srand(seed + 7919);
   // Starting objects get ids 1.. in `units` order.
   const villagers = units.flatMap((u, i) => (u.type === VILLAGER ? [{ id: i + 1, owner: u.owner }] : []));
   const centers = units.flatMap((u, i) => (u.type === TOWN_CENTER ? [{ id: i + 1, owner: u.owner, x: u.x, y: u.y }] : []));
@@ -79,6 +94,15 @@ export function sampleReplay(turns = 120, seed = 20260101): ReplayLog {
         const unit = gen.rand() % 6 === 0 ? CLUBMAN : VILLAGER;
         const count = gen.rand() % 5 === 0 ? -1 : 1 + (gen.rand() % 3);
         commands.push({ type: 'queue', building, unit, count });
+      }
+      if (war.rand() % 24 === 0) {
+        const made = Array.from({ length: 1 + (war.rand() % 6) }, () => units.length + 1 + (war.rand() % 40));
+        const ids = [...new Set([...villagers.filter((v) => v.owner === player && war.rand() % 3 === 0).map((v) => v.id), ...made])];
+        const enemies = villagers.filter((v) => v.owner !== player);
+        const roll = war.rand() % 8;
+        const target =
+          roll < 5 ? enemies[war.rand() % enemies.length]!.id : roll < 6 ? centers.find((c) => c.owner !== player)!.id : units.length + 1 + (war.rand() % 40);
+        commands.push({ type: 'attack', units: ids, target });
       }
       if (gen.rand() % 60 === 0) commands.push({ type: 'cancel', target: units.length + 1 + (gen.rand() % 40) });
       if (commands.length > 0) batches.push({ turn, player, commands });

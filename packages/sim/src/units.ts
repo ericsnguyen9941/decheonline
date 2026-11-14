@@ -128,6 +128,8 @@ export interface UnitType {
   /** Dat class (`object_group`). */
   group: number;
   hitPoints: number;
+  /** `line_of_sight`, tiles: the unit AI's search radius. */
+  los: number;
   /** Tiles per second. */
   speed: number;
   radiusX: number;
@@ -215,6 +217,9 @@ export const HOUSE = 70;
 export const GRANARY = 68;
 export const STORAGE_PIT = 103;
 export const CLUBMAN = 73;
+export const BOWMAN = 4;
+export const SCOUT = 299;
+export const FLARE = 112;
 export const GAZELLE = 65;
 export const ELEPHANT = 48;
 export const MINE_GOLD = 66;
@@ -265,6 +270,7 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     masterType: r.masterType,
     group: r.group,
     hitPoints: r.hitPoints,
+    los: r.los,
     speed: r.speed,
     radiusX: r.radius[0],
     radiusY: r.radius[1],

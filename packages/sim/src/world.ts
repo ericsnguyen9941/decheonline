@@ -1,6 +1,7 @@
 import { build, cancelBuild, checkDestructables, checkPlacement, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
 import {
   CommandQueue,
+  type AttackCommand,
   type BuildCommand,
   type CancelCommand,
   type Command,
@@ -21,6 +22,7 @@ import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
 import { checkForNewTech, newTechStates, type MasterChange } from './techs';
+import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState } from './unit-ai';
 import { ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TOWN_CENTER, TREES, UNIT_TYPES, unitType, VILLAGER } from './units';
 
 /** Base time per step: the network frame granularity (src/com_spd.cpp:11-25). Never wall time. */
@@ -142,7 +144,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 5;
+  version: 6;
   players: number;
   turn: number;
   worldTime: number;
@@ -150,6 +152,8 @@ export interface Snapshot {
   gameSpeed: number;
   playerTurn: number;
   playerTimeDelta: number[];
+  playerUpdateTime: number[];
+  alertCooldown: number[];
   deltaSeconds: number;
   entities: { nextId: number; entities: Entity[] };
   queue: QueuedCommand[];
@@ -167,7 +171,7 @@ export interface Snapshot {
   masters: Record<number, MasterChange>[];
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in whole turns of fixed-size steps
@@ -184,6 +188,10 @@ export class World {
   gameSpeed = f32(1);
   playerTurn = 0;
   playerTimeDelta: number[];
+  /** `TRIBE_Player::update_time`: seconds (float32) towards the player's next once-a-second bookkeeping. */
+  playerUpdateTime: number[];
+  /** `TRIBE_Player::update_count`: seconds before the player hears another under-attack alert. */
+  alertCooldown: number[];
   /**
    * `world_time_delta_seconds`. Commands run before a step recomputes it (src/world.cpp:1270-1272), so they
    * see the previous step's value: it is state, snapshotted and hashed.
@@ -212,6 +220,8 @@ export class World {
     this.randomSeed = options.randomSeed ?? DEFAULT_RANDOM_SEED;
     this.map = options.map ?? createTestMap();
     this.playerTimeDelta = new Array<number>(this.players).fill(0);
+    this.playerUpdateTime = new Array<number>(this.players).fill(0);
+    this.alertCooldown = new Array<number>(this.players).fill(0);
     this.attributes = Array.from({ length: this.players }, (_, p) => (p === 0 ? new Array<number>(ATTRIBUTE_COUNT).fill(0) : [...START_ATTRIBUTES]));
     this.awake = Array.from({ length: this.players }, () => []);
     this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) });
@@ -265,9 +275,9 @@ export class World {
   /**
    * `make_new_obj` + `setup` (src/stat_obj.cpp:200-286): place the object, show its standing sprite (one draw if it
    * has a random start frame, sprites.md §4), load its own starting resource, give the owner its flag 1/2 storages,
-   * draw one `rand()` and reseed with it (economy.md §7); a moving object then draws its facing (movement.md §11).
-   * Animated objects, and static ones without hit points, join the owner's updated list at the front; living trees
-   * sleep.
+   * draw one `rand()` and reseed with it (economy.md §7); a moving object then draws its facing (movement.md §11). Units
+   * and buildings then get their unit AI, which draws its idle timeouts (unit-ai.md §1.2). Animated objects, and static
+   * ones without hit points, join the owner's updated list at the front; living trees sleep.
    */
   createObject(owner: number, type: number, x: number, y: number, z: number): Entity {
     const t = unitType(type);
@@ -290,6 +300,7 @@ export class World {
     giveStorages(this.attributes[owner]!, t, 1, [1, 2]);
     this.rng.srand(this.rng.rand());
     if (e.mover) initialFacing(e, e.mover, this.rng);
+    if (t.masterType === 70 || t.masterType === 80) e.ai = createUnitAI(this.gameContext(), t);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));
     return e;
@@ -308,6 +319,9 @@ export class World {
       techs: this.techs,
       masters: this.masters,
       worldTime: this.worldTime,
+      playerTurn: this.playerTurn,
+      playerTimeDelta: this.playerTimeDelta,
+      alertCooldown: this.alertCooldown,
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
@@ -351,6 +365,14 @@ export class World {
       const ctx = this.gameContext();
       for (let i = 0; i < this.players; i++) {
         this.playerTimeDelta[i] = u32(this.playerTimeDelta[i]! + delta);
+        // `TRIBE_Player::update`: once a game second, before its objects, the alert cooldown runs down (Gaia's has none).
+        if (i > 0) {
+          this.playerUpdateTime[i] = add32(this.playerUpdateTime[i]!, this.deltaSeconds);
+          while (this.playerUpdateTime[i]! > 1) {
+            this.playerUpdateTime[i] = sub32(this.playerUpdateTime[i]!, 1);
+            if (this.alertCooldown[i]! > 0) this.alertCooldown[i]!--;
+          }
+        }
         // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates
         // from its head. Objects created or woken during the walk go in front of it and wait for the next step.
         ctx.attempts = 0;
@@ -378,6 +400,8 @@ export class World {
         return this.doCommandMove(player, command);
       case 'work':
         return this.doCommandWork(player, command);
+      case 'attack':
+        return this.doCommandAttack(player, command);
       case 'build':
         return this.doCommandBuild(player, command);
       case 'queue':
@@ -454,8 +478,13 @@ export class World {
         if (ty < 0) ty = 1;
         else if (ty >= height) ty = sub32(height, 1);
       }
-      // `move_to`: a gather or hunt action takes the order itself (src/act_obj.cpp:111-113).
-      if (!workMoveTo(this.gameContext(), e, tx, ty)) orderMove(e, tx, ty, this.rng);
+      // `move_to`: a gather or hunt action takes the order itself (src/act_obj.cpp:111-113); otherwise the walk is the
+      // only action.
+      if (!workMoveTo(this.gameContext(), e, tx, ty)) {
+        e.attack = null;
+        orderMove(e, tx, ty, this.rng);
+      }
+      setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, tx, ty, 0);
     });
   }
 
@@ -476,6 +505,16 @@ export class World {
       e.mover.waitingToMove = true;
       orderWork(ctx, e, target, command.x, command.y);
     });
+  }
+
+  /**
+   * Attack order: the right-click on an enemy, which the original sends as a work order on the target at its position
+   * (`do_command_work`, then the unit's attack task). A missing target is an order on nothing.
+   */
+  private doCommandAttack(player: number, command: AttackCommand): void {
+    const target = this.entities.get(command.target);
+    if (!target || !UNIT_TYPES.has(target.type)) return;
+    this.doCommandWork(player, { type: 'work', units: command.units, target: target.id, x: target.x, y: target.y });
   }
 
   /**
@@ -541,6 +580,8 @@ export class World {
       .u32(this.playerTurn)
       .f32(this.deltaSeconds);
     for (const d of this.playerTimeDelta) h.u32(d);
+    for (const t of this.playerUpdateTime) h.f32(t);
+    for (const c of this.alertCooldown) h.u32(c);
     h.u32(this.entities.nextEntityId).u32(this.entities.size);
     for (const e of this.entities.all()) hashValue(h, e);
     hashValue(h, this.attributes);
@@ -561,14 +602,14 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
-      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel') hashValue(h, q.command);
+      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack') hashValue(h, q.command);
     }
     return h.digest();
   }
 
   snapshot(): Snapshot {
     return {
-      version: 5,
+      version: 6,
       players: this.players,
       turn: this.turn,
       worldTime: this.worldTime,
@@ -576,6 +617,8 @@ export class World {
       gameSpeed: this.gameSpeed,
       playerTurn: this.playerTurn,
       playerTimeDelta: [...this.playerTimeDelta],
+      playerUpdateTime: [...this.playerUpdateTime],
+      alertCooldown: [...this.alertCooldown],
       deltaSeconds: this.deltaSeconds,
       entities: this.entities.toJSON(),
       queue: this.queue.toJSON(),
@@ -590,7 +633,7 @@ export class World {
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 5) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 6) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -603,6 +646,8 @@ export class World {
     w.gameSpeed = s.gameSpeed;
     w.playerTurn = s.playerTurn;
     w.playerTimeDelta = [...s.playerTimeDelta];
+    w.playerUpdateTime = [...s.playerUpdateTime];
+    w.alertCooldown = [...s.alertCooldown];
     w.deltaSeconds = s.deltaSeconds;
     w.entities = EntityStore.fromJSON(s.entities);
     w.queue = CommandQueue.fromJSON(s.queue);

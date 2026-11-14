@@ -14,6 +14,8 @@ export interface SimUnitRecord {
   masterType: number;
   group: number;
   hitPoints: number;
+  /** `line_of_sight`, tiles. */
+  los: number;
   speed: number;
   radius: [number, number, number];
   clearance: [number, number];

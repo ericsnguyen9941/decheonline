@@ -4,6 +4,7 @@ import type { WorkAction } from './gather';
 import { copyMover, type Mover } from './movement';
 import { f32 } from './num';
 import type { ActiveSprite } from './sprites';
+import type { UnitAI } from './unit-ai';
 
 /** `object_state` values (include/stat_obj.h). */
 export const ObjectState = {
@@ -44,7 +45,7 @@ export interface Entity {
   turnTowardsTime?: number;
   /** Gather or hunt action at the top of the action list. */
   work?: WorkAction | null;
-  /** Attack action: a hunt's sub-action. */
+  /** Attack action: the unit's own, or a hunt's sub-action when `work` is set. */
   attack?: AttackAction | null;
   /** A missile's flight action. */
   missile?: MissileAction | null;
@@ -56,6 +57,8 @@ export interface Entity {
   queue?: QueueRecord[];
   /** Buildings: the queue's train action (`production_queue_actions`), null when none. */
   train?: TrainAction | null;
+  /** Combat objects: the unit AI (`unitAIValue`), absent for groups without one. */
+  ai?: UnitAI | null;
 }
 
 export type EntityInit = Pick<Entity, 'owner' | 'type' | 'x' | 'y' | 'z' | 'hp'> & Partial<Omit<Entity, 'id'>>;
@@ -134,5 +137,13 @@ function copyEntity(e: Entity): Entity {
   if (e.missile) copy.missile = { ...e.missile };
   if (e.queue) copy.queue = e.queue.map((r) => ({ ...r }));
   if (e.train) copy.train = { ...e.train };
+  if (e.ai) {
+    copy.ai = {
+      ...e.ai,
+      attackers: [...e.ai.attackers],
+      notes: e.ai.notes.map((n) => ({ ...n })),
+      orders: e.ai.orders.map((o) => ({ ...o })),
+    };
+  }
   return copy;
 }

@@ -53,7 +53,7 @@ class CountingRand extends CrtRand {
 }
 
 describe('random draws of the Villager sprites (sprites.md §4)', () => {
-  test('creating a Villager draws its standing start frame, the setup fence and its facing', () => {
+  test('creating a Villager draws its standing start frame, the setup fence, its facing and its unit AI idle timeout', () => {
     const seed = 777;
     const world = new World({ players: 2, randomSeed: seed, units: [villager(1, 10.5, 10.5)] });
     const r = new CrtRand();
@@ -61,6 +61,7 @@ describe('random draws of the Villager sprites (sprites.md §4)', () => {
     r.rand(); // standing sprite (sequence type 7: animated, facings, random start)
     r.srand(r.rand()); // static setup fence
     r.rand(); // facing
+    r.rand(); // unit AI adjusted idle timeout (unit-ai.md §1.2)
     expect(world.randomSeed).toBe(r.rand());
   });
 
@@ -149,9 +150,9 @@ describe('move orders on the test map', () => {
   });
 });
 
-describe('fuzz: random move, work, build, queue and cancel orders', () => {
+describe('fuzz: random move, work, build, queue, attack and cancel orders', () => {
   for (const seed of [1, 2, 3, 4]) {
-    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained`, () => {
+    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained, units killed`, () => {
       const log = sampleReplay(240, seed);
       const first = runReplay(log);
       expect(runReplay(log)).toEqual(first);
@@ -194,6 +195,8 @@ describe('fuzz: random move, work, build, queue and cancel orders', () => {
       expect(deposits).toBeGreaterThan(0);
       expect(built.size).toBeGreaterThan(0);
       expect(trained.size).toBeGreaterThan(0);
+      // Kills (player attribute 20) only count combat deaths of a player's objects, not cancels.
+      expect(world.attributes[1]![20]! + world.attributes[2]![20]!).toBeGreaterThan(0);
     });
   }
 });

@@ -46,6 +46,7 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
     masterType: u.type,
     group: u.class,
     hitPoints: u.hitPoints,
+    los: f(u.lineOfSight),
     speed: f(u.speed ?? 0),
     radius: [f(u.collisionSize[0]!), f(u.collisionSize[1]!), f(u.collisionSize[2]!)],
     clearance: [f(u.clearanceSize[0]!), f(u.clearanceSize[1]!)],

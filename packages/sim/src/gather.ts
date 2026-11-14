@@ -4,16 +4,22 @@
  * Only human players exist so far: the computer-player branches are not ported.
  */
 import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } from './build';
-import { distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
+import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { ActionResult, currentSprite, endAction, facetOf, MOVE_RANGE, startMoveTo, updateMover } from './movement';
 import { add32, div32, f32, mul32, sub32 } from './num';
 import { newSprite } from './sprites';
+import { aiStateForAction, setAiState } from './unit-ai';
 import { UNIT_TYPES, unitType, type SpriteInfo, type Task, type UnitType } from './units';
 
 export const ACTION_GATHER = 5;
 export const ACTION_HUNT = 110;
+/** `RGE_Action_Attack` and the task that makes one (`create_task_action` case 7, src/act_list.cpp:137). */
+export const ACTION_ATTACK = 9;
+const TASK_ATTACK = 7;
+/** `RGE_Action_Move_To`. */
+export const ACTION_MOVE = 1;
 
 /** Gather/hunt states (economy.md §3.2, §3.6). */
 export const WORK_DONE = 1;
@@ -70,8 +76,9 @@ function checkTask(task: Task, e: Entity, target: Entity): boolean {
       if (target.owner !== e.owner) return false;
       break;
     case 2:
-      // Another player's object passes only for a player this one has a relation with; Gaia's and its own never do.
-      return false;
+      // Another player's object, for any relation but self: every other player is an enemy. Gaia's never passes.
+      if (target.owner === 0 || target.owner === e.owner) return false;
+      break;
     case 3:
       if (target.owner !== 0) return false;
       break;
@@ -119,7 +126,7 @@ function targetTask(t: UnitType, e: Entity, target: Entity | undefined): number 
  * `transform` (src/stat_obj.cpp:1778, src/move_obj.cpp:318, src/act_obj.cpp:91): the unit becomes `next`. Footprint
  * re-stamped, standing sprite, hp scaled to the new maximum, active again, turning state reset, actions deleted.
  */
-function transform(ctx: GameContext, e: Entity, next: UnitType): void {
+export function transform(ctx: GameContext, e: Entity, next: UnitType): void {
   const old = unitType(e.type);
   const ratio = div32(e.hp, old.hitPoints);
   ctx.pathing.unstamp(e, old);
@@ -164,27 +171,65 @@ export function orderWork(ctx: GameContext, e: Entity, target: Entity | undefine
       }
     }
   }
+  const action = startTask(ctx, e, t, task, target, f32(x), f32(y));
+  // `setCurrentOrder` / `setCurrentAction` / `setCurrentTarget` with the clicked point, then `setTaskedByPlayer`.
+  const [order, aiAction] = aiStateForAction(action);
+  setAiState(e, order, aiAction, target ? target.id : -1, x, y, 0);
+  if (e.ai) e.ai.notes = [];
+}
+
+/**
+ * The action part of `work2`: the current action takes the order when it runs the same task (`action_work`) or
+ * attacks the same target; otherwise the task's action replaces every action, and without one the unit walks there.
+ * Returns the action type now at the top.
+ */
+function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, target: Entity | undefined, x: number, y: number): number {
   const w = e.work;
   if (w && task !== -1 && w.task === task) {
-    if (w.type === ACTION_BUILD) return buildWork(ctx, e, w, target, x, y);
-    if (workRetarget(ctx, e, w, target, f32(x), f32(y))) return;
+    if (w.type === ACTION_BUILD) {
+      buildWork(ctx, e, w, target, x, y);
+      return w.type;
+    }
+    if (workRetarget(ctx, e, w, target, x, y)) return w.type;
   }
+  if (e.attack && !e.work && target && e.attack.target === target.id && attackWork(ctx, e, target)) return ACTION_ATTACK;
   const kind = task === -1 ? -1 : t.action!.tasks[task]!.actionType;
   deleteActions(e);
-  if (kind === ACTION_BUILD) {
-    const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x: f32(x), y: f32(y), z: 0 };
+  if (kind === ACTION_BUILD || kind === ACTION_GATHER || kind === ACTION_HUNT) {
+    const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x, y, z: 0 };
     e.work = a;
-    buildFirstInStack(ctx, e, a);
-    return;
+    if (kind === ACTION_BUILD) buildFirstInStack(ctx, e, a);
+    else firstInStack(ctx, e, a);
+    return kind;
   }
-  if (kind === ACTION_GATHER || kind === ACTION_HUNT) {
-    const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x: f32(x), y: f32(y), z: 0 };
-    e.work = a;
-    firstInStack(ctx, e, a);
-    return;
+  if (kind === TASK_ATTACK && target && t.combat) {
+    // A task attack uses the task's sprites and work range (src/act_list.cpp:137-150).
+    const k = t.action!.tasks[task]!;
+    startAttack(ctx, e, target, k.moving, k.proceeding, k.workRange, false);
+    return ACTION_ATTACK;
   }
-  // No task, or one this port does not run yet (attack, repair, ...): `move_to` the target or the point.
-  startMoveTo(e, target ?? null, f32(x), f32(y), 0, MOVE_RANGE, null, false, ctx.rng);
+  // No task, or one this port does not run yet (repair, ...): `move_to` the target or the point.
+  startMoveTo(e, target ?? null, x, y, 0, MOVE_RANGE, null, false, ctx.rng);
+  return ACTION_MOVE;
+}
+
+/**
+ * `gather` / `hunt` / `build` on the object for the unit AI (src/t_c_obj.cpp:498, 611): the current action of that kind
+ * takes the new target; otherwise the unit's own task for the target, if it is of that kind, replaces every action.
+ * The port does not swap the unit type here.
+ */
+export function aiWork(ctx: GameContext, e: Entity, target: Entity, kind: number): boolean {
+  const w = e.work;
+  if (w && w.type === kind) {
+    if (kind === ACTION_BUILD) buildWork(ctx, e, w, target, target.x, target.y);
+    else workRetarget(ctx, e, w, target, target.x, target.y);
+    return true;
+  }
+  const t = unitType(e.type);
+  const task = targetTask(t, e, target);
+  if (task === -1 || t.action!.tasks[task]!.actionType !== kind) return false;
+  startTask(ctx, e, t, task, target, target.x, target.y);
+  return true;
 }
 
 /**

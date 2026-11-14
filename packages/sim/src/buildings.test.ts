@@ -125,12 +125,14 @@ describe('economy.md §8.3 vector E3: Town Center trains a villager and places i
     const man = world.entities.get(2)!;
     expect([man.type, man.x, man.y]).toEqual([VILLAGER, 21.621126174926758, 22.209999084472656]);
     // srand(14)'s stream: 84 (side 0), 27125 (offset), then the Villager's setup: 9192 for its standing sprite's start
-    // frame, the next value for the setup fence (reseeded with it), then one draw for its facing.
+    // frame, the next value for the setup fence (reseeded with it), one draw for its facing, one for its unit AI's idle
+    // timeout.
     const stream = new CrtRand();
     stream.srand(14);
     expect([stream.rand(), stream.rand(), stream.rand()]).toEqual([84, 27125, 9192]);
     const after = new CrtRand();
     after.srand(stream.rand());
+    after.rand();
     after.rand();
     expect(ctx.rng.rand()).toBe(after.rand());
     expect([attributes[ATTR_HEADROOM], attributes[ATTR_POPULATION]]).toEqual([3, 1]);
