@@ -4,6 +4,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildSyntheticDat, writeDat } from '@aoe/data';
 import { buildDrs, buildPe, buildSlp, syntheticPalette } from '@aoe/formats/fixtures';
+import { buildBmp8, buildTileEdgeFile, EDGE_COUNT, MINIMAP_BMP_ID } from './map-art';
+import type { TileSpan } from './manifest';
 
 /** What the synthetic install contains, for assertions on the imported pack. */
 export const SYNTHETIC = {
@@ -31,7 +33,26 @@ export const SYNTHETIC = {
   /** language.dll's strings; languagex.dll replaces `overriddenString`. */
   strings: { 10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age' },
   overriddenString: [5131, 'Villager'],
+  /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */
+  minimap: { width: 220, height: 114 },
+  /** Every edge draws the whole tile plain; edge 1 also leaves `blackSpan` black. */
+  blackSpan: [16, 0, 3] as TileSpan,
 } as const;
+
+/** The whole flat tile: rows 0-32 of a 65x33 box, as TILEEDGE.DAT's edge 0 `normal_draw`. */
+export const WHOLE_TILE: TileSpan[] = Array.from({ length: 33 }, (_, dy) => {
+  const half = 2 * (16 - Math.abs(dy - 16));
+  return [dy, 32 - half, 32 + half];
+});
+
+/** Interfac.drs bina 50401: palette index 0xFF inside a diamond, 0 elsewhere. */
+function syntheticMapBmp(): Uint8Array {
+  const { width, height } = SYNTHETIC.minimap;
+  return buildBmp8(width, height, (x, y) => {
+    const half = Math.round((width / 2) * (1 - Math.abs(y - 57) / 57));
+    return y > 0 && Math.abs(x + 0.5 - width / 2) < half ? 0xff : 0;
+  });
+}
 
 const fillRow = (...commands: number[]) => ({ left: 0, right: 0, commands: [...commands, 0x0f] });
 
@@ -64,6 +85,7 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   const four = (...commands: number[]) => Array.from({ length: 4 }, () => fillRow(...commands));
   const interfac = buildDrs([
     { type: 'bina', id: 50500, data: syntheticPalette() },
+    { type: 'bina', id: MINIMAP_BMP_ID, data: syntheticMapBmp() },
     { type: 'slp', id: SYNTHETIC.interfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
     { type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
   ]);
@@ -75,6 +97,9 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'data', 'Terrain.drs'), terrain);
   await writeFile(join(dir, 'data', 'Interfac.drs'), interfac);
   await writeFile(join(dir, 'data2', 'Interfac.drs'), interfac2);
+  const none = Array.from({ length: EDGE_COUNT }, (): TileSpan[] => []);
+  await writeFile(join(dir, 'data2', 'TileEdge.Dat'), buildTileEdgeFile([none.map(() => WHOLE_TILE), none]));
+  await writeFile(join(dir, 'data2', 'BlkEdge.Dat'), buildTileEdgeFile([none.map((_, e) => (e === 1 ? [SYNTHETIC.blackSpan] : []))]));
   await writeFile(join(dir, 'language.dll'), buildPe(SYNTHETIC.strings));
   await writeFile(join(dir, 'languagex.dll'), buildPe({ [SYNTHETIC.overriddenString[0]]: SYNTHETIC.overriddenString[1] }));
   const dat = buildSyntheticDat();

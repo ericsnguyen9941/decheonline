@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { importAssets } from './import';
 import { slpImagePath, slpKey, type PackManifest } from './manifest';
-import { SYNTHETIC, writeSyntheticInstall } from './synthetic';
+import { SYNTHETIC, WHOLE_TILE, writeSyntheticInstall } from './synthetic';
 
 let root: string;
 let install: string;
@@ -38,6 +38,24 @@ test('imports interface slps, a data2 Interfac.drs overriding the base one, and 
   expect(unit.outline).toHaveLength(3);
   expect(unit).toMatchObject({ nameId: expect.any(Number), creationId: expect.any(Number), level: expect.any(Number) });
   expect(unit.displayed).toHaveLength(4);
+});
+
+test("imports map.bmp's lines, the tile edges, the minimap colours and each unit's minimap and doppelganger fields", () => {
+  const shape = manifest.minimap!;
+  expect(shape).toMatchObject({ width: 220, height: 114, startY: 1 });
+  expect(shape.lines).toHaveLength(113);
+  // The widest line is the middle row; each line is centred.
+  expect(shape.lines[56]).toEqual([0, 220]);
+  for (const [x, len] of shape.lines) expect(x * 2 + len).toBe(220);
+  const edges = manifest.tileEdges!;
+  expect(edges.normal).toHaveLength(47);
+  expect(edges.normal[0]).toEqual(WHOLE_TILE);
+  expect(edges.fog[3]).toEqual([]);
+  expect(edges.black[1]).toEqual([SYNTHETIC.blackSpan]);
+  expect(edges.black[0]).toEqual([]);
+  expect(manifest.playerColours).toEqual([0, 16]);
+  expect(manifest.terrains[0]?.minimap).toHaveLength(3);
+  expect(manifest.units[SYNTHETIC.unitId]).toMatchObject({ minimap: [1, 0], doppelganger: expect.any(Number) });
 });
 
 test("imports each tech's name and research button ids, icon and button location", () => {

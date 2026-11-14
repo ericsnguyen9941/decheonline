@@ -1,5 +1,5 @@
-import { Graphics, Sprite, type Application, type Texture, type Ticker } from 'pixi.js';
-import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { Graphics, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
+import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, TILE_FOGGED, TILE_VISIBLE, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
 import { canBuild } from '../hud/commands';
@@ -10,6 +10,7 @@ import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import { composeGraphic, GROUND_LAYER, splitsShadow, type PartSet } from './composite';
 import { facingFrame } from './facing';
+import { Doppelgangers, fogDraw, type Doppelganger } from './fog-objects';
 import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
 import { alignBuilding } from './placement';
 
@@ -47,7 +48,7 @@ interface Art {
   pack: boolean;
 }
 
-/** Where a unit is drawn: sim positions only change once per turn, so the drawing slides between them. */
+/** Where a unit is drawn: sim positions only change once per step, so the drawing slides between them. */
 interface Track {
   sprite: Sprite;
   fromX: number;
@@ -88,6 +89,12 @@ function facetOf(e: Entity, angles: number): number {
   return e.sprite && spriteInfo(e.sprite.graphic).hasFacings ? e.id % angles : 0;
 }
 
+/** The facet a doppelganger copied (`facet`), picked as `facetOf` picks its object's. */
+function copyFacet(c: Doppelganger, angles: number): number {
+  if (c.facet !== undefined) return c.facet;
+  return spriteInfo(c.graphic).hasFacings ? c.id % angles : 0;
+}
+
 export interface UnitLayerOptions {
   app: Application;
   view: MapView;
@@ -97,8 +104,8 @@ export interface UnitLayerOptions {
   player: number;
   /** Send a command through the lockstep. */
   issue: (command: Command) => void;
-  /** Wall-clock length of a turn, to spread its movement over. */
-  turnMs: (turn: number) => number;
+  /** Wall-clock time from the step just run to the next one, to spread its movement over. */
+  stepMs: () => number;
   /** Placing a building started (its master id) or ended (null). */
   onPlacement?: (unit: number | null) => void;
   /** The rollover text for the object under the pointer (the attack cursor's), or null when it goes. */
@@ -117,6 +124,13 @@ export interface Ghost {
 const HIT_ALPHA = 8;
 /** Pixels a tile of height (`world_z`) raises a drawn object: `tile_half_height` (src/stat_obj.cpp:1637). */
 const Z_PIXELS = 16;
+/** `draw_level` of a graphic without pack data: above the low layers an unexplored tile still draws. */
+const DEFAULT_LAYER = 20;
+
+/** A sim step's number: `turn` and `turn_step` together. */
+function stepOf(world: World): number {
+  return world.turn * 0x10000 + world.turnStep;
+}
 
 /**
  * Draws every sim object on the map layer (units, buildings, trees, mines, animals, carcasses) with its real sprite
@@ -147,7 +161,12 @@ export class UnitLayer {
   private readonly tick: (ticker: Ticker) => void;
   private readonly cleanup: (() => void)[] = [];
   private readonly alpha = new WeakMap<Texture, { pixels: Uint8ClampedArray; width: number } | null>();
-  private seenTurn: number;
+  private seenStep: number;
+  /** The player's remembered trees, mines and bushes, and their sprites. */
+  readonly doppelgangers: Doppelgangers;
+  private readonly copySprites = new Map<number, Sprite>();
+  /** Each texture with every other pixel black, by the parity of its top-left screen pixel. */
+  private readonly foggedTextures = new WeakMap<Texture, (Texture | null | undefined)[]>();
   private press: { x: number; y: number; boxing: boolean } | null = null;
   /** Master id of the building being placed (`TRIBE_GAME_MODE_PLACE_BUILDING`), or null. */
   private placing: number | null = null;
@@ -159,7 +178,10 @@ export class UnitLayer {
   private attackCursor = 'crosshair';
 
   constructor(private readonly o: UnitLayerOptions) {
-    this.seenTurn = o.world.turn;
+    this.seenStep = stepOf(o.world);
+    this.doppelgangers = new Doppelgangers(o.player, (type) => o.provider.mapArt()?.doppelganger(type) ?? 0);
+    // Each player sees the map through its own fog (`RGE_Player::visible`), in every mode.
+    o.view.setFog({ state: (col, row) => o.world.tileVisibility(o.player, col, row), version: () => stepOf(o.world) });
     this.highlight.zIndex = Number.MAX_SAFE_INTEGER;
     o.view.layer.addChild(this.highlight);
     this.ghostSprite.zIndex = Number.MAX_SAFE_INTEGER - 1;
@@ -271,6 +293,7 @@ export class UnitLayer {
     this.o.app.canvas.style.cursor = '';
     for (const fn of this.cleanup) fn();
     for (const t of this.tracks.values()) t.sprite.destroy();
+    for (const s of this.copySprites.values()) s.destroy();
     this.highlight.destroy();
     this.ghostSprite.destroy();
     this.box.destroy();
@@ -301,9 +324,11 @@ export class UnitLayer {
   private draw(): void {
     const { world, view } = this.o;
     const now = performance.now();
-    const newTurn = world.turn !== this.seenTurn;
-    const duration = newTurn ? this.o.turnMs(world.turn - 1) : 0;
-    this.seenTurn = world.turn;
+    const step = stepOf(world);
+    const newStep = step !== this.seenStep;
+    const duration = newStep ? this.o.stepMs() : 0;
+    this.seenStep = step;
+    if (newStep) this.doppelgangers.update(world);
     const width = world.map.width;
     const alive = new Set<number>();
     for (const e of world.entities.all()) {
@@ -315,7 +340,7 @@ export class UnitLayer {
         t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, pack: false, shadow: null };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
-      } else if (newTurn) {
+      } else if (newStep) {
         const at = this.drawnAt(t, now);
         Object.assign(t, { fromX: at.x, fromY: at.y, toX: e.x, toY: e.y, start: now, duration });
       }
@@ -337,39 +362,38 @@ export class UnitLayer {
       let lift = Math.round(e.z * Z_PIXELS);
       if (graphicInfo && graphicInfo.deltas.length === 0 && graphicInfo.layer <= GROUND_LAYER) lift = 0;
       const split = lift !== 0 && graphicInfo !== null && splitsShadow(this.o.provider, graphicInfo);
-      const art = this.loadArt(graphic, e.owner, split ? 'air' : 'all');
-      const shadow = split ? this.loadArt(graphic, e.owner, 'ground') : null;
+      const tile = this.tileState(e.x, e.y);
+      const fog = fogDraw(type.fogFlag, e.state, tile, graphicInfo?.layer ?? DEFAULT_LAYER, type.fogFlag === 4 && this.doppelgangers.onTile(Math.floor(e.x), Math.floor(e.y)));
+      const art = fog === 'hidden' ? null : this.loadArt(graphic, e.owner, split ? 'air' : 'all');
+      const shadow = split && art ? this.loadArt(graphic, e.owner, 'ground') : null;
       if (t.shadow) t.shadow.visible = false;
       t.sprite.visible = art !== null;
       if (!art) continue;
       t.pack = art.pack;
       const info = art.info;
-      let step = 0;
+      let frameStep = 0;
       if (info && info.frameCount > 1) {
         const last = info.frameCount - 1;
         // A play-once sprite (the death animation) holds its last frame; the sim says when it has stopped.
         const once = (spriteInfo(e.sprite.graphic).flags & 8) !== 0 && !slide;
-        step = once && e.sprite.flag === 0 ? last : t.startFrame + (info.frameDuration > 0 ? Math.floor((now - t.animStart) / 1000 / info.frameDuration) : 0);
-        step = once ? Math.min(step, last) : step % info.frameCount;
+        frameStep = once && e.sprite.flag === 0 ? last : t.startFrame + (info.frameDuration > 0 ? Math.floor((now - t.animStart) / 1000 / info.frameDuration) : 0);
+        frameStep = once ? Math.min(frameStep, last) : frameStep % info.frameCount;
       }
       const pick = info
-        ? facingFrame(facetOf(e, info.angleCount), step, info.angleCount, info.frameCount, info.mirroringMode)
+        ? facingFrame(facetOf(e, info.angleCount), frameStep, info.angleCount, info.frameCount, info.mirroringMode)
         : { index: 0, flipped: false };
       const frame = art.frames[pick.index] ?? art.frames[0]!;
-      t.sprite.texture = frame.texture;
-      t.sprite.scale.x = pick.flipped ? -1 : 1;
-      t.sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - lift - frame.hotspotY);
+      this.place(t.sprite, frame, pick.flipped, pos.x, pos.y - lift, fog === 'fogged');
       // Above every terrain tile; nearer the bottom of the screen draws later.
       t.sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
       if (shadow) {
         const s = (t.shadow ??= view.layer.addChild(new Sprite()));
-        const f = shadow.frames[pick.index] ?? shadow.frames[0]!;
-        s.texture = f.texture;
-        s.position.set(pos.x - f.hotspotX, pos.y - f.hotspotY);
+        this.place(s, shadow.frames[pick.index] ?? shadow.frames[0]!, false, pos.x, pos.y, fog === 'fogged');
         s.zIndex = t.sprite.zIndex - 1;
         s.visible = true;
       }
     }
+    this.drawDoppelgangers();
     for (const [id, t] of this.tracks) {
       if (alive.has(id)) continue;
       t.sprite.destroy();
@@ -381,6 +405,96 @@ export class UnitLayer {
     }
     this.drawHighlight();
     this.drawGhost();
+  }
+
+  /** What the player knows of the tile under map point (x, y): `TILE_VISIBLE`, `TILE_FOGGED` or `TILE_BLACK`. */
+  private tileState(x: number, y: number): number {
+    return this.o.view.fogState(Math.floor(x), Math.floor(y));
+  }
+
+  /**
+   * Puts `sprite` showing `frame` with its hotspot at map pixel (x, y), mirrored when `flipped`; `fogged` draws it with
+   * every other pixel black (`fog_next_shape` 1), on whole pixels so the dots line up with the terrain's.
+   */
+  private place(sprite: Sprite, frame: SpriteFrame, flipped: boolean, x: number, y: number, fogged: boolean): void {
+    let left = flipped ? x + frame.hotspotX : x - frame.hotspotX;
+    let top = y - frame.hotspotY;
+    let texture = frame.texture;
+    if (fogged) {
+      left = Math.round(left);
+      top = Math.round(top);
+      const { camera } = this.o.view;
+      // A mirrored sprite's texture pixel lx lands on screen column left - lx - 1.
+      texture = this.foggedTexture(texture, (left + top - camera.x - camera.y + (flipped ? 1 : 0)) & 1) ?? texture;
+    }
+    sprite.texture = texture;
+    sprite.scale.x = flipped ? -1 : 1;
+    sprite.position.set(left, top);
+  }
+
+  /**
+   * `texture` drawn through the shadowing mask (`ASMSet_Shadowing`, src/drawarea.cpp:67): its pixel (x, y) black where
+   * `x + y + parity` is odd, so on the screen the dots fall where the fogged terrain's do. Made once per texture and
+   * parity; null when its pixels cannot be read.
+   */
+  private foggedTexture(texture: Texture, parity: number): Texture | null {
+    let pair = this.foggedTextures.get(texture);
+    if (!pair) this.foggedTextures.set(texture, (pair = []));
+    const made = pair[parity];
+    if (made !== undefined) return made;
+    const data = this.pixelsOf(texture);
+    let out: Texture | null = null;
+    if (data) {
+      const { width, height } = texture.frame;
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const g = canvas.getContext('2d')!;
+      const image = g.createImageData(width, height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const from = (y * data.width + x) * 4;
+          const to = (y * width + x) * 4;
+          const black = ((x + y + parity) & 1) === 1;
+          for (let c = 0; c < 3; c++) image.data[to + c] = black ? 0 : data.pixels[from + c]!;
+          image.data[to + 3] = data.pixels[from + 3]!;
+        }
+      }
+      g.putImageData(image, 0, 0);
+      out = Texture.from(canvas);
+      out.source.scaleMode = 'nearest';
+    }
+    pair[parity] = out;
+    return out;
+  }
+
+  /**
+   * The player's doppelgangers (fog flag 3 in `RGE_Object_List::draw`): drawn fogged while their tile is fogged, in their
+   * object's look and owner colour; on a visible tile the object itself shows, on an unexplored one nothing.
+   */
+  private drawDoppelgangers(): void {
+    const { world, view } = this.o;
+    const copies = this.doppelgangers.copies;
+    for (const [id, s] of this.copySprites) {
+      if (copies.has(id)) continue;
+      s.destroy();
+      this.copySprites.delete(id);
+    }
+    for (const c of copies.values()) {
+      let sprite = this.copySprites.get(c.id);
+      if (!sprite) {
+        sprite = view.layer.addChild(new Sprite());
+        this.copySprites.set(c.id, sprite);
+      }
+      const art = this.tileState(c.x, c.y) === TILE_FOGGED ? this.loadArt(c.graphic, c.owner) : null;
+      sprite.visible = art !== null;
+      if (!art) continue;
+      const info = art.info;
+      const pick = info ? facingFrame(copyFacet(c, info.angleCount), c.frame % Math.max(1, info.frameCount), info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
+      const pos = tileCoordsToPixel(c.x, c.y, world.map.width);
+      this.place(sprite, art.frames[pick.index] ?? art.frames[0]!, pick.flipped, pos.x, pos.y, true);
+      sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
+    }
   }
 
   /**
@@ -557,7 +671,8 @@ export class UnitLayer {
 
   /**
    * A left click on the map with the two-button mouse (`RGE_Main_View::mouse_left_up_action`, `interface_style` 2,
-   * src/vw_main.cpp:470-530): the topmost object of `select_level` 2 or more under the pointer, whoever owns it.
+   * src/vw_main.cpp:470-530): the topmost object of `select_level` 2 or more under the pointer, whoever owns it, on a
+   * tile the player sees (objects drawn under the fog can be ordered at but not selected).
    * - A plain click selects it alone (with its group); on an object already selected among others, it alone; on nothing,
    *   it unselects. A second click on the same spot picks past the panel's object to the next one under it.
    * - Shift or Ctrl takes the object out of the selection, or adds it; it first clears the selection when the panel's
@@ -566,7 +681,7 @@ export class UnitLayer {
   private clickAt(x: number, y: number, toggle: boolean): void {
     const again = this.lastClick !== null && this.lastClick.x === x && this.lastClick.y === y;
     const exclude = again && !toggle ? this.primary : null;
-    const hit = this.topmostAt(x, y, (e) => e.id !== exclude && this.selectLevel(e) >= SELECT_CLICK, false);
+    const hit = this.topmostAt(x, y, (e) => e.id !== exclude && this.selectLevel(e) >= SELECT_CLICK && this.tileState(e.x, e.y) === TILE_VISIBLE, false);
     this.lastClick = null;
     if (toggle) {
       if (!hit) return;
@@ -617,6 +732,16 @@ export class UnitLayer {
   /** Is the pixel of `sprite`'s texture under canvas point (x, y) opaque? Reads and caches the texture's pixels. */
   private opaque(sprite: Sprite, x: number, y: number): boolean {
     const texture = sprite.texture;
+    const data = this.pixelsOf(texture);
+    if (!data) return true;
+    const p = sprite.toLocal({ x, y });
+    const [px, py] = [Math.floor(p.x), Math.floor(p.y)];
+    if (px < 0 || py < 0 || px >= texture.frame.width || py >= texture.frame.height) return false;
+    return data.pixels[(py * data.width + px) * 4 + 3]! > HIT_ALPHA;
+  }
+
+  /** The pixels of `texture` (RGBA rows `width` pixels apart), read once; null when they cannot be read. */
+  private pixelsOf(texture: Texture): { pixels: Uint8ClampedArray; width: number } | null {
     let data = this.alpha.get(texture);
     if (data === undefined) {
       try {
@@ -627,11 +752,7 @@ export class UnitLayer {
       }
       this.alpha.set(texture, data);
     }
-    if (!data) return true;
-    const p = sprite.toLocal({ x, y });
-    const [px, py] = [Math.floor(p.x), Math.floor(p.y)];
-    if (px < 0 || py < 0 || px >= texture.frame.width || py >= texture.frame.height) return false;
-    return data.pixels[(py * data.width + px) * 4 + 3]! > HIT_ALPHA;
+    return data;
   }
 
   /**
@@ -672,6 +793,18 @@ export class UnitLayer {
 
   private hasOwnSelection(): boolean {
     return this.selectedOwn().some((id) => isUnit(this.o.world.entities.get(id)!));
+  }
+
+  /**
+   * A right click on the minimap (`RGE_Diamond_Map_View::command_make_do` with no object): the selected own units walk to
+   * map point (x, y). False when no own unit is selected.
+   */
+  moveSelectedTo(x: number, y: number): boolean {
+    const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
+    if (units.length === 0) return false;
+    this.flashes.clear();
+    this.o.issue({ type: 'move', units, x, y });
+    return true;
   }
 
   /**

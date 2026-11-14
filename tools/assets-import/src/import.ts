@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { parseDat, type DatFile } from '@aoe/data';
 import { DrsArchive, mergeStrings, parsePalette, readPeStrings, parseSlp, slpFrameToRgba, SlpPixelKind, type Palette } from '@aoe/formats';
 import { blit, packShelves } from './atlas';
+import { MINIMAP_BMP_ID, parseMinimapShape, parseTileEdges } from './map-art';
 import {
   PACK_VERSION,
   PLAYER_OWNERS,
@@ -10,7 +11,9 @@ import {
   slpKey,
   type PackFrame,
   type PackManifest,
+  type PackMinimap,
   type PackSlp,
+  type PackTileEdges,
   type SlpSource,
 } from './manifest';
 import { encodePng } from './png';
@@ -78,6 +81,13 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     ...(await Promise.all(languages.filter((p) => p !== null).map(async (p) => readPeStrings(await readFile(p))))),
   );
 
+  // The minimap's shape and the fog's tile edges; an install without them gets the client's plain diamond.
+  const mapBmp = interfac.read('bina', MINIMAP_BMP_ID);
+  const minimap = mapBmp ? parseMinimapShape(mapBmp) : null;
+  const edgePaths = await Promise.all(['data2/TileEdge.dat', 'data2/BlkEdge.dat'].map((rel) => find(installDir, rel)));
+  const [tileEdgePath, blackEdgePath] = edgePaths;
+  const tileEdges = tileEdgePath && blackEdgePath ? parseTileEdges(await readFile(tileEdgePath), await readFile(blackEdgePath)) : null;
+
   await rm(outDir, { recursive: true, force: true });
   await mkdir(join(outDir, 'sprites'), { recursive: true });
   await copyFile(datPath, join(outDir, 'empires.dat'));
@@ -100,7 +110,7 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     log(`${source}: ${bytesById.size} slp`);
   }
 
-  const manifest = buildManifest(dat, slps, strings);
+  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges);
   log(`strings: ${strings.size}`);
   await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
   return { manifest, slpCount: Object.keys(slps).length, imageCount };
@@ -135,7 +145,13 @@ async function writeSlp(
   return { slp, images: owners.length };
 }
 
-function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map<number, string>): PackManifest {
+function buildManifest(
+  dat: DatFile,
+  slps: Record<string, PackSlp>,
+  strings: Map<number, string>,
+  minimap: PackMinimap | null,
+  tileEdges: PackTileEdges | null,
+): PackManifest {
   const graphicSlp = (slp: number): string | null => {
     const key = slpKey('graphics', slp);
     return slp >= 0 && slps[key] ? key : null;
@@ -149,6 +165,9 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
     terrains: {},
     units: {},
     techs: {},
+    playerColours: dat.playerColours.map((c) => c.minimapColour),
+    minimap,
+    tileEdges,
     strings: Object.fromEntries(strings),
   };
   dat.graphics.forEach((g, id) => {
@@ -167,7 +186,13 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
   dat.terrainBlock.terrains.slice(0, dat.terrainsUsed).forEach((t, id) => {
     const key = slpKey('terrain', t.slp);
     const [rows = 1, cols = 1] = t.terrainDimensions;
-    manifest.terrains[id] = { name: t.name, slp: t.slp >= 0 && slps[key] ? key : null, rows: Math.max(rows, 1), cols: Math.max(cols, 1) };
+    manifest.terrains[id] = {
+      name: t.name,
+      slp: t.slp >= 0 && slps[key] ? key : null,
+      rows: Math.max(rows, 1),
+      cols: Math.max(cols, 1),
+      minimap: [t.colours[0] ?? 0, t.colours[1] ?? 0, t.colours[2] ?? 0],
+    };
   });
   // Trees, mines, forage and animals exist only in Gaia's table (civ 0).
   [dat.civs[1], dat.civs[0]].forEach((civ) => civ?.units.forEach((u, id) => {
@@ -187,6 +212,8 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
           ? [u.combat.displayedAttack, u.combat.displayedMeleeArmour, u.creatable?.displayedPierceArmour ?? 0, u.combat.displayedRange]
           : [0, 0, 0, 0],
         selectLevel: u.interactionMode,
+        minimap: [u.minimapMode, u.minimapColour],
+        doppelganger: u.createDoppelgangerOnDeath,
       };
     }
   }));

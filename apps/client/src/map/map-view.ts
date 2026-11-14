@@ -1,9 +1,19 @@
-import { Container, Sprite, type Application, type Ticker } from 'pixi.js';
+import { Container, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
 import type { TileMap } from '@aoe/sim';
+import type { PackTileEdges } from '@aoe/assets-import/manifest';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, SpriteFrame } from '../assets';
 import { Camera, CameraControls } from './camera';
+import { edgeNumber, FOG_H, FOG_W, fogPixels, PLAIN_EDGES, TILE_BLACK, TILE_VISIBLE } from './fog';
 import { mapPixelSize, tileOrigin, tileTouches, visibleRange, type Rect } from './iso';
+
+/** What the fog is drawn from: one player's knowledge of the tiles. */
+export interface FogSource {
+  /** `TILE_VISIBLE`, `TILE_FOGGED` or `TILE_BLACK` (`get_visible`). */
+  state(col: number, row: number): number;
+  /** Changes whenever `state` may have changed (each sim step). */
+  version(): number;
+}
 
 interface TerrainArt {
   frames: SpriteFrame[];
@@ -14,6 +24,7 @@ interface TerrainArt {
 /**
  * Draws a `TileMap` as flat isometric tiles in `app.stage`, scrolled by a `Camera`. Only tiles that touch the
  * viewport have sprites. Each tile picks its variant frame like the original (`RGE_View::get_tile_picture`).
+ * With a `FogSource` (`setFog`) unexplored tiles are left black and fogged ones and the edges are shaded (`fog.ts`).
  */
 export class MapView {
   readonly camera: Camera;
@@ -28,15 +39,24 @@ export class MapView {
     this.refresh();
   };
   private drawnAt: { x: number; y: number } | null = null;
+  private fog: FogSource | null = null;
+  private fogDrawn: { version: number; parity: number } | null = null;
+  /** Above every terrain tile, under every object (their `zIndex` starts at the tile count). */
+  private readonly fogLayer = new Container();
+  private readonly overlays = new Map<number, Sprite>();
+  private readonly fogTextures = new Map<string, Texture | null>();
 
   private constructor(
     private readonly app: Application,
     readonly map: TileMap,
     private readonly art: Map<number, TerrainArt>,
     readonly source: AssetProvider['kind'],
+    private readonly edges: PackTileEdges,
   ) {
     this.camera = new Camera(map.width, map.height, app.screen.width, app.screen.height);
     this.layer.sortableChildren = true;
+    this.fogLayer.zIndex = map.width * map.height - 0.5;
+    this.layer.addChild(this.fogLayer);
     app.stage.addChild(this.layer);
     this.controls = new CameraControls(this.camera, app.canvas);
     this.tick = (ticker) => {
@@ -63,7 +83,7 @@ export class MapView {
       }
       art.set(id, { frames, ...layout });
     }
-    return new MapView(app, map, art, provider.kind);
+    return new MapView(app, map, art, provider.kind, provider.mapArt()?.tileEdges ?? PLAIN_EDGES);
   }
 
   /** Map pixel rectangle the camera shows. */
@@ -76,16 +96,34 @@ export class MapView {
     return this.active.size;
   }
 
+  /** Draw the fog of `source` from now on (null: the whole map, as the scenario editor shows it). */
+  setFog(source: FogSource | null): void {
+    this.fog = source;
+    this.fogDrawn = null;
+    this.refresh();
+  }
+
+  /** The fog state drawn for tile (col, row): what `setFog`'s source says, `TILE_VISIBLE` without one. */
+  fogState(col: number, row: number): number {
+    return this.fog ? this.fog.state(col, row) : TILE_VISIBLE;
+  }
+
   /** Move the camera so map pixel `(x, y)` is at the viewport centre. */
   centerOn(x: number, y: number): void {
     this.camera.centerOn(x, y);
     this.refresh();
   }
 
-  /** Make the sprites match the camera; no-op when it has not moved since the last call. */
+  /** Make the sprites match the camera and the fog; no-op when neither has changed since the last call. */
   refresh(): void {
     const { x, y } = this.camera;
-    if (this.drawnAt?.x === x && this.drawnAt.y === y) return;
+    const version = this.fog?.version() ?? 0;
+    const parity = (x + y) & 1;
+    const fogChanged = this.fogDrawn?.version !== version || this.fogDrawn.parity !== parity;
+    if (this.drawnAt?.x === x && this.drawnAt.y === y) {
+      if (fogChanged) this.drawFog(version, parity);
+      return;
+    }
     this.drawnAt = { x, y };
     this.layer.position.set(-x, -y);
 
@@ -121,6 +159,78 @@ export class MapView {
       this.layer.addChild(sprite);
       this.active.set(index, sprite);
     }
+    this.drawFog(version, parity);
+  }
+
+  /**
+   * `view_function_terrain`'s fog (src/view.cpp:1940-2110): an unexplored tile is not drawn; an explored one gets the
+   * fog of its state and the edges of its neighbours. The dots follow the screen (`parity` is the camera's).
+   */
+  private drawFog(version: number, parity: number): void {
+    this.fogDrawn = { version, parity };
+    const { map, fog } = this;
+    const width = map.width;
+    for (const [index, overlay] of this.overlays) {
+      if (fog && this.active.has(index)) continue;
+      overlay.destroy();
+      this.overlays.delete(index);
+    }
+    if (!fog) {
+      for (const sprite of this.active.values()) sprite.visible = true;
+      return;
+    }
+    const visible = (c: number, r: number) => fog.state(c, r) === TILE_VISIBLE;
+    const explored = (c: number, r: number) => fog.state(c, r) !== TILE_BLACK;
+    for (const [index, sprite] of this.active) {
+      const col = index % width;
+      const row = (index - col) / width;
+      const state = fog.state(col, row);
+      sprite.visible = state !== TILE_BLACK;
+      const texture =
+        state === TILE_BLACK
+          ? null
+          : this.fogTexture(
+              state,
+              state === TILE_VISIBLE ? edgeNumber(visible, col, row, width, map.height) : 0,
+              edgeNumber(explored, col, row, width, map.height),
+              parity,
+            );
+      let overlay = this.overlays.get(index);
+      if (!texture) {
+        if (overlay) overlay.visible = false;
+        continue;
+      }
+      if (!overlay) {
+        overlay = this.fogLayer.addChild(new Sprite());
+        const origin = tileOrigin(col, row, width);
+        overlay.position.set(origin.x, origin.y);
+        this.overlays.set(index, overlay);
+      }
+      overlay.texture = texture;
+      overlay.visible = true;
+    }
+  }
+
+  /** The black over a tile of `state` with these edges, made once per kind; null when nothing is shaded. */
+  private fogTexture(state: number, visibleEdge: number, exploredEdge: number, parity: number): Texture | null {
+    const key = `${state}:${visibleEdge}:${exploredEdge}:${parity}`;
+    let texture = this.fogTextures.get(key);
+    if (texture !== undefined) return texture;
+    const alpha = fogPixels(this.edges, state, visibleEdge, exploredEdge, parity);
+    texture = null;
+    if (alpha) {
+      const canvas = document.createElement('canvas');
+      canvas.width = FOG_W;
+      canvas.height = FOG_H;
+      const g = canvas.getContext('2d')!;
+      const image = g.createImageData(FOG_W, FOG_H);
+      alpha.forEach((a, i) => (image.data[i * 4 + 3] = a));
+      g.putImageData(image, 0, 0);
+      texture = Texture.from(canvas);
+      texture.source.scaleMode = 'nearest';
+    }
+    this.fogTextures.set(key, texture);
+    return texture;
   }
 
   destroy(): void {
@@ -129,5 +239,6 @@ export class MapView {
     this.controls.destroy();
     this.app.stage.removeChild(this.layer);
     this.layer.destroy({ children: true });
+    for (const texture of this.fogTextures.values()) texture?.destroy(true);
   }
 }

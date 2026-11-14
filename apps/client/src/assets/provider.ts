@@ -1,4 +1,5 @@
 import type { Texture } from 'pixi.js';
+import type { PackMinimap, PackTileEdges } from '@aoe/assets-import/manifest';
 
 export interface SpriteFrame {
   texture: Texture;
@@ -78,6 +79,24 @@ export interface TechInfo {
   button: number;
 }
 
+/** What the fog and the minimap read from the pack (pack version 8; docs/spec/hud.md "Fog of war", "Minimap"). */
+export interface MapArt {
+  /** Colour of palette 50500 index `index`, as 0xRRGGBB. */
+  rgb(index: number): number;
+  /** `map_hi_color`, `map_med_color`, `map_low_color` of a terrain (palette indices); null when unknown. */
+  terrainColours(terrainId: number): readonly [number, number, number] | null;
+  /** `map_draw_level` and `map_color` of a unit (the first playable civ's record, Gaia's for its own); null when unknown. */
+  unitMinimap(unitId: number): readonly [number, number] | null;
+  /** `create_doppleganger_on_death` of a unit; 0 when unknown. */
+  doppelganger(unitId: number): number;
+  /** `map_color` of player `player`'s colour table (player n uses table n - 1); null when unknown. */
+  playerColour(player: number): number | null;
+  /** map.bmp's lines; null when the pack has none. */
+  readonly minimap: PackMinimap | null;
+  /** The flat tile's fog edge spans; null when the pack has none. */
+  readonly tileEdges: PackTileEdges | null;
+}
+
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */
 export interface AssetProvider {
   readonly kind: 'pack' | 'debug';
@@ -97,6 +116,8 @@ export interface AssetProvider {
   techInfo(techId: number): TechInfo | null;
   /** Text of a language string id (language.dll, languagex.dll over it); null when the pack has none. */
   string(id: number): string | null;
+  /** Palette, minimap colours and shape and fog edges; null without a pack. */
+  mapArt(): MapArt | null;
   /** Flat-tile variants of a terrain: a `rows` x `cols` grid at the start of its frames (RGE_View::get_tile_picture). */
   terrainLayout(terrainId: number): { rows: number; cols: number };
 }

@@ -49,6 +49,8 @@ interface Window {
     delayPongs(ms: number): void;
     age(player?: number): number;
     techState(tech: number, player?: number): number;
+    tileVisibility(col: number, row: number, player?: number): number;
+    minimapPoint(col: number, row: number): { x: number; y: number } | null;
   };
 }
 

@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 7;
+export const PACK_VERSION = 8;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -56,6 +56,8 @@ export interface PackTerrain {
    */
   rows: number;
   cols: number;
+  /** `map_hi_color`, `map_med_color`, `map_low_color`: the minimap's palette indices (a flat tile uses the middle one). */
+  minimap: [number, number, number];
 }
 
 export interface PackUnit {
@@ -79,6 +81,10 @@ export interface PackUnit {
   displayed: [number, number, number, number];
   /** `select_level` (the dat's interaction mode): a click selects from 2 up, a box only 4 (units). */
   selectLevel: number;
+  /** `map_draw_level` (the dat's minimap mode: 0 none, 1 a 3x3 square, 2 a cross in the owner's colour, 3 a cross in `map_color`, 4 tints its tiles) and `map_color` (a palette index). */
+  minimap: [number, number];
+  /** `create_doppleganger_on_death`: 1 remembered when removed unseen, 2 when it dies unseen (trees). */
+  doppelganger: number;
 }
 
 export interface PackTech {
@@ -91,6 +97,29 @@ export interface PackTech {
   icon: number;
   /** `button_location`: where its research button sits in the command grid (1-20); 0 none. */
   button: number;
+}
+
+/** `(Y_delta, X_start, X_end)`: one row of pixels from the top-left of a tile's 65x33 box, ends included. */
+export type TileSpan = [number, number, number];
+
+/** The flat tile's fog edge spans by edge number (47 each; docs/spec/hud.md "Fog of war"). */
+export interface PackTileEdges {
+  /** TILEEDGE.DAT `normal_draw`: the part of a visible tile drawn plain. */
+  normal: TileSpan[][];
+  /** TILEEDGE.DAT `fog_draw`: the part of a visible tile drawn fogged, along its neighbours that are not visible. */
+  fog: TileSpan[][];
+  /** BLKEDGE.DAT `black_UNdraw`: the part of a tile left black, along its unexplored neighbours. */
+  black: TileSpan[][];
+}
+
+/** map.bmp (interfac.drs bina 50401): the minimap's lines, as `RGE_Diamond_Map::set_bitmap` reads them. */
+export interface PackMinimap {
+  width: number;
+  height: number;
+  /** `map_image_start_y`: the first picture row with a line. */
+  startY: number;
+  /** `[start_x, line_len]` per line, top down. */
+  lines: [number, number][];
 }
 
 export interface PackManifest {
@@ -109,6 +138,12 @@ export interface PackManifest {
   units: Record<string, PackUnit>;
   /** Keyed by tech id: what the research buttons show (pack version 7). */
   techs: Record<string, PackTech>;
+  /** `map_color` of each player colour table (the dat's player colours, in order; player n uses n - 1): a palette index. */
+  playerColours: number[];
+  /** The minimap's shape; null when the install has no map.bmp. */
+  minimap: PackMinimap | null;
+  /** The fog's tile edges; null when the install has no TILEEDGE.DAT and BLKEDGE.DAT. */
+  tileEdges: PackTileEdges | null;
   /** The game's text by string id: language.dll's string tables with languagex.dll's (Rise of Rome) over them. */
   strings: Record<string, string>;
 }

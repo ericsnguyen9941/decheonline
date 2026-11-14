@@ -102,12 +102,15 @@ describe('lockstep', () => {
     const boundary = timers.clock + FRAME_MS;
     timers.next();
     expect([lockstep.turn, lockstep.world.turnStep]).toEqual([7, 2]);
+    expect(lockstep.stepMs()).toBe(90);
     const steps: number[] = [];
     while (lockstep.turn === 7) {
       timers.next();
       steps.push(timers.clock - boundary);
     }
     expect(steps).toEqual([90, 180, 270, 360, 450, 540, 630, 720, 810]);
+    // After a turn's last step the next one is a frame away.
+    expect(lockstep.stepMs()).toBe(FRAME_MS);
     for (const m of link.sent.splice(0)) if (m.t === 'turn') link.receive(release(m.turn));
     timers.next();
     expect(timers.clock - boundary).toBe(810 + FRAME_MS);

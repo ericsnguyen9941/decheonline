@@ -119,6 +119,14 @@ export class Lockstep {
     return (steps + this.frameMs()) * this.paceScale;
   }
 
+  /**
+   * Wall time from the step just run to the next one: `G` within a turn, a frame after a turn's last step (the next
+   * boundary waits for the following pass of the game loop, §2).
+   */
+  stepMs(): number {
+    return (this.world.turnStep === 0 ? this.frameMs() : this.world.granularity) * this.paceScale;
+  }
+
   /** Queue a command; it goes out after the current turn and executes COMMAND_DELAY_TURNS later on both clients. */
   issue(command: Command): void {
     this.pending.push(command);

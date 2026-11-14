@@ -61,6 +61,10 @@ export interface NetDebug {
   age(player?: number): number;
   /** State of tech `tech` for `player` (default: this client's): -1 disabled, 0 locked, 1 available, 2 researching, 3 done. */
   techState(tech: number, player?: number): number;
+  /** What `player` (default: this client's) knows of tile (col, row): 0x0F visible, 0x80 fogged, 0 unexplored. */
+  tileVisibility(col: number, row: number, player?: number): number;
+  /** Pixel of the minimap canvas where tile (col, row)'s objects are drawn, or null before the HUD is up. */
+  minimapPoint(col: number, row: number): { x: number; y: number } | null;
 }
 
 export interface DebugNet {
@@ -204,7 +208,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
     game.onEnded = () => end('peer-left', 'Your opponent left the game.');
-    if (debug) panel = debugPanel(host, game, player, () => units, frames);
+    if (debug) panel = debugPanel(host, game, player, () => units, () => hud, frames);
     void createAssetProvider().then(async (provider) => {
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
@@ -216,7 +220,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         provider,
         player,
         issue: (c) => game.issue(c),
-        turnMs: (t) => game.turnMs(t),
+        stepMs: () => game.stepMs(),
         onPlacement: (unit) => hud?.commands.placementChanged(unit),
         onRollover: (text) => hud?.rollover(text),
       });
@@ -231,6 +235,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         issue: (c) => game.issue(c),
         startPlacement: (unit) => layer.startPlacement(unit),
         cancelPlacement: () => layer.cancelPlacement(),
+        map: { view, units: layer },
       });
       // Start looking at this player's town centre spot.
       const own = units.ownUnits()[0];
@@ -243,7 +248,14 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   };
 }
 
-function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: () => UnitLayer | undefined, frames: FrameClock): HTMLElement {
+function debugPanel(
+  host: HTMLElement,
+  game: Lockstep,
+  player: number,
+  layer: () => UnitLayer | undefined,
+  hud: () => GameHud | undefined,
+  frames: FrameClock,
+): HTMLElement {
   const panel = document.createElement('div');
   panel.dataset.testid = 'net-debug';
   const status = document.createElement('span');
@@ -338,6 +350,8 @@ function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: ()
     delayPongs: (ms) => (game.pongDelayMs = ms),
     age: (p = player) => game.world.attributes[p]![ATTR_CURRENT_AGE]!,
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
+    tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
+    minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,
   };
   return panel;
 }

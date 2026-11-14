@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
 import { slpImagePath, slpKey, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
-import type { AssetProvider, GraphicInfo, ImageFrame, SpriteFrame, TechInfo, UnitInfo } from './provider';
+import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SpriteFrame, TechInfo, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -15,7 +15,14 @@ export async function loadPackProvider(baseUrl = DEFAULT_PACK_URL): Promise<Asse
     return null;
   }
   if (manifest.version !== PACK_VERSION) return null;
-  return new PackProvider(baseUrl, manifest);
+  let palette: number[] = [];
+  try {
+    const res = await fetch(`${baseUrl}/${manifest.palette}`);
+    if (res.ok) palette = ((await res.json()) as { rgb: number[] }).rgb;
+  } catch {
+    // Without the palette the minimap draws in black.
+  }
+  return new PackProvider(baseUrl, manifest, palette);
 }
 
 class PackProvider implements AssetProvider {
@@ -24,7 +31,10 @@ class PackProvider implements AssetProvider {
   constructor(
     private readonly baseUrl: string,
     private readonly manifest: PackManifest,
+    private readonly palette: number[],
   ) {}
+
+  private art: MapArt | null = null;
 
   unitStandingGraphic(unitId: number): number | null {
     return this.manifest.units[unitId]?.standingGraphic ?? null;
@@ -71,6 +81,19 @@ class PackProvider implements AssetProvider {
 
   string(id: number): string | null {
     return this.manifest.strings[id] ?? null;
+  }
+
+  mapArt(): MapArt {
+    const { manifest, palette } = this;
+    return (this.art ??= {
+      rgb: (i) => ((palette[i * 3] ?? 0) << 16) | ((palette[i * 3 + 1] ?? 0) << 8) | (palette[i * 3 + 2] ?? 0),
+      terrainColours: (id) => manifest.terrains[id]?.minimap ?? null,
+      unitMinimap: (id) => manifest.units[id]?.minimap ?? null,
+      doppelganger: (id) => manifest.units[id]?.doppelganger ?? 0,
+      playerColour: (player) => manifest.playerColours[player - 1] ?? null,
+      minimap: manifest.minimap,
+      tileEdges: manifest.tileEdges,
+    });
   }
 
   terrainLayout(terrainId: number): { rows: number; cols: number } {

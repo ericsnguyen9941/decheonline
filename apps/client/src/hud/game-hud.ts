@@ -1,11 +1,13 @@
 import type { Application, Ticker } from 'pixi.js';
 import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, HOUSE, ObjectState, typeOf, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
+import type { MapView } from '../map/map-view';
 import { CommandPanel } from './command-panel';
 import { constructionProgress, researchStatus, trainingStatus } from './commands';
 import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
+import { Minimap, type MinimapUnits } from './minimap';
 import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
 import { ageName, civilizationName, objectName, statRows, topButtonLabels } from './text';
@@ -70,6 +72,8 @@ export interface GameHudOptions {
   /** Start and stop placing a building on the map. */
   startPlacement: (unit: number) => void;
   cancelPlacement: () => void;
+  /** The map view and its units, for the minimap; without them the minimap's frame stays empty. */
+  map?: { view: MapView; units: MinimapUnits };
 }
 
 function box(parent: HTMLElement | null, className: string, testid?: string): HTMLDivElement {
@@ -108,6 +112,8 @@ export class GameHud {
   private readonly message = box(this.root, 'hud-message', 'hud-message');
   /** The command button grid. */
   readonly commands: CommandPanel;
+  /** The minimap, when the HUD has a map view. */
+  readonly minimapView: Minimap | null;
   private readonly bar: ResourceBar;
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = () => this.applyLayout();
@@ -132,6 +138,7 @@ export class GameHud {
       group: () => o.selection.group(),
       ungroup: () => o.selection.ungroup(),
     });
+    this.minimapView = o.map ? new Minimap({ parent: this.minimap, world: o.world, provider: o.provider, player: o.player, ...o.map }) : null;
     topButtonLabels(o.provider).forEach((label, i) => (this.menus[i]!.textContent = label));
     this.root.classList.toggle('art', o.provider.interfaceFrame(SLP.screen[1024], 0) !== null);
     this.applyLayout();
@@ -147,6 +154,7 @@ export class GameHud {
     window.removeEventListener('resize', this.onResize);
     this.bar.destroy();
     this.commands.destroy();
+    this.minimapView?.destroy();
     clearCursors(this.o.parent);
     this.root.remove();
   }
@@ -212,6 +220,7 @@ export class GameHud {
    */
   private update(): void {
     const { world, selection, player } = this.o;
+    this.minimapView?.update();
     this.age.textContent = ageName(this.o.provider, world.attributes[player]![ATTR_CURRENT_AGE]!);
     const primary = selection.primary;
     const entity = primary === null ? undefined : world.entities.get(primary);

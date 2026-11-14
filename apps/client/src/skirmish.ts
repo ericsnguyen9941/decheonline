@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { STEP_MS, startingObjects, stepsInTurn, World, type Command, type StartUnit } from '@aoe/sim';
+import { STEP_MS, startingObjects, World, type Command, type StartUnit } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { exposeMapDebug, MapView } from './map';
 import { tileCoordsToPixel } from './map/iso';
@@ -55,17 +55,19 @@ export async function startSkirmish(app: Application, speed: number): Promise<Sk
   const provider = await createAssetProvider();
   const view = await MapView.create(app, world.map, provider);
   let pending: Command[] = [];
-  const turnMs = (turn: number) => (stepsInTurn(turn) * STEP_MS) / speed;
-  const layer = new UnitLayer({ app, view, world, provider, player: 1, issue: (c) => pending.push(c), turnMs });
+  const stepMs = () => STEP_MS / speed;
+  const layer = new UnitLayer({ app, view, world, provider, player: 1, issue: (c) => pending.push(c), stepMs });
   const centre = tileCoordsToPixel(MIDDLE.x, MIDDLE.y, world.map.width);
   view.centerOn(centre.x, centre.y);
   exposeMapDebug(view);
+  // One step at a time, so the units slide from step to step as in a game.
   const run = () => {
-    world.addBatch(world.turn, 1, pending);
-    pending = [];
-    const ms = turnMs(world.turn);
-    world.runTurn();
-    setTimeout(run, ms);
+    if (world.turnStep === 0) {
+      world.addBatch(world.turn, 1, pending);
+      pending = [];
+    }
+    world.runStep();
+    setTimeout(run, stepMs());
   };
   run();
   return {
