@@ -9,12 +9,14 @@ import { updateAttack, updateMissile } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, updateWork } from './gather';
+import { typeOf } from './masters';
 import { ActionResult, endAction, updateMover } from './movement';
 import { add32, f32, mul32, sub32 } from './num';
+import { updateResearch } from './research';
 import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
 import { updateUnitAI } from './unit-ai';
-import { spriteInfo, unitType, type UnitType } from './units';
+import { spriteInfo, type UnitType } from './units';
 
 /** Master types (`master_type`): 20 animated, 30 moving, 40 action, 50 combat, 60 missile, 70 unit, 80 building. */
 export function isAnimated(t: UnitType): boolean {
@@ -37,8 +39,11 @@ export function giveStorages(attributes: number[], t: UnitType, sign: 1 | -1, fl
   }
 }
 
-/** The Tool, Bronze and Iron Age techs, undone with the last building of a kind (`src/t_b_obj.cpp:314-327`). */
-const AGE_TECHS = [101, 102, 103];
+/**
+ * The shadow techs that open the Tool, Bronze and Iron Age (`TECH_A01_B01_F01_I01_TOOL_AGE` 74, 75, 76), undone with the
+ * last building of a kind (`src/t_b_obj.cpp:314-327`); the ages themselves stay.
+ */
+const AGE_TECHS = [74, 75, 76];
 
 /**
  * `set_object_state` side effects the sim keeps: a unit starting to die returns its flag-2 storages. A built building
@@ -47,7 +52,7 @@ const AGE_TECHS = [101, 102, 103];
  */
 function setObjectState(ctx: GameContext, e: Entity, state: number): void {
   if (e.state === state) return;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const lost = isBuilding(t) && state === ObjectState.Dying && e.state === ObjectState.Active;
   if (lost) giveBuiltStorages(ctx, e, t, -1);
   if (state >= ObjectState.Dying && e.state < ObjectState.Dying) giveStorages(ctx.attributes[e.owner]!, t, -1, [2]);
@@ -64,7 +69,7 @@ function setObjectState(ctx: GameContext, e: Entity, state: number): void {
  * chain, then its production queue: dropped once it is no longer active, else advanced.
  */
 export function updateObject(ctx: GameContext, e: Entity): boolean {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   if (!isBuilding(t)) return updateChain(ctx, e, t);
   updateConstruction(ctx, e, t);
   const remove = updateChain(ctx, e, t);
@@ -90,18 +95,20 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   }
   if (!isActionObject(t)) return remove;
   if (e.state > ObjectState.Active) {
-    deleteActions(e);
+    deleteActions(ctx, e);
     e.missile = null;
     return remove;
   }
-  if (e.missile) {
+  if (e.research) {
+    if (updateResearch(ctx, e, e.research) === ActionResult.Remove) e.research = null;
+  } else if (e.missile) {
     if (updateMissile(ctx, e) === ActionResult.Remove) e.missile = null;
   } else if (e.work) {
     const r = updateWork(ctx, e);
-    if (r === ActionResult.Failed || r === ActionResult.Remove) deleteActions(e);
+    if (r === ActionResult.Failed || r === ActionResult.Remove) deleteActions(ctx, e);
   } else if (e.attack) {
     // Only `remove` drops an attack; a failed one stays in state 13 and tells the unit AI every update.
-    if (updateAttack(ctx, e) === ActionResult.Remove) deleteActions(e);
+    if (updateAttack(ctx, e) === ActionResult.Remove) deleteActions(ctx, e);
   } else if (e.mover?.action) {
     const r = updateMover(ctx, e);
     if (r === ActionResult.Failed || r === ActionResult.Remove) endAction(e.mover);
@@ -118,7 +125,7 @@ function staticUpdate(ctx: GameContext, e: Entity, t: UnitType): boolean {
     case ObjectState.Unbuilt:
       if (e.hp < 1) {
         setObjectState(ctx, e, ObjectState.Dying);
-        newSprite(e, t.dying, ctx.rng);
+        newSprite(ctx, e, t.dying);
         // The death sound is fenced off the stream (src/stat_obj.cpp:1796-1806).
         ctx.rng.srand(ctx.rng.rand());
       }

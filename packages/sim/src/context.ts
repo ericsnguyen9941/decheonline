@@ -1,9 +1,9 @@
 import type { Entity } from './entities';
 import type { MoveContext } from './movement';
-import type { TechPlayers } from './techs';
+import type { TechContext } from './techs';
 
 /** What object updates and actions need from the world during a step. */
-export interface GameContext extends MoveContext, TechPlayers {
+export interface GameContext extends MoveContext, TechContext {
   /** `world_time` in ms. */
   worldTime: number;
   /** `make_new_obj`: create and set up an object (its setup draws from the RNG). */

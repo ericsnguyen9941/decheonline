@@ -37,6 +37,16 @@ export function toUint(a: number): number {
   return Math.trunc(a) >>> 0;
 }
 
+/** C narrowing of an int to `short`: wrap to signed 16 bits. */
+export function i16(a: number): number {
+  return (a << 16) >> 16;
+}
+
+/** C narrowing of an int to `unsigned char`: wrap to 8 bits. */
+export function u8(a: number): number {
+  return a & 0xff;
+}
+
 export function u32(a: number): number {
   return a >>> 0;
 }

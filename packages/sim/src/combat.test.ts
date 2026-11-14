@@ -49,7 +49,7 @@ function stepContext(w: World): GameContext {
 /** Face east (angle 0). */
 function faceEast(e: Entity): void {
   e.mover!.angle = 0;
-  e.mover!.facet = facetOf(0, currentSprite(e));
+  e.mover!.facet = facetOf(0, currentSprite(e, unitType(e.type)));
 }
 
 /** Damage per hit and hp left, every time the target's hp changes, until `limit` turns pass or it dies. */

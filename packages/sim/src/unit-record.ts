@@ -66,3 +66,14 @@ export interface SimUnitRecord {
     techId: number;
   } | null;
 }
+
+/** One civ in the generated table (`CIV_RECORDS`). */
+export interface SimCivRecord {
+  name: string;
+  /** `tribe_effect`: the civ's tech-tree effect run at game start, -1 none. */
+  effect: number;
+  /** Starting player attributes, float32. */
+  resources: number[];
+  /** By unit id: the civ's record fields that differ from `UNIT_RECORDS`. */
+  diffs: Record<number, Partial<SimUnitRecord>>;
+}

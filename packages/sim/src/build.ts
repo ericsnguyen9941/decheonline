@@ -8,10 +8,11 @@ import { turnTowards } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import type { WorkAction } from './gather';
+import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, endAction, startMoveTo, updateMover } from './movement';
 import { f32, mul32 } from './num';
 import { newSprite } from './sprites';
-import { unitType, type Task } from './units';
+import type { Task } from './units';
 
 export const ACTION_BUILD = 101;
 
@@ -25,8 +26,8 @@ const BUILD_WORKING = 7;
 const BUILD_TO_POINT = 11;
 const BUILD_FAILED = 13;
 
-function taskOf(e: Entity, a: WorkAction): Task {
-  return unitType(e.type).action!.tasks[a.task]!;
+function taskOf(ctx: PlayerMasters, e: Entity, a: WorkAction): Task {
+  return typeOf(ctx, e).action!.tasks[a.task]!;
 }
 
 function object(ctx: GameContext, id: number): Entity | undefined {
@@ -42,23 +43,23 @@ export function buildFirstInStack(ctx: GameContext, e: Entity, a: WorkAction): v
 function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): void {
   if (e.mover) endAction(e.mover);
   a.state = state;
-  const task = taskOf(e, a);
-  const t = unitType(e.type);
+  const task = taskOf(ctx, e, a);
+  const t = typeOf(ctx, e);
   switch (state) {
     case BUILD_WAITING:
     case BUILD_DONE:
     case BUILD_FAILED:
       // Waiting asks the unit AI for a task; human players' units get none yet.
-      newSprite(e, t.standing, ctx.rng);
+      newSprite(ctx, e, t.standing);
       return;
     case BUILD_IDLE:
-      newSprite(e, t.standing, ctx.rng);
+      newSprite(ctx, e, t.standing);
       a.target = -1;
       a.target2 = -1;
       a.x = a.y = a.z = f32(-1);
       return;
     case BUILD_TO_POINT:
-      startMoveTo(e, null, a.x, a.y, a.z, 0, task.moving, true, ctx.rng);
+      startMoveTo(e, null, a.x, a.y, a.z, 0, task.moving, true, ctx);
       return;
     case BUILD_TO_TARGET: {
       const target = object(ctx, a.target);
@@ -67,15 +68,15 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
         a.y = target.y;
         a.z = target.z;
       }
-      startMoveTo(e, target ?? null, a.x, a.y, a.z, task.workRange, task.moving, true, ctx.rng);
+      startMoveTo(e, target ?? null, a.x, a.y, a.z, task.workRange, task.moving, true, ctx);
       return;
     }
     case BUILD_TURNING:
-      newSprite(e, task.moving, ctx.rng);
+      newSprite(ctx, e, task.moving);
       return;
     case BUILD_WORKING:
       // `work_sprite`.
-      newSprite(e, task.proceeding, ctx.rng);
+      newSprite(ctx, e, task.proceeding);
       return;
   }
 }
@@ -170,8 +171,8 @@ export function updateBuild(ctx: GameContext, e: Entity, a: WorkAction): ActionR
     case BUILD_WORKING: {
       // A finished Farm keeps its builder (timer -1, then `do_command(farm)`); the sim has no Farms yet, so every
       // finished building sends the builder to wait.
-      const task = taskOf(e, a);
-      const work = mul32(mul32(task.workValue1, unitType(e.type).action!.workRate), ctx.deltaSeconds);
+      const task = taskOf(ctx, e, a);
+      const work = mul32(mul32(task.workValue1, typeOf(ctx, e).action!.workRate), ctx.deltaSeconds);
       if (!target || build(ctx, target, work)) setState(ctx, e, a, BUILD_WAITING);
       return ActionResult.Continue;
     }

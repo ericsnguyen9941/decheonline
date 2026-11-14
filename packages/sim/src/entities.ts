@@ -3,6 +3,7 @@ import type { AttackAction, MissileAction } from './combat';
 import type { WorkAction } from './gather';
 import { copyMover, type Mover } from './movement';
 import { f32 } from './num';
+import type { ResearchAction } from './research';
 import type { ActiveSprite } from './sprites';
 import type { UnitAI } from './unit-ai';
 
@@ -57,6 +58,8 @@ export interface Entity {
   queue?: QueueRecord[];
   /** Buildings: the queue's train action (`production_queue_actions`), null when none. */
   train?: TrainAction | null;
+  /** Buildings: a research, the building's only action while it lasts (`TRIBE_Action_Make_Tech`). */
+  research?: ResearchAction | null;
   /** Combat objects: the unit AI (`unitAIValue`), absent for groups without one. */
   ai?: UnitAI | null;
 }
@@ -137,6 +140,7 @@ function copyEntity(e: Entity): Entity {
   if (e.missile) copy.missile = { ...e.missile };
   if (e.queue) copy.queue = e.queue.map((r) => ({ ...r }));
   if (e.train) copy.train = { ...e.train };
+  if (e.research) copy.research = { ...e.research };
   if (e.ai) {
     copy.ai = {
       ...e.ai,

@@ -1,5 +1,6 @@
 import type { Command } from './commands';
 import { CrtRand } from './rng';
+import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
 import { startingObjects, World, type StartUnit } from './world';
 
@@ -48,7 +49,10 @@ const SKIRMISH: readonly StartUnit[] = [
  * a `queue` of Villagers (or a Clubman, or an unqueue) at their Town Center or now and then the other's; with `war`, an `attack` by
  * some of their Villagers and of the units made during the game on one of the other side's Villagers, mostly, else its
  * Town Center or a unit made during the game (drawn from a second generator, so the other orders stay as they were);
- * and rarely a `cancel` of an object made during the game.
+ * rarely a `cancel` of an object made during the game; and, from a third generator, now and then a `research` at their
+ * Town Center (sometimes the other's or an object made during the game) of a building's 2-second tech (Granary,
+ * Storage Pit or Barracks built: two make the Tool Age available), the Tool Age or any tech id, and rarely a `stop` of
+ * their Town Center.
  */
 export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLog {
   const players = 3;
@@ -57,6 +61,8 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
   gen.srand(seed);
   const fight = new CrtRand();
   fight.srand(seed + 7919);
+  const study = new CrtRand();
+  study.srand(seed + 104729);
   // Starting objects get ids 1.. in `units` order.
   const villagers = units.flatMap((u, i) => (u.type === VILLAGER ? [{ id: i + 1, owner: u.owner }] : []));
   const centers = units.flatMap((u, i) => (u.type === TOWN_CENTER ? [{ id: i + 1, owner: u.owner, x: u.x, y: u.y }] : []));
@@ -105,6 +111,13 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
         commands.push({ type: 'attack', units: ids, target });
       }
       if (gen.rand() % 60 === 0) commands.push({ type: 'cancel', target: units.length + 1 + (gen.rand() % 40) });
+      if (study.rand() % 20 === 0) {
+        const roll = study.rand() % 8;
+        const building = roll < 6 ? own.id : roll < 7 ? centers.find((c) => c.owner !== player)!.id : units.length + 1 + (study.rand() % 40);
+        const techs = [10, 39, 62, TOOL_AGE, TOOL_AGE, study.rand() % 130];
+        commands.push({ type: 'research', building, tech: techs[study.rand() % techs.length]! });
+      }
+      if (study.rand() % 150 === 0) commands.push({ type: 'stop', objects: [own.id] });
       if (commands.length > 0) batches.push({ turn, player, commands });
     }
   }

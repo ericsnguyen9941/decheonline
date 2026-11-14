@@ -9,7 +9,8 @@ import { ActionResult } from './movement';
 import { add32, div32, f32, mul32, sub32 } from './num';
 import { newSprite } from './sprites';
 import { buildingFacet, doTech } from './techs';
-import { spriteInfo, UNIT_TYPES, unitType, type UnitType } from './units';
+import { hasMaster, master, typeOf } from './masters';
+import { spriteInfo, type UnitType } from './units';
 
 /** One production queue record: a unit type and how many are paid for. */
 export interface QueueRecord {
@@ -59,7 +60,7 @@ export function isBuilding(t: UnitType): boolean {
 function objectsInTiles(ctx: GameContext, x0: number, y0: number, x1: number, y1: number): Entity[] {
   const found: Entity[] = [];
   for (const o of ctx.entities.all()) {
-    if (!UNIT_TYPES.has(o.type)) continue;
+    if (!hasMaster(ctx, o.owner, o.type)) continue;
     const tx = Math.trunc(o.x);
     const ty = Math.trunc(o.y);
     if (tx >= x0 && tx <= x1 && ty >= y0 && ty <= y1) found.push(o);
@@ -105,7 +106,7 @@ export function checkPlacement(ctx: GameContext, t: UnitType, col: number, row: 
   const [x0, y0, x1, y1] = searchBox(ctx, col, row);
   for (const o of objectsInTiles(ctx, x0, y0, x1, y1)) {
     if (o.state >= ObjectState.PendingRemoval) continue;
-    const ot = unitType(o.type);
+    const ot = typeOf(ctx, o);
     if (builtOn && ot.canBeBuiltOn === 1 && t.canBeBuiltOn === 0) continue;
     if (!(ot.radiusX > 0) || !(ot.radiusY > 0)) continue;
     if (ot.radiusZ > 0 !== t.radiusZ > 0) continue;
@@ -124,7 +125,7 @@ export function checkDestructables(ctx: GameContext, t: UnitType, col: number, r
   if (!(t.radiusX > 0) && !(t.radiusY > 0)) return;
   const [x0, y0, x1, y1] = searchBox(ctx, col, row);
   for (const o of objectsInTiles(ctx, x0, y0, x1, y1)) {
-    const ot = unitType(o.type);
+    const ot = typeOf(ctx, o);
     if (ot.id === t.id || ot.canBeBuiltOn === 0) continue;
     const dx = Math.abs(sub32(o.x, col));
     const dy = Math.abs(sub32(o.y, row));
@@ -138,7 +139,7 @@ export function checkDestructables(ctx: GameContext, t: UnitType, col: number, r
  */
 export function setupBuilding(ctx: GameContext, e: Entity, t: UnitType, destroy: (o: Entity) => void): void {
   e.state = ObjectState.Unbuilt;
-  if (t.creatable!.trainTime > 0) newSprite(e, t.building!.construction, ctx.rng);
+  if (t.creatable!.trainTime > 0) newSprite(ctx, e, t.building!.construction);
   e.buildPoints = 0;
   e.hp = 1;
   e.facet = buildingFacet(ctx, e.owner, t.id);
@@ -153,7 +154,7 @@ export function setupBuilding(ctx: GameContext, e: Entity, t: UnitType, destroy:
  */
 export function build(ctx: GameContext, e: Entity, work: number): boolean {
   if (e.state !== ObjectState.Unbuilt) return true;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const required = f32(t.creatable!.trainTime);
   const maxHp = f32(t.hitPoints);
   let amount = work;
@@ -189,7 +190,7 @@ function complete(ctx: GameContext, e: Entity, t: UnitType): void {
     ctx.wake(e);
     e.hp = 0;
   } else {
-    newSprite(e, t.standing, ctx.rng);
+    newSprite(ctx, e, t.standing);
     e.facet = buildingFacet(ctx, e.owner, t.id);
   }
   if (b.makeObject > -1) ctx.create(e.owner, b.makeObject, e.x, e.y, e.z);
@@ -217,7 +218,7 @@ export function updateConstruction(ctx: GameContext, e: Entity, t: UnitType): vo
  * by half the unbuilt fraction, then hp 0 (the building dies on its next update).
  */
 export function cancelBuild(ctx: GameContext, e: Entity): void {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const required = f32(t.creatable!.trainTime);
   let percent = 0;
   if (!(e.state >= ObjectState.Active || e.hp <= 0)) percent = mul32(div32(sub32(required, e.buildPoints!), required), CANCEL_REFUND);
@@ -233,7 +234,7 @@ export function cancelBuild(ctx: GameContext, e: Entity): void {
  */
 export function checkObjCost(ctx: GameContext, player: number, id: number, modifier: number, ignorePop: boolean): boolean {
   const attributes = ctx.attributes[player]!;
-  const t = UNIT_TYPES.get(id);
+  const t = ctx.masters[player]?.[id];
   if (!t || t.masterType < MASTER_TYPE_COMBAT || !t.creatable) return false;
   const replace = attributes[ATTR_GOLD_REPLACEMENT]! >= 1;
   let gold = replace ? attributes[ATTR_GOLD]! : 0;
@@ -256,7 +257,7 @@ export function checkObjCost(ctx: GameContext, player: number, id: number, modif
 export function payObjCost(ctx: GameContext, player: number, id: number, modifier: number, ignorePop: boolean): boolean {
   if (!checkObjCost(ctx, player, id, modifier, ignorePop)) return false;
   const attributes = ctx.attributes[player]!;
-  for (const c of unitType(id).creatable!.costs) {
+  for (const c of master(ctx, player, id).creatable!.costs) {
     if (c.flag === 0 || (ignorePop && c.type === ATTR_HEADROOM)) continue;
     const amount = mul32(c.amount, modifier);
     if (amount > attributes[c.type]!) {
@@ -269,7 +270,7 @@ export function payObjCost(ctx: GameContext, player: number, id: number, modifie
 
 /** `reimburse_obj_cost` (`src/tplayer.cpp:1101`): give back every flagged slot in full. */
 export function reimburseObjCost(ctx: GameContext, player: number, id: number): void {
-  const t = unitType(id);
+  const t = master(ctx, player, id);
   if (t.masterType < MASTER_TYPE_COMBAT || !t.creatable) return;
   const attributes = ctx.attributes[player]!;
   for (const c of t.creatable.costs) if (c.flag !== 0) attributes[c.type] = add32(attributes[c.type]!, c.amount);
@@ -340,12 +341,17 @@ export function emptyQueue(e: Entity): void {
 /**
  * `update_production_queue` (`src/t_b_obj.cpp:959-1029`, economy.md §5.1), after the building's own update: with no
  * train action, start one for the first record when the population is below its limit and there is headroom; then
- * advance the action, and the queue when it ends. The building's own action list never trains or researches here
- * (the make and research commands are not ported), so the queue is never flushed for that.
+ * advance the action, and the queue when it ends. While the building researches (its own action; the make command is
+ * not ported) the queue goes instead: `remove_from_production_queue(id, -1)` adds 1 to the record's short count until
+ * it wraps negative, so each record is removed without a refund, and the queue's train action is stopped unpaid.
  */
 export function updateQueue(ctx: GameContext, e: Entity): void {
   const queue = e.queue;
   if (!queue || queue.length === 0) return;
+  if (e.research) {
+    emptyQueue(e);
+    return;
+  }
   if (!e.train) {
     const attributes = ctx.attributes[e.owner]!;
     if (attributes[ATTR_POPULATION]! >= attributes[ATTR_POPULATION_LIMIT]!) return;
@@ -366,8 +372,8 @@ export function updateQueue(ctx: GameContext, e: Entity): void {
  */
 function updateTrain(ctx: GameContext, e: Entity, a: TrainAction): ActionResult {
   if (a.state === TRAIN_DONE) return ActionResult.Remove;
-  a.workDone = add32(mul32(unitType(e.type).action!.workRate, ctx.deltaSeconds), a.workDone);
-  if (f32(unitType(a.unit).creatable!.trainTime) <= a.workDone) {
+  a.workDone = add32(mul32(typeOf(ctx, e).action!.workRate, ctx.deltaSeconds), a.workDone);
+  if (f32(master(ctx, e.owner, a.unit).creatable!.trainTime) <= a.workDone) {
     a.state = TRAIN_DONE;
     if (!placeUnit(ctx, e, a.unit)) reimburseObjCost(ctx, e.owner, a.unit);
     return ActionResult.Remove;
@@ -380,12 +386,12 @@ function updateTrain(ctx: GameContext, e: Entity, a: TrainAction): ActionResult 
  * around the building; each try draws a side, then (sides 0-3) an offset along it. The first free spot gets the unit.
  */
 export function placeUnit(ctx: GameContext, e: Entity, unit: number): Entity | null {
-  const proto = unitType(unit);
-  const master = unitType(e.type);
+  const proto = master(ctx, e.owner, unit);
+  const own = typeOf(ctx, e);
   const rng = ctx.rng;
-  let rx = sub32(add32(master.radiusX, proto.radiusX), MAKE_RADIUS_ADJUSTMENT);
+  let rx = sub32(add32(own.radiusX, proto.radiusX), MAKE_RADIUS_ADJUSTMENT);
   let rx2 = add32(rx, rx);
-  let ry = sub32(add32(master.radiusY, proto.radiusY), MAKE_RADIUS_ADJUSTMENT);
+  let ry = sub32(add32(own.radiusY, proto.radiusY), MAKE_RADIUS_ADJUSTMENT);
   let ry2 = add32(ry, ry);
   let x = -1;
   let y = -1;

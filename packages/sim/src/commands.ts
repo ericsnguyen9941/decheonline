@@ -83,10 +83,23 @@ export interface AttackCommand {
   target: number;
 }
 
+/** Research order (`TRIBE_Command::do_command_research`, techs.md §3.1): building `building` researches tech `tech`. */
+export interface ResearchCommand {
+  type: 'research';
+  building: number;
+  tech: number;
+}
+
+/** Stop order (`RGE_Command::do_command_stop`, techs.md §3.5) on the listed buildings: research and queue refunded. */
+export interface StopCommand {
+  type: 'stop';
+  objects: number[];
+}
+
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand;
+export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand | ResearchCommand | StopCommand;
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
@@ -146,6 +159,17 @@ export function parseCommand(v: unknown): Command | null {
       if (!isId(target)) return null;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'attack', units: [...(units as number[])], target };
+    }
+    case 'research': {
+      const { building, tech } = o;
+      // `tech_id` is a short.
+      if (!isId(building) || !isMasterId(tech)) return null;
+      return { type: 'research', building, tech };
+    }
+    case 'stop': {
+      const { objects } = o;
+      if (!Array.isArray(objects) || objects.length === 0 || objects.length > MAX_ORDER_UNITS || !objects.every(isId)) return null;
+      return { type: 'stop', objects: [...(objects as number[])] };
     }
     default:
       return null;

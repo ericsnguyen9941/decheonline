@@ -3,7 +3,7 @@ import type { Command } from './commands';
 import { ObjectState } from './entities';
 import { ACTION_GATHER, updateWork, WORK_DROP_OFF, WORK_TO_TARGET, WORK_WORKING } from './gather';
 import { f32, mul32, MS_TO_SECONDS, add32, sub32 } from './num';
-import { GAZELLE, HUNTER, LUMBERJACK, MINE_GOLD, MINER_GOLD, TOWN_CENTER, TREES, unitType, VILLAGER } from './units';
+import { CIV_GAIA, CIV_GREEK, GAZELLE, HUNTER, LUMBERJACK, MINE_GOLD, MINER_GOLD, TOWN_CENTER, TREES, unitType, VILLAGER } from './units';
 import { ATTR_FOOD, ATTR_GOLD, ATTR_WOOD, startingObjects, World, type StartUnit } from './world';
 
 const GOLD_EARNED = 49;
@@ -25,8 +25,10 @@ function objects(...list: StartUnit[]): StartUnit[] {
 
 describe('economy.md §8.1 vector E1: gold miner fills up and drops off', () => {
   test('445 steps of 50 ms fill the miner to exactly 10.0, the mine keeps 390.0038146972656; the Town Center gets 10', () => {
+    // The Greeks have no gold-mining bonus (the Egyptians' effect gives the Gold Miner +0.2 work rate and +2 carried).
     const world = new World({
       players: 2,
+      civs: [CIV_GAIA, CIV_GREEK],
       units: objects(
         { owner: 1, type: MINER_GOLD, x: 12.5, y: 10.5 },
         { owner: 0, type: MINE_GOLD, x: 13.5, y: 10.5 },

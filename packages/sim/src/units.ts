@@ -1,4 +1,4 @@
-import { EFFECT_RECORDS, TECH_RECORDS, TERRAIN_ROWS, UNIT_RECORDS } from './unit-data';
+import { CIV_RECORDS, EFFECT_RECORDS, TECH_RECORDS, TERRAIN_ROWS, UNIT_RECORDS } from './unit-data';
 import type { SimSprite, SimUnitRecord } from './unit-record';
 
 /**
@@ -117,8 +117,8 @@ export interface MissileInfo {
 /**
  * The master-object fields the sim reads (docs/spec/movement.md §2, economy.md §2, combat.md §1). Values are generated
  * from the original `empires.dat` into `unit-data.ts` by tools/gen-sim-tables.mjs (civ 1's record, Gaia's for units
- * civ 1 lacks; every civ that has a unit has the same record) and checked against it by packages/data
- * `units.golden.test.ts`. Float fields hold float32 values.
+ * civ 1 lacks, and each civ's own fields) and checked against it by packages/data `units.golden.test.ts`. Each player
+ * owns a copy of its civ's records (`civUnitTypes`), which techs change (techs.md §4). Float fields hold float32 values.
  */
 export interface UnitType {
   id: number;
@@ -205,6 +205,13 @@ export interface BuildingInfo {
 }
 
 export const VILLAGER = 83;
+export const MARKET = 84;
+export const ARCHERY_RANGE = 87;
+export const STABLE = 101;
+export const SMALL_WALL = 72;
+export const WATCH_TOWER = 79;
+export const SLINGER = 347;
+export const FARM = 50;
 export const BUILDER = 118;
 export const LUMBERJACK = 123;
 export const HUNTER = 122;
@@ -324,11 +331,56 @@ export function toUnitType(r: SimUnitRecord): UnitType {
 
 const TYPES = UNIT_RECORDS.map(toUnitType);
 
+/** The table's records (civ 1's, or Gaia's for units civ 1 lacks), by id; per-player masters start from `civUnitTypes`. */
 export const UNIT_TYPES: ReadonlyMap<number, UnitType> = new Map(TYPES.map((t) => [t.id, t]));
+
+/** A civilization (`RGE_Civilization`): name, tech-tree effect and starting attributes. */
+export interface CivInfo {
+  name: string;
+  /** `tribe_effect`, run for the player at game start; -1 none. */
+  effect: number;
+  /** Starting player attributes (float32). */
+  resources: readonly number[];
+}
+
+/** Every civ of the dat; 0 is Gaia, 1 Egyptian, ... 16 Macedonian. */
+export const CIVS: readonly CivInfo[] = CIV_RECORDS.map(({ name, effect, resources }) => ({ name, effect, resources }));
+export const CIV_GAIA = 0;
+export const CIV_EGYPTIAN = 1;
+export const CIV_GREEK = 2;
+
+const CIV_TYPES = CIV_RECORDS.map((c) =>
+  Object.fromEntries(UNIT_RECORDS.map((r) => [r.id, c.diffs[r.id] ? toUnitType({ ...r, ...c.diffs[r.id] }) : UNIT_TYPES.get(r.id)!])),
+);
+
+/**
+ * Civ `civ`'s master records by id: its own record of every table type, the table's where the civ has none (Gaia has no
+ * Villager tasks, players no trees). Shared and never changed: a player's masters are `copyUnitType` copies.
+ */
+export function civUnitTypes(civ: number): Readonly<Record<number, UnitType>> {
+  const types = CIV_TYPES[civ];
+  if (!types) throw new Error(`civ ${civ} is not in the sim's table`);
+  return types;
+}
+
+/** A copy of `t` an effect may change without touching `t` (sprites are shared, they are never changed). */
+export function copyUnitType(t: UnitType): UnitType {
+  const weapons = (list: readonly WeaponEntry[]) => list.map((w) => ({ ...w }));
+  const storages = (list: readonly Storage[]) => list.map((s) => ({ ...s }));
+  return {
+    ...t,
+    storages: storages(t.storages),
+    action: t.action && { ...t.action, tasks: t.action.tasks.map((k) => ({ ...k })) },
+    combat: t.combat && { ...t.combat, attacks: weapons(t.combat.attacks), armours: weapons(t.combat.armours) },
+    missile: t.missile && { ...t.missile },
+    creatable: t.creatable && { ...t.creatable, costs: storages(t.creatable.costs) },
+    building: t.building && { ...t.building },
+  };
+}
 
 /** Every sprite the types above use, by graphic id. */
 const SPRITES = new Map<number, SpriteInfo>();
-for (const t of TYPES) {
+for (const t of CIV_TYPES.flatMap((types) => Object.values(types))) {
   const tasks = t.action?.tasks.flatMap((k) => [k.moving, k.proceeding, k.working, k.carrying]) ?? [];
   const sprites = [t.standing, t.walking, t.dying, t.combat?.attackSprite ?? null, t.building?.construction ?? null, ...tasks];
   for (const s of sprites) if (s) SPRITES.set(s.graphic, s);
@@ -340,6 +392,7 @@ export function spriteInfo(graphic: number): SpriteInfo {
   return s;
 }
 
+/** The table's record of `id` (civ 1's): what the client shows. The simulation reads each player's own masters. */
 export function unitType(id: number): UnitType {
   const t = UNIT_TYPES.get(id);
   if (!t) throw new Error(`unit type ${id} is not in the sim's table`);
@@ -356,10 +409,21 @@ export interface TechInfo {
   researchTime: number;
   /** Effect run on completion, -1 none. */
   effect: number;
+  /** Cost slots with a type (`attribute`, `attribute_cost`, `attribute_used`), in slot order. */
+  costs: readonly Storage[];
+  /** `build_obj_id`: the building whose button offers it, -1 none. */
+  location: number;
 }
 
 /** Every tech of the dat, by id. */
-export const TECHS: readonly TechInfo[] = TECH_RECORDS.map(([requires, required, researchTime, effect]) => ({ requires, required, researchTime, effect }));
+export const TECHS: readonly TechInfo[] = TECH_RECORDS.map(([requires, required, researchTime, effect, costs, location]) => ({
+  requires,
+  required,
+  researchTime,
+  effect,
+  costs: costs.map(storage),
+  location,
+}));
 
 /** One effect command (techs.md §2.2). */
 export interface EffectCommand {

@@ -6,10 +6,11 @@ import { ObjectState, type Entity, type EntityStore } from './entities';
 import type { TileMap } from './map';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
 import type { PathingSystem, Waypoint } from './pathing';
+import { typeOf, type PlayerMasters } from './masters';
 import type { CrtRand } from './rng';
-import { newSprite } from './sprites';
+import { newSprite, type SpriteContext } from './sprites';
 import { atan2, cos, sin } from './trig';
-import { spriteInfo, unitType, type SpriteInfo, type UnitType } from './units';
+import { spriteInfo, type SpriteInfo, type UnitType } from './units';
 
 const TWO_PI_F = f32(6.2831855);
 const FULL_CIRCLE = 6.2831853;
@@ -138,7 +139,7 @@ export function copyMover(m: Mover): Mover {
 }
 
 /** What a moving unit needs from the world while it updates. */
-export interface MoveContext {
+export interface MoveContext extends PlayerMasters {
   map: TileMap;
   entities: EntityStore;
   pathing: PathingSystem;
@@ -186,8 +187,8 @@ export function facetOf(angle: number, sprite: SpriteInfo | null): number {
 }
 
 /** The object's main sprite (its master's standing sprite before one is shown). */
-export function currentSprite(e: Entity, t?: UnitType): SpriteInfo {
-  return e.sprite ? spriteInfo(e.sprite.graphic) : (t ?? unitType(e.type)).standing;
+export function currentSprite(e: Entity, t: UnitType): SpriteInfo {
+  return e.sprite ? spriteInfo(e.sprite.graphic) : t.standing;
 }
 
 /** `maximumSpeed`: speed times the current sprite's base speed when that is positive. */
@@ -197,8 +198,8 @@ export function maximumSpeed(e: Entity, t: UnitType): number {
 }
 
 /** Facing drawn at creation: one `rand()` when the sprite has facings (movement.md §9, §11). */
-export function initialFacing(e: Entity, m: Mover, rng: CrtRand): void {
-  const s = currentSprite(e);
+export function initialFacing(e: Entity, t: UnitType, m: Mover, rng: CrtRand): void {
+  const s = currentSprite(e, t);
   m.angle = 0;
   if (s.hasFacings && s.facets > 1) {
     const k = Math.trunc((rng.rand() * s.facets) / 0x7fff);
@@ -596,9 +597,9 @@ function doMove(ctx: MoveContext, e: Entity, t: UnitType, m: Mover): number {
 }
 
 /** `RGE_Static_Object::inRange` (src/stat_obj.cpp:2268): edge-to-edge distance strictly below `range`. */
-export function inRange(e: Entity, target: Entity, range: number): boolean {
-  const a = unitType(e.type);
-  const b = unitType(target.type);
+export function inRange(ctx: PlayerMasters, e: Entity, target: Entity, range: number): boolean {
+  const a = typeOf(ctx, e);
+  const b = typeOf(ctx, target);
   let dX = sub32(target.x, e.x);
   let dY = sub32(target.y, e.y);
   if (dX < 0) dX = -dX;
@@ -629,11 +630,11 @@ export function startMoveTo(
   range: number,
   sprite: SpriteInfo | null,
   sub: boolean,
-  rng: CrtRand,
+  ctx: SpriteContext,
 ): MoveAction | null {
   const m = e.mover;
   if (!m) return null;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const r = range <= 0 ? MOVE_RANGE : f32(range);
   m.action = {
     state: MOVE_NEED_PATH,
@@ -645,29 +646,29 @@ export function startMoveTo(
     sprite: sprite ? sprite.graphic : defaultMoveSprite(t),
     sub,
   };
-  if (target && inRange(e, target, r)) setState(e, MOVE_DONE, rng);
-  else if (maximumSpeed(e, t) === 0) setState(e, MOVE_FAILED, rng);
+  if (target && inRange(ctx, e, target, r)) setState(ctx, e, MOVE_DONE);
+  else if (maximumSpeed(e, t) === 0) setState(ctx, e, MOVE_FAILED);
   return m.action;
 }
 
 /** Give `e` a new move order to (x, y): `move_to` replaces the current action (movement.md §5). */
-export function orderMove(e: Entity, x: number, y: number, rng: CrtRand): void {
+export function orderMove(ctx: SpriteContext, e: Entity, x: number, y: number): void {
   const m = e.mover;
   if (!m) return;
   // The old action's destructor clears user waypoints and stops the unit.
   endAction(m);
-  startMoveTo(e, null, x, y, 0, MOVE_RANGE, null, false, rng);
+  startMoveTo(e, null, x, y, 0, MOVE_RANGE, null, false, ctx);
 }
 
 /**
  * `RGE_Action_Move_To::set_state`: moving shows the move sprite; done or failed show the standing sprite again unless
  * this is a sub-action. A sprite that actually changes is a new active sprite (docs/spec/sprites.md §2, §4).
  */
-function setState(e: Entity, state: number, rng: CrtRand): void {
+function setState(ctx: SpriteContext, e: Entity, state: number): void {
   const a = e.mover!.action!;
   a.state = state;
-  if (state === MOVE_MOVING) newSprite(e, spriteInfo(a.sprite), rng);
-  else if ((state === MOVE_DONE || state === MOVE_FAILED) && !a.sub) newSprite(e, null, rng);
+  if (state === MOVE_MOVING) newSprite(ctx, e, spriteInfo(a.sprite));
+  else if ((state === MOVE_DONE || state === MOVE_FAILED) && !a.sub) newSprite(ctx, e, null);
 }
 
 /** End the action: the list drops it, its destructor clears user waypoints and stops the unit. */
@@ -698,7 +699,7 @@ export function updateMover(ctx: MoveContext, e: Entity): ActionResult {
 }
 
 function updateMoveTo(ctx: MoveContext, e: Entity, m: Mover, action: MoveAction): ActionResult {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   let target: Entity | undefined;
   if (action.target !== -1) {
     target = ctx.entities.get(action.target);
@@ -709,8 +710,8 @@ function updateMoveTo(ctx: MoveContext, e: Entity, m: Mover, action: MoveAction)
   }
   switch (action.state) {
     case MOVE_NEED_PATH: {
-      if (target && inRange(e, target, action.range)) {
-        setState(e, MOVE_DONE, ctx.rng);
+      if (target && inRange(ctx, e, target, action.range)) {
+        setState(ctx, e, MOVE_DONE);
         m.waitingToMove = false;
         m.group = [];
         return ActionResult.Completed;
@@ -729,23 +730,23 @@ function updateMoveTo(ctx: MoveContext, e: Entity, m: Mover, action: MoveAction)
         m.finalUserWaypoint = true;
       }
       m.actionRange = action.range;
-      const tt = target && unitType(target.type);
+      const tt = target && typeOf(ctx, target);
       m.targetId = target ? target.id : -1;
       m.targetRadiusX = tt ? tt.radiusX : 0;
       m.targetRadiusY = tt ? tt.radiusY : 0;
-      if (findPath(ctx, e, t, m) === PathResult.Found) setState(e, MOVE_MOVING, ctx.rng);
+      if (findPath(ctx, e, t, m) === PathResult.Found) setState(ctx, e, MOVE_MOVING);
       return ActionResult.Continue;
     }
     case MOVE_MOVING: {
       if (targetMoved(action, target)) return retarget(ctx, e, m, action);
       const r = doMove(ctx, e, t, m);
       if (r === 0) {
-        setState(e, MOVE_DONE, ctx.rng);
+        setState(ctx, e, MOVE_DONE);
         return ActionResult.Failed;
       }
       if (r === 2) {
         if (targetMoved(action, target)) return retarget(ctx, e, m, action);
-        setState(e, MOVE_DONE, ctx.rng);
+        setState(ctx, e, MOVE_DONE);
         return ActionResult.Completed;
       }
       return ActionResult.Continue;
@@ -753,7 +754,7 @@ function updateMoveTo(ctx: MoveContext, e: Entity, m: Mover, action: MoveAction)
     case MOVE_DONE:
       return ActionResult.Remove;
     default:
-      setState(e, action.state, ctx.rng);
+      setState(ctx, e, action.state);
       return ActionResult.Failed;
   }
 }

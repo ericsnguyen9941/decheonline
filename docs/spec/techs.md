@@ -122,7 +122,16 @@ research included (`src/tcommand.cpp:37`; `core.md` §4). Then
 
 The command does **not** check that the tech belongs to this building
 (`build_obj_id`) or that the player owns the building; the UI does
-(unverified where; out of scope).
+(unverified where; out of scope). Last, the building's unit AI gets
+`setCurrentAction(RESEARCH 0x26c)` and `setCurrentTarget(unique_id, -1,
+-1, -1, -1)` (`src/tcommand.cpp:156-159`), the order unchanged.
+
+Port (`packages/sim/src/research.ts` `orderResearch`, `world.ts`
+`doCommandResearch`): the `research` command `{building, tech}`. Port-side
+guards as for `queue` (`economy.md` §5.5): a building the sender does not
+own, one not active, an object without a production queue, or a tech id
+outside the table is ignored after the per-command `rand()`. The tech's
+location is not checked, as in the original.
 
 ### 3.2 Affordability (`check_tech_cost`, `src/tech.cpp:374-421`, D)
 
@@ -201,6 +210,26 @@ can complete any non-disabled tech instantly.
   its action list (`src/act_obj.cpp:398-400`).
 - `research_done` is cleared only by `cancel_research`; it survives
   `undo_tech`/`disable`.
+- **Stop command on a building** (`RGE_Command::do_command_stop`,
+  `src/command.cpp:262-277`, no owner check) → `TRIBE_Building_Object::stop`
+  (`src/t_b_obj.cpp:1049-1054`): `RGE_Combat_Object::stop`
+  (`src/com_obj.cpp:103-111`) runs `action_stop` on the top action (a
+  research: the player stop above, refunded; with no action,
+  `delete_list`), then the unit AI's `stopObject(1)` (`stopAction`: delete
+  the now-done action, standing sprite); then
+  `remove_from_production_queue(first id, 1)` until the queue is empty,
+  each unit refunded. The UI shows this Stop button while the building
+  researches, or trains with a queue (`src/scr_game.cpp:2759-2780`).
+  Port: the `stop` command `{objects}`, buildings only (stopping units is
+  not ported), the sender's own active buildings only (`economy.md` §5.5).
+- **The production queue while researching**: `update_production_queue`
+  removes every queue record while the building's own action is a research
+  (`economy.md` §5.1 step 2) **without a refund**, the queue's train action
+  stopped unpaid. A research command is accepted while units are queued
+  (only an own make/research action blocks it), so queued units are lost.
+  Whether the retail UI lets a player click a research with units queued
+  is **unverified** (the button grid lists techs next to the queue's Stop,
+  `src/scr_game.cpp:2768-2780`).
 
 ### 3.7 Opening techs (`check_for_new_tech`, `src/tech.cpp:476-527`, **N**)
 
@@ -492,6 +521,23 @@ Pit, work rate 1.0); effect 40.
 - Tool Working (tech 46, 40 s) researched at a rate-1.5 building (only a
   Dock has that; illustrative): `work = 0.15000000596046448`, 267 steps.
 
+**Vector R1, 90 ms steps** (the port's `STEP_MS`): `delta_s = work =
+fround(90 × 0.001f) = 0.09000000357627869` at a rate-1 building.
+
+| tech | research | steps | sum at completion |
+| --- | --- | --- | --- |
+| 10 / 39 / 62 (Granary / Storage Pit / Barracks built), free | 2 | 23 | 2.070000410079956 |
+| Leather Armor – Soldiers (40) | 30 | 334 | 30.060041427612305 |
+| Tool Age (101) | 120 | 1334 | 120.05781555175781 |
+| Bronze Age (102) | 140 | 1556 | 140.03700256347656 |
+| Iron Age (103) | 160 | 1778 | 160.0161895751953 |
+
+The command's step counts as step 1 (§6): a Tool Age ordered by a command
+that runs on step N is done during the update of step N + 1333, its 500
+food paid in step N before any work. `research_done` keeps the sum after
+completion. Tests: `packages/sim/src/research.test.ts` "techs.md §7.1
+vector R1" (the 90 ms, 100 ms and 2-second rows, and the command path).
+
 ### 7.2 Cost and refund
 
 Iron Age (tech 103): costs 1000 food (slot 0) and 800 gold (slot 1).
@@ -563,6 +609,37 @@ At player creation `check_for_new_tech` runs once (ascending ids):
   back to 0 (§3.8); Tool Age, if not yet researched, re-locks on the next
   check. Effects already applied stay.
 
+### 7.5 Vector R2: the Tool Age through commands
+
+Egyptian player 1 on the test map (`startingObjects(3)`), food and wood
+set to 2000: its Villagers build a House, a Granary and a Barracks. The
+finished Granary and Barracks complete techs 10 and 62 (`on_build_make_tech`),
+which complete shadow tech 74 (2 of 0/10/39/62); the Tool Age (101,
+prerequisites 74 and 100) becomes state 1. The `research` command at the
+Town Center pays 500 food; 1334 steps later (R1) the Tool Age is done:
+
+- effect 95: attribute 6 (age) = 2; Town Center (109) facet = 2; House
+  (70) ← House1 (154) by `copy_obj` (id and `enabled` kept; the built
+  House instance swaps to House1's standing sprite 234); attribute 21
+  (technology count) +1; attribute 30 (building allowance) +8; Scout (299)
+  line of sight +2;
+- `check_for_new_tech` then completes the zero-time techs it opens:
+  94 (101 + Granary built 10, effect 77: enable Market 84), 95 (101 +
+  Barracks built 62, effect 75: enable Archery Range 87), 97 (101 + 62,
+  effect 79: enable Stable 101), 123 (101, effect 201: enable Slinger
+  347); techs 11 (Stone Wall, effect 11: enable wall 72) and 16 (Watch
+  Tower, effect 12: enable 79), 50 food and 10 s at the Granary, open
+  (state 1); the Bronze Age (102) stays 0 until tech 75 (2 of Market 26,
+  Range 55, Stable 67 built);
+- the Villagers build an Archery Range (87); when it is finished its tech
+  55 (2 s, free, no prerequisite, so state 1 from the start) is done by
+  `on_build_make_tech`, and effect 55 enables the Bowman (4); a `queue`
+  of one Bowman at the Range trains it.
+
+Player 2 (no commands) keeps its masters, tech states and attributes
+exactly as at game start: effects change only the researching player's
+masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
+
 ## 8. Unverified / inferred points
 
 - `check_for_new_tech` is **N**: the single-pass order, recursion and the
@@ -585,7 +662,13 @@ At player creation `check_for_new_tech` runs once (ascending ids):
 
 - **Data model:** keep per-player copies of every master (unit type) and
   let objects reference the master; master-level effects must reach live
-  objects without iterating them. Per player keep `{researchDone: f32,
+  objects without iterating them. Port: `World.masters[player][id]`
+  (`packages/sim/src/masters.ts`), copies of the player's civ's records
+  (`civUnitTypes`, generated per civ in `unit-data.ts` `CIV_RECORDS`);
+  every object reads its owner's copy (`typeOf`); the civ effect runs at
+  game start after the starting objects (§3.8). The world hashes each
+  player's masters once per change (`mastersChanged`, called by
+  `doEffect`). Per player keep `{researchDone: f32,
   state: i16}` per tech.
 - **Order:** within one effect, apply every type-102 row first, then
   rows 0–5 in list order. Within a row: instances (in the player's

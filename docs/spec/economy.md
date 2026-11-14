@@ -430,8 +430,13 @@ deletes the running train action.
 building's update after its own action list (`src/t_b_obj.cpp:356-361`):
 1. Disabled or empty: nothing.
 2. If the building's main action list is training or researching (action
-   type 0x66 / 0x67): the whole queue is removed with refunds
-   (`:1024-1027`).
+   type 0x66 / 0x67): the whole queue is removed **without refunds**
+   (`:1024-1027`): `remove_from_production_queue(first id, -1)` refunds
+   `min(count, -1)` = no unit and subtracts −1, so the record's `short`
+   count climbs until it wraps to −32768 and the record goes; at index 0
+   the queue's train action is stopped and deleted (pre-paid, nothing
+   back). Port: `updateQueue` empties the queue while `e.research` exists
+   (`techs.md` §3.6).
 3. Else, if no train action exists: if `population ≥ population_limit`
    wait (attribute 32 needed); else if `headroom > 0` create
    `TRIBE_Action_Make_Obj(first id, pre_paid = 1)` and add it; else wait
@@ -591,7 +596,9 @@ where noted. Computed with a scratch script, not with the game.
 
 ### 8.1 Vector E1: gold miner fills up and drops off
 
-Miner-Gold (251): `workRate` 0.45f, `workValue1` 1, cap 10,
+Miner-Gold (251) of a civ without a gold bonus (the Egyptian civ effect
+adds 0.2 work rate and 2 capacity; the test plays the Greeks): `workRate`
+0.45f, `workValue1` 1, cap 10,
 `resourceMultiplier` 47 with `attributes[47] = 1`; target Mine-Gold (66),
 400 gold, Gaia-owned; miner already facing the mine (state 7).
 
@@ -689,11 +696,12 @@ Kept as behaviour (the target is the original game):
   non-food load (`src/tact_bld.cpp:224-230`, `src/act_gath.cpp:59`).
 - `update_production_queue` step 2 calls `remove_from_production_queue`
   with count −1: the refund loop runs 0 times and the count goes **up** by
-  1, so the `while` would never end (`src/t_b_obj.cpp:1024-1027`,
-  `:872-884`). Reading the code, this path would hang the game; that it is
-  reachable (queue non-empty while the main list trains or researches) is
-  **unverified** — the UI may forbid it (`src/scr_game.cpp:2759-2776`).
-  `beta-only?`
+  1 per call (`src/t_b_obj.cpp:1024-1027`, `:872-884`). The count is a
+  `short` (`include/t_b_obj.h:8-11`), so it wraps to −32768 after at most
+  32 767 calls and the record is removed: the loop ends, nothing is
+  refunded (§5.1). A research command is accepted with units queued
+  (`techs.md` §3.6), so the path is reachable by command; whether the UI
+  offers it is **unverified**.
 - Train actions destroyed with their building never tell the AI
   (`src/tact_mob.cpp:36-45`); AI-only.
 

@@ -7,12 +7,13 @@ import { isBuilding } from './buildings';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, transform } from './gather';
+import { master, typeOf, type PlayerMasters } from './masters';
 import { ActionResult, currentSprite, endAction, facetOf, maximumSpeed, startMoveTo, updateMover } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
 import { framePassed, newSprite } from './sprites';
 import { atan2, cos, sin } from './trig';
 import { AI_ACTION_ATTACK, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
-import { spriteInfo, unitType, type SpriteInfo } from './units';
+import { spriteInfo, type SpriteInfo } from './units';
 
 /** `RGE_Action_Attack` states (combat.md §3.2). */
 export const ATTACK_DONE = 1;
@@ -89,9 +90,9 @@ function length32(dx: number, dy: number): number {
 }
 
 /** `distance_to_object` (src/stat_obj.cpp:2299): edge to edge. */
-export function distanceToObject(e: Entity, target: Entity): number {
-  const a = unitType(e.type);
-  const b = unitType(target.type);
+export function distanceToObject(ctx: PlayerMasters, e: Entity, target: Entity): number {
+  const a = typeOf(ctx, e);
+  const b = typeOf(ctx, target);
   let gx = sub32(sub32(Math.abs(sub32(target.x, e.x)), a.radiusX), b.radiusX);
   let gy = sub32(sub32(Math.abs(sub32(target.y, e.y)), a.radiusY), b.radiusY);
   if (gx < 0) gx = 0;
@@ -100,8 +101,8 @@ export function distanceToObject(e: Entity, target: Entity): number {
 }
 
 /** `angle_to_object` (src/move_obj.cpp:340): the turn still needed, in facets of the current sprite. */
-function angleToObject(e: Entity, x: number, y: number): number {
-  const s = currentSprite(e);
+function angleToObject(ctx: PlayerMasters, e: Entity, x: number, y: number): number {
+  const s = currentSprite(e, typeOf(ctx, e));
   if (!s.hasFacings || s.facets <= 0) return 0;
   let a = f32(atan2(sub32(y, e.y), sub32(x, e.x)));
   if (a < 0) a = sub32(a, -TWO_PI_F);
@@ -117,18 +118,18 @@ function angleToObject(e: Entity, x: number, y: number): number {
  */
 export function turnTowards(ctx: GameContext, e: Entity, x: number, y: number): boolean {
   const m = e.mover!;
-  let delta = angleToObject(e, x, y);
+  let delta = angleToObject(ctx, e, x, y);
   if (delta <= 0.5 && delta >= -0.5) return true;
   const now = mul32(f32(ctx.worldTime), TIME_SCALE);
-  if (sub32(now, e.turnTowardsTime ?? 0) < unitType(e.type).turnSpeed) return false;
-  const s = currentSprite(e);
+  if (sub32(now, e.turnTowardsTime ?? 0) < typeOf(ctx, e).turnSpeed) return false;
+  const s = currentSprite(e, typeOf(ctx, e));
   const step = f32(FULL_CIRCLE / s.facets);
   m.angle = delta < 0 ? sub32(m.angle, step) : add32(m.angle, step);
   if (m.angle < 0) m.angle = sub32(m.angle, -TWO_PI_F);
   else if (m.angle > TWO_PI_F) m.angle = sub32(m.angle, TWO_PI_F);
   m.facet = facetOf(m.angle, s);
   e.turnTowardsTime = now;
-  delta = angleToObject(e, x, y);
+  delta = angleToObject(ctx, e, x, y);
   return delta <= 0.5 && delta >= -0.5;
 }
 
@@ -146,7 +147,7 @@ export function startAttack(
   range: number,
   sub: boolean,
 ): AttackAction {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const c = t.combat!;
   let r = f32(range);
   if (r === 0) r = c.range === 0 ? DEFAULT_RANGE : c.range;
@@ -180,11 +181,11 @@ export function startAttack(
 export function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, state: number): void {
   if (e.mover?.action) endAction(e.mover);
   a.state = state;
-  const c = unitType(e.type).combat!;
+  const c = typeOf(ctx, e).combat!;
   switch (state) {
     case ATTACK_MOVING: {
       const target = a.target === -1 ? null : (ctx.entities.get(a.target) ?? null);
-      startMoveTo(e, target, a.x, a.y, a.z, a.range, spriteInfo(a.moveSprite), true, ctx.rng);
+      startMoveTo(e, target, a.x, a.y, a.z, a.range, spriteInfo(a.moveSprite), true, ctx);
       a.timer = 0;
       return;
     }
@@ -196,16 +197,16 @@ export function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, sta
       }
       // `ready_to_attack` may itself have switched to 4 or 13.
       if (a.state !== ATTACK_WAITING) return;
-      newSprite(e, spriteInfo(c.projectileUnitId === -1 ? a.fightSprite : a.waitSprite), ctx.rng);
+      newSprite(ctx, e, spriteInfo(c.projectileUnitId === -1 ? a.fightSprite : a.waitSprite));
       return;
     case ATTACK_ATTACKING:
-      newSprite(e, spriteInfo(a.fightSprite), ctx.rng);
+      newSprite(ctx, e, spriteInfo(a.fightSprite));
       a.needToAttack = true;
       return;
     case ATTACK_DONE:
     case ATTACK_FAILED:
     case ATTACK_INVALID:
-      newSprite(e, spriteInfo(a.waitSprite), ctx.rng);
+      newSprite(ctx, e, spriteInfo(a.waitSprite));
       return;
   }
 }
@@ -214,7 +215,7 @@ export function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, sta
 function readyToAttack(ctx: GameContext, e: Entity, a: AttackAction): boolean {
   const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
   if (!turnTowards(ctx, e, target ? target.x : a.x, target ? target.y : a.y)) return false;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const reach = sub32(add32(length32(t.radiusX, t.radiusY), a.range), RANGE_SLACK);
   let ready = false;
   if (!target) {
@@ -231,7 +232,7 @@ function readyToAttack(ctx: GameContext, e: Entity, a: AttackAction): boolean {
     const dz = sub32(target.z, a.z);
     if (dx <= HALF && dx >= -HALF && dy <= HALF && dy >= -HALF && dz <= HALF && dz >= -HALF) ready = true;
     else {
-      const d = distanceToObject(e, target);
+      const d = distanceToObject(ctx, e, target);
       if (d < a.minRange) return tooClose(ctx, e, a);
       if (d <= reach) {
         a.x = target.x;
@@ -250,7 +251,7 @@ function readyToAttack(ctx: GameContext, e: Entity, a: AttackAction): boolean {
 
 /** Too close: a mobile unit without a unit AI just waits (src/act_atak.cpp:499-512). */
 function tooClose(ctx: GameContext, e: Entity, a: AttackAction): boolean {
-  if (maximumSpeed(e, unitType(e.type)) !== 0) return false;
+  if (maximumSpeed(e, typeOf(ctx, e)) !== 0) return false;
   setAttackState(ctx, e, a, ATTACK_FAILED);
   return false;
 }
@@ -298,7 +299,7 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
       }
     case ATTACK_WAITING:
       if (readyToAttack(ctx, e, a)) {
-        e.attackTimer = unitType(e.type).combat!.reloadTime;
+        e.attackTimer = typeOf(ctx, e).combat!.reloadTime;
         setAttackState(ctx, e, a, ATTACK_ATTACKING);
       }
       return ActionResult.Continue;
@@ -309,7 +310,7 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
             setAttackState(ctx, e, a, ATTACK_TARGET_LOST);
             return ActionResult.Continue;
           }
-          e.attackTimer = unitType(e.type).combat!.reloadTime;
+          e.attackTimer = typeOf(ctx, e).combat!.reloadTime;
           setAttackState(ctx, e, a, ATTACK_WAITING);
           // `set_state(6)` may have moved on to 13 or 4 (src/act_atak.cpp:345-350).
           const now = a.state as number;
@@ -317,13 +318,13 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
           setAttackState(ctx, e, a, ATTACK_ATTACKING);
         }
         if (!a.needToAttack) {
-          if (!e.sprite?.looped && (currentSprite(e).flags & 1) !== 0) return ActionResult.Continue;
+          if (!e.sprite?.looped && (currentSprite(e, typeOf(ctx, e)).flags & 1) !== 0) return ActionResult.Continue;
           setAttackState(ctx, e, a, a.target === -1 ? ATTACK_TARGET_LOST : ATTACK_WAITING);
           return ActionResult.Continue;
         }
       }
-      const c = unitType(e.type).combat!;
-      const frame = c.frameDelay !== 0 ? c.frameDelay : toInt(mul32(currentSprite(e).frames, HALF)) << 16 >> 16;
+      const c = typeOf(ctx, e).combat!;
+      const frame = c.frameDelay !== 0 ? c.frameDelay : toInt(mul32(currentSprite(e, typeOf(ctx, e)).frames, HALF)) << 16 >> 16;
       if (e.sprite && framePassed(e.sprite, frame)) {
         const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
         if (target) launch(ctx, e, target);
@@ -346,7 +347,7 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
  * throws.
  */
 export function launch(ctx: GameContext, e: Entity, target: Entity): void {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const c = t.combat!;
   if (c.projectileUnitId >= 0 && target.owner > 0) ctx.create(target.owner, FLARE, e.x, e.y, e.z);
   if (c.projectileUnitId < 0) {
@@ -382,23 +383,23 @@ export function launch(ctx: GameContext, e: Entity, target: Entity): void {
 
 /** `do_attack` (combat.md §4.3) without blast: one hit roll, then damage on a hit. */
 export function doAttack(ctx: GameContext, attacker: Entity, target: Entity): void {
-  const c = unitType(attacker.type).combat!;
+  const c = typeOf(ctx, attacker).combat!;
   const chance = Math.trunc((ctx.rng.rand() * 100) / 0x7fff);
   if (chance > c.accuracy) return;
-  damage(ctx, target, attacker, attackModifier(attacker, target));
+  damage(ctx, target, attacker, attackModifier(ctx, attacker, target));
 }
 
 /** `calc_attack_modifier` (combat.md §2.3) on flat ground: only the attacker's and target's z decide. */
-function attackModifier(attacker: Entity, target: Entity): number {
-  const c = unitType(attacker.type).combat!;
+function attackModifier(ctx: PlayerMasters, attacker: Entity, target: Entity): number {
+  const c = typeOf(ctx, attacker).combat!;
   if (c.projectileUnitId >= 0) return attacker.z > target.z ? f32(1.5) : 1;
   return attacker.z < target.z ? MELEE_LOW : 1;
 }
 
 /** `calculateDamage` (combat.md §2.2) with the defence terrain multiplier 1. */
-function armouredDamage(attacker: Entity, target: Entity, modifier: number): number {
-  const weapon = unitType(attacker.type).combat!;
-  const defence = unitType(target.type).combat!;
+function armouredDamage(ctx: PlayerMasters, attacker: Entity, target: Entity, modifier: number): number {
+  const weapon = typeOf(ctx, attacker).combat!;
+  const defence = typeOf(ctx, target).combat!;
   let total = 0;
   for (const w of weapon.attacks) {
     let armour = defence.baseArmour;
@@ -415,11 +416,11 @@ function armouredDamage(attacker: Entity, target: Entity, modifier: number): num
  * `src/t_c_obj.cpp:212`).
  */
 function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: number): void {
-  const tt = unitType(target.type);
+  const tt = typeOf(ctx, target);
   if (!tt.combat) {
     // `RGE_Static_Object::damage`: plain sum of the weapon values, no armour, no minimum; a kill wakes it.
     let total = 0;
-    for (const w of unitType(attacker.type).combat!.attacks) total = add32(mul32(w.amount, modifier), total);
+    for (const w of typeOf(ctx, attacker).combat!.attacks) total = add32(mul32(w.amount, modifier), total);
     target.hp = sub32(target.hp, total);
     if (target.hp < 1) {
       target.hp = 0;
@@ -431,7 +432,7 @@ function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: nu
   if (isBuilding(tt)) {
     if (before <= 0) return;
     combatDamage(ctx, target, attacker, modifier);
-    const at = unitType(attacker.type);
+    const at = typeOf(ctx, attacker);
     const least = ARCHER_GROUPS.includes(at.group) || TOWERS.includes(at.id) ? BUILDING_MIN_LOSS_ARCHER : 1;
     if (sub32(before, target.hp) < least) target.hp = sub32(before, least);
     if (target.owner > 0 && target.hp < 1) {
@@ -442,7 +443,7 @@ function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: nu
   }
   if (before < 1) return;
   combatDamage(ctx, target, attacker, modifier);
-  if (target.hp < 1 && unitType(attacker.type).group !== GROUP_CIVILIAN) target.heldAmount = 0;
+  if (target.hp < 1 && typeOf(ctx, attacker).group !== GROUP_CIVILIAN) target.heldAmount = 0;
   if (sub32(before, target.hp) < 1) target.hp = sub32(before, 1);
   if (target.owner > 0 && target.hp < 1) {
     const kills = ctx.attributes[attacker.owner]!;
@@ -455,7 +456,7 @@ function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: nu
  * the hp left (as an int, before the clamp), then clamp below 1 to 0.
  */
 function combatDamage(ctx: GameContext, target: Entity, attacker: Entity, modifier: number): void {
-  target.hp = sub32(target.hp, armouredDamage(attacker, target, modifier));
+  target.hp = sub32(target.hp, armouredDamage(ctx, attacker, target, modifier));
   notifyObject(ctx, target, attacker.id, NOTIFY_ATTACKED, attacker.id, Math.trunc(target.hp));
   if (target.hp < 1) target.hp = 0;
 }
@@ -471,10 +472,10 @@ export function combatAttack(ctx: GameContext, e: Entity, target: Entity, uncond
     if (!unconditional) return true;
     return attackWork(ctx, e, target);
   }
-  if (!e.mover || !unitType(e.type).combat) return false;
-  if (unitType(e.type).group === GROUP_CIVILIAN) transform(ctx, e, unitType(MAN));
-  const c = unitType(e.type).combat!;
-  deleteActions(e);
+  if (!e.mover || !typeOf(ctx, e).combat) return false;
+  if (typeOf(ctx, e).group === GROUP_CIVILIAN) transform(ctx, e, master(ctx, e.owner, MAN));
+  const c = typeOf(ctx, e).combat!;
+  deleteActions(ctx, e);
   startAttack(ctx, e, target, null, null, c.range, false);
   return true;
 }
@@ -493,12 +494,12 @@ export function attackWork(ctx: GameContext, e: Entity, target: Entity): boolean
 
 /** `RGE_Action_Missile::set_state(3)` (combat.md §5.2): aim at the target and fly (state 4). */
 function aim(ctx: GameContext, e: Entity, a: MissileAction): void {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const mi = t.missile!;
   const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
   const tx = target ? target.x : a.x;
   const ty = target ? target.y : a.y;
-  const tz = target ? add32(mul32(unitType(target.type).radiusZ, HALF), target.z) : a.z;
+  const tz = target ? add32(mul32(typeOf(ctx, target).radiusZ, HALF), target.z) : a.z;
   let dx = sub32(tx, e.x);
   let dy = sub32(ty, e.y);
   const dz = sub32(tz, e.z);
@@ -522,7 +523,7 @@ function aim(ctx: GameContext, e: Entity, a: MissileAction): void {
     a.vy = mi.type === 0 ? div32(dy, d) : dy;
     a.vz = mi.type === 0 ? div32(dz, d) : dz;
     e.mover!.angle = f32(atan2(a.vy, a.vx));
-    e.mover!.facet = facetOf(e.mover!.angle, currentSprite(e));
+    e.mover!.facet = facetOf(e.mover!.angle, currentSprite(e, typeOf(ctx, e)));
     if (mi.type === 0) a.timer = 0;
   }
   if (mi.ballistics > 0) {
@@ -541,7 +542,7 @@ function aim(ctx: GameContext, e: Entity, a: MissileAction): void {
 export function updateMissile(ctx: GameContext, e: Entity): ActionResult {
   const a = e.missile;
   if (!a) return ActionResult.Remove;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const mi = t.missile!;
   const dt = ctx.deltaSeconds;
   const s = mul32(t.speed, dt);
@@ -576,7 +577,7 @@ export function updateMissile(ctx: GameContext, e: Entity): ActionResult {
   const hitGround = missileMove(ctx, e, a, vx, vy, vz);
   const source = (a.launcher === -1 ? undefined : ctx.entities.get(a.launcher)) ?? e;
   const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
-  if ((mi.type === 0 || mi.type === 2) && target && collides(e, target, s)) {
+  if ((mi.type === 0 || mi.type === 2) && target && collides(ctx, e, target, s)) {
     doAttack(ctx, source, target);
     die(ctx, e, a);
   } else if (mi.type === 3 && target) {
@@ -601,9 +602,9 @@ function missileMove(ctx: GameContext, e: Entity, a: MissileAction, vx: number, 
 }
 
 /** `make_object_collision_list` (src/misl_obj.cpp:94) for one candidate: within 3 tiles and inside the swept box. */
-function collides(e: Entity, o: Entity, s: number): boolean {
-  const t = unitType(e.type);
-  const ot = unitType(o.type);
+function collides(ctx: PlayerMasters, e: Entity, o: Entity, s: number): boolean {
+  const t = typeOf(ctx, e);
+  const ot = typeOf(ctx, o);
   if (t.radiusX <= 0 || t.radiusY <= 0 || ot.radiusX <= 0 || ot.radiusY <= 0) return false;
   const minX = Math.max(0, toInt(sub32(e.x, MISSILE_SPAN)));
   const minY = Math.max(0, toInt(sub32(e.y, MISSILE_SPAN)));

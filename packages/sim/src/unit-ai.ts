@@ -11,10 +11,11 @@ import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { aiWork, deleteActions, workMoveTo, ACTION_ATTACK, ACTION_GATHER, ACTION_HUNT, ACTION_MOVE } from './gather';
 import { ACTION_BUILD } from './build';
+import { hasMaster, typeOf, type PlayerMasters } from './masters';
 import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { newSprite } from './sprites';
-import { UNIT_TYPES, unitType, type UnitType } from './units';
+import type { UnitType } from './units';
 
 /** Unit AI actions (`UNIT_AI_ACTION_*`, include/stat_obj.h). */
 export const AI_ACTION_ATTACK = 0x258;
@@ -28,7 +29,7 @@ const AI_ACTION_FOLLOW = 0x264;
 export const AI_ACTION_HUNT = 0x265;
 const AI_ACTION_REPAIR = 0x26a;
 const AI_ACTION_TRAIN = 0x26b;
-const AI_ACTION_RESEARCH = 0x26c;
+export const AI_ACTION_RESEARCH = 0x26c;
 /** Unit AI orders (`UNIT_AI_ORDER_*`): an order is its action + 100. */
 export const AI_ORDER_ATTACK = 0x2bc;
 export const AI_ORDER_BUILD = 0x2be;
@@ -269,6 +270,14 @@ export function setAiState(e: Entity, order: number, action: number, target: num
   setTarget(ai, target, x, y, z);
 }
 
+/** `setCurrentAction(action)` then `setCurrentTarget(target, -1, -1, -1, -1)`, the order kept (a building's train or research). */
+export function setAiAction(e: Entity, action: number, target: number): void {
+  const ai = e.ai;
+  if (!ai) return;
+  setAction(ai, action);
+  setTarget(ai, target, -1, -1, -1);
+}
+
 function setAction(ai: UnitAI, action: number): void {
   ai.lastAction = ai.action;
   ai.action = action;
@@ -292,7 +301,7 @@ function removeCurrentTarget(ai: UnitAI): void {
 
 /** The object has a game action at the top of its list. */
 function hasAction(e: Entity): boolean {
-  return !!(e.work || e.attack || e.mover?.action);
+  return !!(e.work || e.attack || e.mover?.action || e.research);
 }
 
 /**
@@ -359,7 +368,7 @@ export function updateUnitAI(ctx: GameContext, e: Entity, uTime: number): void {
         if (idle === IDLE_NOTHING) {
           if (order !== AI_ORDER_STAND_GROUND) {
             // The fallback walks to where the target stood when the attack began (decomp @bug, aiuaimod.cpp:449).
-            if (!aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, weaponRange(e), true)) {
+            if (!aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, weaponRange(ctx, e), true)) {
               removeCurrentTarget(ai);
               stopObject(ctx, e, true);
             } else {
@@ -423,7 +432,7 @@ export function updateUnitAI(ctx: GameContext, e: Entity, uTime: number): void {
 }
 
 /** `stopObject` (src/aiuaimod.cpp:1733): `stopAction` drops every action and shows the standing sprite. */
-function stopObject(ctx: GameContext, e: Entity, checkOrderAndAction: boolean): void {
+export function stopObject(ctx: GameContext, e: Entity, checkOrderAndAction: boolean): void {
   const ai = e.ai!;
   ai.lastAction = ai.action;
   if (!checkOrderAndAction || ai.action + 100 === ai.order) {
@@ -431,21 +440,21 @@ function stopObject(ctx: GameContext, e: Entity, checkOrderAndAction: boolean): 
     ai.order = -1;
     ai.priority = -1;
   }
-  deleteActions(e);
-  newSprite(e, null, ctx.rng);
+  deleteActions(ctx, e);
+  newSprite(ctx, e, null);
   ai.action = -1;
 }
 
-/** `weaponRange()`: the master's weapon range; 0 for objects without combat data. */
-function weaponRange(e: Entity): number {
-  return unitType(e.type).combat?.range ?? 0;
+/** `weaponRange(ctx, )`: the master's weapon range; 0 for objects without combat data. */
+function weaponRange(ctx: PlayerMasters, e: Entity): number {
+  return typeOf(ctx, e).combat?.range ?? 0;
 }
 
 /** `inAttackRange` (src/com_obj.cpp:890): edge distance within range + own radius + 0.3. */
-function inAttackRange(e: Entity, target: Entity): boolean {
-  const t = unitType(e.type);
+function inAttackRange(ctx: PlayerMasters, e: Entity, target: Entity): boolean {
+  const t = typeOf(ctx, e);
   const radius = sqrt32(add32(mul32(t.radiusX, t.radiusX), mul32(t.radiusY, t.radiusY)));
-  return distanceToObject(e, target) <= add32(add32(weaponRange(e), radius), f32(0.3));
+  return distanceToObject(ctx, e, target) <= add32(add32(weaponRange(ctx, e), radius), f32(0.3));
 }
 
 /**
@@ -454,11 +463,11 @@ function inAttackRange(e: Entity, target: Entity): boolean {
  */
 function canPath(ctx: GameContext, e: Entity, target: Entity, range: number): boolean {
   if (!e.mover) return false;
-  return ctx.pathing.findTilePath(e, unitType(e.type), toInt(e.x), toInt(e.y), toInt(target.x), toInt(target.y), range, target.id).found;
+  return ctx.pathing.findTilePath(e, typeOf(ctx, e), toInt(e.x), toInt(e.y), toInt(target.x), toInt(target.y), range, target.id).found;
 }
 
-function canAttackUnit(ai: UnitAI, target: Entity): boolean {
-  if (ai.kind === AiClass.Soldier || ai.kind === AiClass.Civilian || ai.kind === AiClass.Tower) return unitType(target.type).group !== GROUP_ARTIFACT;
+function canAttackUnit(ctx: PlayerMasters, ai: UnitAI, target: Entity): boolean {
+  if (ai.kind === AiClass.Soldier || ai.kind === AiClass.Civilian || ai.kind === AiClass.Tower) return typeOf(ctx, target).group !== GROUP_ARTIFACT;
   return true;
 }
 
@@ -473,7 +482,7 @@ export function attackObject(ctx: GameContext, e: Entity, targetId: number, unco
   const ai = e.ai!;
   if (!unconditional && ai.action !== -1) return false;
   const target = ctx.entities.get(targetId);
-  if (!target || !canAttackUnit(ai, target)) return false;
+  if (!target || !canAttackUnit(ctx, ai, target)) return false;
   if (!combatAttack(ctx, e, target, unconditional)) return false;
   // `attack` may have transformed a villager; the AI record travels with the object.
   setAction(e.ai!, AI_ACTION_ATTACK);
@@ -491,8 +500,8 @@ function objectMoveTo(ctx: GameContext, e: Entity, x: number, y: number, z: numb
   const top = m.action && !e.work && !e.attack ? m.action : null;
   if (!unconditional && top && top.target === -1 && top.x === x && top.y === y && top.z === z) return true;
   if (workMoveTo(ctx, e, x, y)) return true;
-  deleteActions(e);
-  startMoveTo(e, null, x, y, z, range, null, false, ctx.rng);
+  deleteActions(ctx, e);
+  startMoveTo(e, null, x, y, z, range, null, false, ctx);
   return true;
 }
 
@@ -510,7 +519,7 @@ function aiMoveTo(ctx: GameContext, e: Entity, x: number, y: number, z: number, 
 function evasiveMoveTo(ctx: GameContext, e: Entity, x: number, y: number, z: number): boolean {
   // |S| = 0 gives NaN in the original too (unit-ai.md §4.5, unverified): no walk.
   if (Number.isNaN(x) || Number.isNaN(y)) return false;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const width = f32(ctx.map.width);
   const height = f32(ctx.map.height);
   const clamp = () => {
@@ -541,7 +550,7 @@ function runAwayFromAttackers(ctx: GameContext, e: Entity): boolean {
     dx = add32(dx, sub32(a.x, e.x));
     dy = add32(dy, sub32(a.y, e.y));
   }
-  const distance = mul32(maximumSpeed(e, unitType(e.type)), 4);
+  const distance = mul32(maximumSpeed(e, typeOf(ctx, e)), 4);
   const length = sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));
   const x = add32(-mul32(div32(dx, length), distance), e.x);
   const y = add32(-mul32(div32(dy, length), distance), e.y);
@@ -569,7 +578,7 @@ function search(ctx: GameContext, e: Entity): Seen[][] {
   const buckets: Seen[][] = [[], [], [], [], []];
   const groups = IMPORTANT[e.ai!.kind];
   if (!groups) return buckets;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   let radius = toInt(t.los);
   if (t.id === 118) radius += radius;
   if (radius > 15) radius = 15;
@@ -577,13 +586,13 @@ function search(ctx: GameContext, e: Entity): Seen[][] {
   const cy = toInt(e.y);
   const all = [...ctx.entities.all()].filter((o) => {
     // `test` probe objects are not game objects.
-    const ot = UNIT_TYPES.get(o.type);
+    const ot = hasMaster(ctx, o.owner, o.type) ? typeOf(ctx, o) : undefined;
     if (!ot) return false;
     return ot.masterType >= 50 && ot.masterType <= 80 && o.state < ObjectState.PendingRemoval;
   });
   for (const group of groups) {
     for (const o of all) {
-      if (unitType(o.type).group !== group) continue;
+      if (typeOf(ctx, o).group !== group) continue;
       const ox = toInt(o.x);
       const oy = toInt(o.y);
       if (ox > cx + radius || ox < cx - radius || oy > cy + radius || oy < cy - radius) continue;
@@ -597,18 +606,18 @@ function search(ctx: GameContext, e: Entity): Seen[][] {
   return buckets;
 }
 
-/** `damageCapability()` (src/com_obj.cpp:859): the sum of the positive weapon values. */
-function damageCapability(e: Entity): number {
+/** `damageCapability(ctx, )` (src/com_obj.cpp:859): the sum of the positive weapon values. */
+function damageCapability(ctx: PlayerMasters, e: Entity): number {
   let total = 0;
-  for (const w of unitType(e.type).combat?.attacks ?? []) if (w.amount > 0) total = add32(total, w.amount);
+  for (const w of typeOf(ctx, e).combat?.attacks ?? []) if (w.amount > 0) total = add32(total, w.amount);
   return total;
 }
 
 /** `calc_base_damage_ability` of `target`'s master against `attacker`'s weapons (src/m_co_obj.cpp:525), an integer ≥ 1. */
-function baseDamageAbility(target: Entity, attacker: Entity): number {
-  const defence = unitType(target.type).combat;
+function baseDamageAbility(ctx: PlayerMasters, target: Entity, attacker: Entity): number {
+  const defence = typeOf(ctx, target).combat;
   let total = 0;
-  for (const w of unitType(attacker.type).combat?.attacks ?? []) {
+  for (const w of typeOf(ctx, attacker).combat?.attacks ?? []) {
     let armour = defence?.baseArmour ?? 0;
     for (const a of defence?.armours ?? []) if (a.group === w.group) armour = a.amount;
     const diff = sub32(w.amount, armour);
@@ -624,19 +633,19 @@ function baseDamageAbility(target: Entity, attacker: Entity): number {
  */
 export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolean, quickCheck: boolean): number {
   const ai = e.ai!;
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   const buckets = search(ctx, e);
   const modifier = toInt(t.los) * 2;
   const minRange = t.combat?.minRange ?? 0;
   const current = ai.target === -1 ? undefined : ctx.entities.get(ai.target);
-  const wallOk = !!current && unitType(current.type).group === GROUP_WALL;
+  const wallOk = !!current && typeOf(ctx, current).group === GROUP_WALL;
   const passes = (o: Entity | undefined, bucket: number): o is Entity => {
     if (!o || o.state > ObjectState.Active) return false;
     if (o.owner === e.owner) return false;
-    const g = unitType(o.type).group;
+    const g = typeOf(ctx, o).group;
     if (!(allowWalls && wallOk) && g === GROUP_WALL) return false;
     if (g === GROUP_BUILDING && o.hp <= 1 && CATAPULTS.includes(t.id)) return false;
-    if (!canAttackUnit(ai, o)) return false;
+    if (!canAttackUnit(ctx, ai, o)) return false;
     return bucket !== 3 || canAttackUnitAtNeutrality(ai, g);
   };
   let nonCurrent = 0;
@@ -648,12 +657,12 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
     for (const r of buckets[b]!) {
       const o = ctx.entities.get(r.id);
       if (!passes(o, b)) continue;
-      const d = distanceToObject(e, o);
+      const d = distanceToObject(ctx, e, o);
       if (!(minRange <= d && modifier >= r.distance)) continue;
       if (o.id !== ai.target) nonCurrent++;
-      const building = unitType(o.type).group === GROUP_BUILDING;
+      const building = typeOf(ctx, o).group === GROUP_BUILDING;
       if (!building) nUnits++;
-      if (damageCapability(o) > 0) nArmed++;
+      if (damageCapability(ctx, o) > 0) nArmed++;
       if (!building && d < closest) {
         closest = d;
         closestId = o.id;
@@ -665,42 +674,42 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
   let bestIsBuilding = false;
   if (current && !quickCheck && ai.action === AI_ACTION_ATTACK) {
     // With every object visible, the visibility gate on a current wall target always passes.
-    const blocked = nonCurrent !== 0 && !inAttackRange(e, current) && !canPath(ctx, e, current, weaponRange(e));
+    const blocked = nonCurrent !== 0 && !inAttackRange(ctx, e, current) && !canPath(ctx, e, current, weaponRange(ctx, e));
     if (!blocked && current.state === ObjectState.Active && current.owner !== e.owner) {
       if (current.type === 276) return current.id;
       best = current.id;
-      let score = add32(mul32(baseDamageAbility(current, e), 100), mul32(damageCapability(current), 50));
+      let score = add32(mul32(baseDamageAbility(ctx, current, e), 100), mul32(damageCapability(ctx, current), 50));
       if (current.hp > 0) score = div32(score, current.hp);
-      const d = distanceToObject(current, e);
+      const d = distanceToObject(ctx, current, e);
       if (nUnits < 2) {
         if (d !== 0) score = div32(score, d);
       } else if (d !== 0) score = div32(score, mul32(mul32(nUnits, d), f32(0.5)));
       bestScore = score;
-      if (unitType(current.type).group !== GROUP_BUILDING) {
+      if (typeOf(ctx, current).group !== GROUP_BUILDING) {
         nUnits++;
         bestIsBuilding = false;
       } else bestIsBuilding = true;
-      if (damageCapability(current) > 0) nArmed++;
+      if (damageCapability(ctx, current) > 0) nArmed++;
     }
   }
   if (nUnits > 1) {
     const o = ctx.entities.get(closestId);
-    if (o && (inAttackRange(e, o) || canPath(ctx, e, o, weaponRange(e)))) return closestId;
+    if (o && (inAttackRange(ctx, e, o) || canPath(ctx, e, o, weaponRange(ctx, e)))) return closestId;
   }
   for (let b = 4; b >= 2; b--) {
     for (const r of buckets[b]!) {
       const o = ctx.entities.get(r.id);
       if (!passes(o, b)) continue;
-      const d = distanceToObject(e, o);
-      if (!(minRange <= d && modifier >= r.distance && (!quickCheck || inAttackRange(e, o)))) continue;
-      if (!quickCheck && !inAttackRange(e, o) && !canPath(ctx, e, o, weaponRange(e))) continue;
-      const threat = mul32(damageCapability(o), 50);
+      const d = distanceToObject(ctx, e, o);
+      if (!(minRange <= d && modifier >= r.distance && (!quickCheck || inAttackRange(ctx, e, o)))) continue;
+      if (!quickCheck && !inAttackRange(ctx, e, o) && !canPath(ctx, e, o, weaponRange(ctx, e))) continue;
+      const threat = mul32(damageCapability(ctx, o), 50);
       if (nArmed > 0 && threat === 0) continue;
-      let score = add32(mul32(baseDamageAbility(o, e), 100), threat);
+      let score = add32(mul32(baseDamageAbility(ctx, o, e), 100), threat);
       if (o.hp > 0) score = div32(score, o.hp);
       if (r.distance !== 0) score = div32(score, r.distance);
       if (nUnits > 1) score = div32(score, r.distance * r.distance * r.distance);
-      const building = unitType(o.type).group === GROUP_BUILDING;
+      const building = typeOf(ctx, o).group === GROUP_BUILDING;
       if (best === -1 || bestIsBuilding || !building) {
         if (best === -1 || (bestIsBuilding && !building) || score > bestScore) {
           best = o.id;
@@ -785,9 +794,9 @@ function baseNotify(ctx: GameContext, e: Entity, note: Note): number {
       if (ai.action === AI_ACTION_HEAL && runAwayFromAttackers(ctx, e)) return NOTE_STOP;
       const target = ai.target === -1 ? undefined : ctx.entities.get(ai.target);
       if (target) {
-        const tt = unitType(target.type);
+        const tt = typeOf(ctx, target);
         if ((tt.group === GROUP_BUILDING || tt.group === GROUP_WALL) && !SWITCH_EXEMPT_TOWERS.includes(tt.id)) {
-          if (!canAttackUnit(ai, attacker) || (!inAttackRange(e, attacker) && !canPath(ctx, e, attacker, weaponRange(e)))) {
+          if (!canAttackUnit(ctx, ai, attacker) || (!inAttackRange(ctx, e, attacker) && !canPath(ctx, e, attacker, weaponRange(ctx, e)))) {
             runAwayFromAttackers(ctx, e);
             return NOTE_STOP;
           }
@@ -797,7 +806,7 @@ function baseNotify(ctx: GameContext, e: Entity, note: Note): number {
         // A human unit keeps a unit (or tower) target; the kill-time comparison is for computer players.
         return NOTE_DONE;
       }
-      if (canAttackUnit(ai, attacker) && (inAttackRange(e, attacker) || canPath(ctx, e, attacker, weaponRange(e)))) {
+      if (canAttackUnit(ctx, ai, attacker) && (inAttackRange(ctx, e, attacker) || canPath(ctx, e, attacker, weaponRange(ctx, e)))) {
         attackObject(ctx, e, note.caller, true);
         return NOTE_STOP;
       }
@@ -855,7 +864,7 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
       const order = ai.order;
       if (order === AI_ORDER_MOVE && speed > 0) return NOTE_DONE;
       if (order === AI_ORDER_ATTACK || order === AI_ORDER_REPAIR) return NOTE_DONE;
-      if (order === AI_ORDER_HUNT && e.work?.state === 12 && target && unitType(target.type).group === GROUP_PREDATOR && attacker.owner === 0) return NOTE_DONE;
+      if (order === AI_ORDER_HUNT && e.work?.state === 12 && target && typeOf(ctx, target).group === GROUP_PREDATOR && attacker.owner === 0) return NOTE_DONE;
       if (attacker.owner === 0) {
         // An animal: fight back, then go back to the order.
         if (order !== -1) {
@@ -928,11 +937,11 @@ function askForHelp(ctx: GameContext, e: Entity, attackerId: number): void {
       if (r.id === e.id) continue;
       const o = ctx.entities.get(r.id);
       if (!o?.ai || o.state > ObjectState.Active) continue;
-      if (NO_HELP_GROUPS.includes(unitType(o.type).group)) continue;
+      if (NO_HELP_GROUPS.includes(typeOf(ctx, o).group)) continue;
       if (o.owner !== e.owner) continue;
-      if (distanceToObject(e, o) > 3) continue;
+      if (distanceToObject(ctx, e, o) > 3) continue;
       if (o.ai.action !== -1 || o.ai.order !== -1 || o.ai.orders.length > 0) continue;
-      aiOrder(ctx, o, o.owner, AI_ORDER_ATTACK, attackerId, attacker.owner, attacker.x, attacker.y, attacker.y, weaponRange(o), true, false, 50);
+      aiOrder(ctx, o, o.owner, AI_ORDER_ATTACK, attackerId, attacker.owner, attacker.x, attacker.y, attacker.y, weaponRange(ctx, o), true, false, 50);
     }
   }
 }

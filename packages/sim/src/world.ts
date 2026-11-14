@@ -8,6 +8,8 @@ import {
   type MoveCommand,
   type QueueCommand,
   type QueuedCommand,
+  type ResearchCommand,
+  type StopCommand,
   type WorkCommand,
 } from './commands';
 import type { GameContext } from './context';
@@ -16,14 +18,16 @@ import { orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
 import { createTestMap, TileMap, type MapSnapshot } from './map';
+import { copyMasters, hasMaster, master, newMasters, typeOf } from './masters';
 import { initialFacing, newMover, orderMove, teleport } from './movement';
 import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
+import { orderResearch, stopBuilding } from './research';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
-import { checkForNewTech, newTechStates, type MasterChange } from './techs';
+import { checkForNewTech, doEffect, newResearchDone, newTechStates } from './techs';
 import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState } from './unit-ai';
-import { ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TOWN_CENTER, TREES, UNIT_TYPES, unitType, VILLAGER } from './units';
+import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
 
 /** Base time per step: the network frame granularity (src/com_spd.cpp:11-25). Never wall time. */
 export const STEP_MS = 90;
@@ -56,6 +60,8 @@ export interface WorldOptions {
   pathingIterations?: number;
   /** The game's population limit (`pop_limit`, default 50), each player's attribute 32. */
   populationLimit?: number;
+  /** Each player's civ (empires.dat civ index), Gaia's included; a missing entry is Egyptian (Gaia: civ 0). */
+  civs?: readonly number[];
 }
 
 export interface StartUnit {
@@ -68,13 +74,10 @@ export interface StartUnit {
 
 /**
  * `RGE_Player` attributes at game start: the civilization's resource table (empires.dat civ 1, Egyptians; every
- * playable civ has the same table). Food 200, wood 200, stone 150, gold 0; attribute 47 (gold mining multiplier) 1.
- * Gaia's table (civ 0) is all zeros.
+ * playable civ but Palmyra has this table). Food 200, wood 200, stone 150, gold 0; attribute 47 (gold mining
+ * multiplier) 1. Gaia's table (civ 0) is all zeros.
  */
-export const START_ATTRIBUTES: readonly number[] = [
-  200, 200, 150, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 103, 101, 10, 0, 0, 0, 0, 0, 0, 0, 0, 2, 250,
-  0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-].map(f32);
+export const START_ATTRIBUTES: readonly number[] = CIVS[CIV_EGYPTIAN]!.resources;
 export const ATTRIBUTE_COUNT = START_ATTRIBUTES.length;
 /** Player attribute indices the client shows (`PLAYER_ATTRIBUTE_*`). */
 export const ATTR_FOOD = 0;
@@ -144,7 +147,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 6;
+  version: 7;
   players: number;
   turn: number;
   worldTime: number;
@@ -167,11 +170,15 @@ export interface Snapshot {
   awake: number[][];
   /** Tech states, `[player][tech]`. */
   techs: number[][];
-  /** Changed masters, `[player]` by unit id. */
-  masters: Record<number, MasterChange>[];
+  /** Research progress, `[player][tech]`. */
+  researchDone: number[][];
+  /** Each player's civ. */
+  civs: number[];
+  /** Each player's masters by unit id. */
+  masters: Record<number, UnitType>[];
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in whole turns of fixed-size steps
@@ -210,8 +217,14 @@ export class World {
   awake: number[][];
   /** Tech states per player (`Tech_Player_Tree`), `[player][tech]`. */
   techs: number[][];
-  /** Each player's changes to the master objects (masters are per player in the original), by unit id. */
-  masters: Record<number, MasterChange>[];
+  /** Research progress per player (`Tech_Player_Tree.research_done`), `[player][tech]`, float32. */
+  researchDone: number[][];
+  /** Each player's civ (empires.dat civ index). */
+  readonly civs: readonly number[];
+  /** Each player's master objects (`RGE_Player::master_objects`): copies of its civ's records the techs change. */
+  masters: Record<number, UnitType>[];
+  /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
+  private mastersDigest: (number | undefined)[] = [];
   private queue = new CommandQueue();
   private readonly rng = new CrtRand();
 
@@ -222,21 +235,28 @@ export class World {
     this.playerTimeDelta = new Array<number>(this.players).fill(0);
     this.playerUpdateTime = new Array<number>(this.players).fill(0);
     this.alertCooldown = new Array<number>(this.players).fill(0);
-    this.attributes = Array.from({ length: this.players }, (_, p) => (p === 0 ? new Array<number>(ATTRIBUTE_COUNT).fill(0) : [...START_ATTRIBUTES]));
+    this.civs = Array.from({ length: this.players }, (_, p) => options.civs?.[p] ?? (p === 0 ? CIV_GAIA : CIV_EGYPTIAN));
+    this.attributes = this.civs.map((c) => [...CIVS[c]!.resources]);
     this.awake = Array.from({ length: this.players }, () => []);
-    this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) });
+    this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) }, (e) => typeOf(this, e));
     this.pathing.iterations = options.pathingIterations ?? DEFAULT_PATHING_ITERATIONS;
-    // Player creation runs each tech tree's first `check_for_new_tech` (techs.md §3.7): the zero-time start techs
-    // complete, Gaia's too. The fog-of-war draw of player creation is not ported (no fog of war yet).
+    // Player creation copies the civ's masters and runs its tech tree's first `check_for_new_tech` (techs.md §3.7):
+    // the zero-time start techs complete, Gaia's too. The fog-of-war draw of player creation is not ported (no fog of
+    // war yet).
+    this.masters = this.civs.map((c) => newMasters(c));
     this.techs = Array.from({ length: this.players }, () => newTechStates());
-    this.masters = Array.from({ length: this.players }, () => ({}));
-    for (let p = 0; p < this.players; p++) checkForNewTech(this, p);
-    if (options.units?.length) {
-      // Game setup draws from the stored seed and stores a fresh one afterwards (docs/spec/core.md §4.2).
-      this.rng.srand(this.randomSeed);
-      for (const u of options.units) this.createUnit(u);
-      this.randomSeed = this.rng.rand();
+    this.researchDone = Array.from({ length: this.players }, () => newResearchDone());
+    for (let p = 0; p < this.players; p++) checkForNewTech(this.gameContext(), p);
+    // Game setup draws from the stored seed and stores a fresh one afterwards (docs/spec/core.md §4.2).
+    const setup = (options.units?.length ?? 0) > 0;
+    if (setup) this.rng.srand(this.randomSeed);
+    for (const u of options.units ?? []) this.createUnit(u);
+    // `new_game` (src/tworld.cpp:793-805, techs.md §4.6): after the objects, each player but Gaia gets its civ's effect.
+    for (let p = 1; p < this.players; p++) {
+      const effect = CIVS[this.civs[p]!]!.effect;
+      if (effect >= 0) doEffect(this.gameContext(), p, effect);
     }
+    if (setup) this.randomSeed = this.rng.rand();
     for (let p = 1; p < this.players; p++) {
       for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
     }
@@ -248,7 +268,7 @@ export class World {
    */
   createUnit({ owner, type, x, y }: StartUnit): Entity {
     const e = this.createObject(owner, type, x, y, 0);
-    const t = unitType(type);
+    const t = typeOf(this, e);
     if (isBuilding(t)) {
       const ctx = this.gameContext();
       checkDestructables(ctx, t, e.x, e.y, (o) => this.destroyObject(o));
@@ -280,7 +300,7 @@ export class World {
    * ones without hit points, join the owner's updated list at the front; living trees sleep.
    */
   createObject(owner: number, type: number, x: number, y: number, z: number): Entity {
-    const t = unitType(type);
+    const t = master(this, owner, type);
     const own = t.storages.find((s) => s.flag === 0);
     const e = this.entities.create({
       owner,
@@ -296,10 +316,10 @@ export class World {
     if (t.combat) e.attackTimer = 0;
     if (isMoving(t)) e.turnTowardsTime = 0;
     teleport(this.gameContext(), e, t, e.x, e.y, e.z);
-    newSprite(e, null, this.rng);
+    newSprite(this.gameContext(), e, null);
     giveStorages(this.attributes[owner]!, t, 1, [1, 2]);
     this.rng.srand(this.rng.rand());
-    if (e.mover) initialFacing(e, e.mover, this.rng);
+    if (e.mover) initialFacing(e, t, e.mover, this.rng);
     if (t.masterType === 70 || t.masterType === 80) e.ai = createUnitAI(this.gameContext(), t);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));
@@ -317,6 +337,7 @@ export class World {
       attempts: 0,
       attributes: this.attributes,
       techs: this.techs,
+      researchDone: this.researchDone,
       masters: this.masters,
       worldTime: this.worldTime,
       playerTurn: this.playerTurn,
@@ -325,12 +346,15 @@ export class World {
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
+      mastersChanged: (player) => {
+        this.mastersDigest[player] = undefined;
+      },
     };
   }
 
   /** Remove an object that is ready (`recycle_out_of_game`): off the obstruction map, the lists and the store. */
   private removeObject(e: Entity): void {
-    this.pathing.unstamp(e, unitType(e.type));
+    this.pathing.unstamp(e, typeOf(this, e));
     const list = this.awake[e.owner]!;
     const i = list.indexOf(e.id);
     if (i !== -1) list.splice(i, 1);
@@ -408,6 +432,10 @@ export class World {
         return this.doCommandQueue(player, command);
       case 'cancel':
         return this.doCommandCancel(player, command);
+      case 'research':
+        return this.doCommandResearch(player, command);
+      case 'stop':
+        return this.doCommandStop(player, command);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
@@ -482,7 +510,7 @@ export class World {
       // only action.
       if (!workMoveTo(this.gameContext(), e, tx, ty)) {
         e.attack = null;
-        orderMove(e, tx, ty, this.rng);
+        orderMove(this.gameContext(), e, tx, ty);
       }
       setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, tx, ty, 0);
     });
@@ -495,7 +523,7 @@ export class World {
   private doCommandWork(player: number, command: WorkCommand): void {
     // `test` probe objects are not game objects: an order on one is an order on nothing.
     const found = this.entities.get(command.target);
-    const target = found && UNIT_TYPES.has(found.type) ? found : undefined;
+    const target = found && hasMaster(this, found.owner, found.type) ? found : undefined;
     const ids = command.units;
     const ctx = this.gameContext();
     ids.forEach((id, index) => {
@@ -513,7 +541,7 @@ export class World {
    */
   private doCommandAttack(player: number, command: AttackCommand): void {
     const target = this.entities.get(command.target);
-    if (!target || !UNIT_TYPES.has(target.type)) return;
+    if (!target || !hasMaster(this, target.owner, target.type)) return;
     this.doCommandWork(player, { type: 'work', units: command.units, target: target.id, x: target.x, y: target.y });
   }
 
@@ -522,8 +550,9 @@ export class World {
    * be built on ignored) and be paid for; then it is created and each listed unit of the sender is ordered onto it.
    */
   private doCommandBuild(player: number, command: BuildCommand): void {
-    const t = UNIT_TYPES.get(command.unitType);
-    if (!t || !isBuilding(t) || !t.creatable) return;
+    if (!hasMaster(this, player, command.unitType)) return;
+    const t = master(this, player, command.unitType);
+    if (!isBuilding(t) || !t.creatable) return;
     const x = f32(command.x);
     const y = f32(command.y);
     const ctx = this.gameContext();
@@ -545,7 +574,7 @@ export class World {
    */
   private doCommandQueue(player: number, command: QueueCommand): void {
     const building = this.entities.get(command.building);
-    if (!building?.queue || building.owner !== player || building.state >= ObjectState.PendingRemoval || !UNIT_TYPES.has(command.unit)) return;
+    if (!building?.queue || building.owner !== player || building.state >= ObjectState.PendingRemoval || !hasMaster(this, player, command.unit)) return;
     const ctx = this.gameContext();
     if (command.count > 0) addToQueue(ctx, building, command.unit, command.count);
     else removeFromQueue(ctx, building, command.unit, -command.count);
@@ -558,14 +587,39 @@ export class World {
    */
   private doCommandCancel(player: number, command: CancelCommand): void {
     const e = this.entities.get(command.target);
-    if (!e || e.owner !== player || !UNIT_TYPES.has(e.type) || e.state >= ObjectState.PendingRemoval) return;
-    const t = unitType(e.type);
+    if (!e || e.owner !== player || !hasMaster(this, e.owner, e.type) || e.state >= ObjectState.PendingRemoval) return;
+    const t = typeOf(this, e);
     if (t.masterType < 50) return;
     const ctx = this.gameContext();
     if (isBuilding(t) && e.state === ObjectState.Unbuilt) cancelBuild(ctx, e);
     else {
       this.wake(e);
       e.hp = 0;
+    }
+  }
+
+  /**
+   * `TRIBE_Command::do_command_research` (techs.md §3.1): the building starts researching the tech, unless it already
+   * researches. Port-side guard (economy.md §5.5): the original accepts another player's building, this ignores it, and
+   * an unknown tech id; the command's `rand()` was already drawn in `execute`.
+   */
+  private doCommandResearch(player: number, command: ResearchCommand): void {
+    const building = this.entities.get(command.building);
+    if (!building?.queue || building.owner !== player || building.state !== ObjectState.Active || !TECHS[command.tech]) return;
+    orderResearch(this.gameContext(), building, command.tech);
+  }
+
+  /**
+   * `RGE_Command::do_command_stop` on buildings (techs.md §3.5): each listed building of the sender stops its research
+   * (refunded) and empties its queue (refunded). Port-side guard (economy.md §5.5): the original stops any listed
+   * object of any player; another player's objects and units (whose stop is not ported) are skipped.
+   */
+  private doCommandStop(player: number, command: StopCommand): void {
+    const ctx = this.gameContext();
+    for (const id of command.objects) {
+      const e = this.entities.get(id);
+      if (!e?.queue || e.owner !== player || e.state !== ObjectState.Active) continue;
+      stopBuilding(ctx, e);
     }
   }
 
@@ -587,7 +641,9 @@ export class World {
     hashValue(h, this.attributes);
     hashValue(h, this.awake);
     hashValue(h, this.techs);
-    hashValue(h, this.masters);
+    hashValue(h, this.researchDone);
+    hashValue(h, this.civs);
+    for (let p = 0; p < this.players; p++) h.u32((this.mastersDigest[p] ??= digest(this.masters[p])));
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -602,14 +658,16 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
-      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack') hashValue(h, q.command);
+      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop') {
+        hashValue(h, q.command);
+      }
     }
     return h.digest();
   }
 
   snapshot(): Snapshot {
     return {
-      version: 6,
+      version: 7,
       players: this.players,
       turn: this.turn,
       worldTime: this.worldTime,
@@ -628,17 +686,20 @@ export class World {
       attributes: this.attributes.map((a) => [...a]),
       awake: this.awake.map((a) => [...a]),
       techs: this.techs.map((a) => [...a]),
+      researchDone: this.researchDone.map((a) => [...a]),
+      civs: [...this.civs],
       masters: copyMasters(this.masters),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 6) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 7) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
       map: TileMap.fromJSON(s.map),
       pathingIterations: s.pathingIterations,
+      civs: s.civs,
     });
     w.pathing.cells.set(s.obstruction);
     w.turn = s.turn;
@@ -654,13 +715,18 @@ export class World {
     w.attributes = s.attributes.map((a) => [...a]);
     w.awake = s.awake.map((a) => [...a]);
     w.techs = s.techs.map((a) => [...a]);
+    w.researchDone = s.researchDone.map((a) => [...a]);
     w.masters = copyMasters(s.masters);
+    w.mastersDigest = [];
     return w;
   }
 }
 
-function copyMasters(masters: readonly Record<number, MasterChange>[]): Record<number, MasterChange>[] {
-  return masters.map((m) => Object.fromEntries(Object.entries(m).map(([id, c]) => [id, { ...c }])));
+/** `hashValue` of `v` on its own. */
+function digest(v: unknown): number {
+  const h = new Hasher();
+  hashValue(h, v);
+  return h.digest();
 }
 
 /**

@@ -8,7 +8,7 @@ import type { Entity } from './entities';
 import type { Hasher } from './hash';
 import type { TileMap } from './map';
 import { add32, f32, mul32, sub32, toInt } from './num';
-import { unitType, type UnitType } from './units';
+import type { UnitType } from './units';
 
 /** Obstruction cells per tile along each axis (movement.md §3). */
 export const CELLS_PER_TILE = 4;
@@ -162,6 +162,8 @@ export class PathingSystem {
   constructor(
     readonly map: TileMap,
     readonly objects: { get(id: number): Entity | undefined },
+    /** The master an object reads (its owner's). */
+    readonly typeOf: (e: Entity) => UnitType,
   ) {
     // One spare cell row/column: a footprint's exclusive maximum can reach 4 * size.
     this.cellsX = map.width * CELLS_PER_TILE + 1;
@@ -275,7 +277,7 @@ export class PathingSystem {
         const om = other?.mover;
         if (!other || !om) continue;
         if (om.waitingToMove || om.speed !== 0 || om.collisionAvoidanceDistance > 0) {
-          if (this.unstamp(other, unitType(other.type))) unstamped.push(other);
+          if (this.unstamp(other, this.typeOf(other))) unstamped.push(other);
         }
       }
     }
@@ -284,7 +286,7 @@ export class PathingSystem {
     const box = { id: -1, minX: gx * 4, minY: gy * 4, maxX: gx * 4 + 3, maxY: gy * 4 + 3 };
     const target = targetId === -1 ? undefined : this.objects.get(targetId);
     if (target) {
-      const tt = unitType(target.type);
+      const tt = this.typeOf(target);
       box.id = targetId;
       box.minX = toInt(mul32(sub32(target.x, tt.radiusX), 4));
       box.minY = toInt(mul32(sub32(target.y, tt.radiusY), 4));
@@ -293,7 +295,7 @@ export class PathingSystem {
     }
     const result = this.run(e, t, sx, sy, gx, gy, range, offX, offY, box);
 
-    for (const other of unstamped) this.stamp(other, unitType(other.type));
+    for (const other of unstamped) this.stamp(other, this.typeOf(other));
     if (selfStamped) this.stamp(e, t);
     return result;
   }

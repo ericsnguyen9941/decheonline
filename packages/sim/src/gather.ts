@@ -7,11 +7,13 @@ import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } 
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
+import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, currentSprite, endAction, facetOf, MOVE_RANGE, startMoveTo, updateMover } from './movement';
 import { add32, div32, f32, mul32, sub32 } from './num';
+import { dropResearch } from './research';
 import { newSprite } from './sprites';
 import { aiStateForAction, setAiState } from './unit-ai';
-import { UNIT_TYPES, unitType, type SpriteInfo, type Task, type UnitType } from './units';
+import type { SpriteInfo, Task, UnitType } from './units';
 
 export const ACTION_GATHER = 5;
 export const ACTION_HUNT = 110;
@@ -60,8 +62,8 @@ const TOWN_CENTER = 109;
 const STORAGE_PIT = 103;
 const GRANARY = 68;
 
-function taskOf(e: Entity, a: WorkAction): Task {
-  return unitType(e.type).action!.tasks[a.task]!;
+function taskOf(ctx: PlayerMasters, e: Entity, a: WorkAction): Task {
+  return typeOf(ctx, e).action!.tasks[a.task]!;
 }
 
 function object(ctx: GameContext, id: number): Entity | undefined {
@@ -69,7 +71,7 @@ function object(ctx: GameContext, id: number): Entity | undefined {
 }
 
 /** `RGE_Task_List::check_task` (src/task_lst.cpp:177) for players without diplomacy: all others are enemies. */
-function checkTask(task: Task, e: Entity, target: Entity): boolean {
+function checkTask(ctx: PlayerMasters, task: Task, e: Entity, target: Entity): boolean {
   if (task.carryCheck === 1 && (target.heldType === -1 || target.heldAmount <= 0)) return false;
   switch (task.diplomacy) {
     case 1:
@@ -86,18 +88,18 @@ function checkTask(task: Task, e: Entity, target: Entity): boolean {
       return target.owner === e.owner;
     case 5:
       if (target.owner === e.owner) return false;
-      if (target.owner === 0 && unitType(e.type).combatLevel === 0) return false;
+      if (target.owner === 0 && typeOf(ctx, e).combatLevel === 0) return false;
       break;
   }
   return e !== target;
 }
 
 /** `TRIBE_Task_List::get_target_task` then `RGE_Task_List::get_target_task` (src/task_lst.cpp:107): task index or -1. */
-function targetTask(t: UnitType, e: Entity, target: Entity | undefined): number {
+function targetTask(ctx: PlayerMasters, t: UnitType, e: Entity, target: Entity | undefined): number {
   const tasks = t.action?.tasks ?? [];
   if (!target || tasks.length === 0) return -1;
-  const tt = unitType(target.type);
-  const self = unitType(e.type);
+  const tt = typeOf(ctx, target);
+  const self = typeOf(ctx, e);
   if (e.heldType !== -1 && e.heldAmount > 0 && target.state === ObjectState.Active && self.group === 4 && target.owner === e.owner) {
     let site = -1;
     let alternate = -1;
@@ -110,14 +112,14 @@ function targetTask(t: UnitType, e: Entity, target: Entity | undefined): number 
   }
   if (target.state === ObjectState.Unbuilt) {
     if (target.owner === e.owner && tt.masterType === 80) return tasks.findIndex((k) => k.actionType === 101);
-    const i = tasks.findIndex((k) => k.building === 1 && checkTask(k, e, target));
+    const i = tasks.findIndex((k) => k.building === 1 && checkTask(ctx, k, e, target));
     if (i !== -1) return i;
   }
-  let i = tasks.findIndex((k) => k.unitId === target.type && checkTask(k, e, target));
+  let i = tasks.findIndex((k) => k.unitId === target.type && checkTask(ctx, k, e, target));
   if (i !== -1) return i;
-  i = tasks.findIndex((k) => k.group === tt.group && checkTask(k, e, target));
+  i = tasks.findIndex((k) => k.group === tt.group && checkTask(ctx, k, e, target));
   if (i !== -1) return i;
-  if (target.state < ObjectState.Dying && tt.combatLevel > 0) i = tasks.findIndex((k) => k.combatLevel > 0 && checkTask(k, e, target));
+  if (target.state < ObjectState.Dying && tt.combatLevel > 0) i = tasks.findIndex((k) => k.combatLevel > 0 && checkTask(ctx, k, e, target));
   // The terrain pass never matches here: no task of these units names a terrain.
   return i;
 }
@@ -127,12 +129,12 @@ function targetTask(t: UnitType, e: Entity, target: Entity | undefined): number 
  * re-stamped, standing sprite, hp scaled to the new maximum, active again, turning state reset, actions deleted.
  */
 export function transform(ctx: GameContext, e: Entity, next: UnitType): void {
-  const old = unitType(e.type);
+  const old = typeOf(ctx, e);
   const ratio = div32(e.hp, old.hitPoints);
   ctx.pathing.unstamp(e, old);
   e.type = next.id;
   ctx.pathing.stamp(e, next);
-  newSprite(e, next.standing, ctx.rng);
+  newSprite(ctx, e, next.standing);
   e.hp = mul32(next.hitPoints, ratio);
   e.state = ObjectState.Active;
   const m = e.mover!;
@@ -140,15 +142,16 @@ export function transform(ctx: GameContext, e: Entity, next: UnitType): void {
   m.turnTimer = 0;
   e.turnTowardsTime = 0;
   // `set_angle`: the facet follows the angle on the new main sprite.
-  m.facet = facetOf(m.angle, currentSprite(e));
-  deleteActions(e);
+  m.facet = facetOf(m.angle, currentSprite(e, typeOf(ctx, e)));
+  deleteActions(ctx, e);
 }
 
 /** `set_only_action` / `delete_list`: drop every action and sub-action; the move's destructor stops the unit. */
-export function deleteActions(e: Entity): void {
+export function deleteActions(ctx: GameContext, e: Entity): void {
   e.work = null;
   e.attack = null;
   if (e.mover) endAction(e.mover);
+  dropResearch(ctx, e);
 }
 
 /**
@@ -158,11 +161,11 @@ export function deleteActions(e: Entity): void {
  */
 export function orderWork(ctx: GameContext, e: Entity, target: Entity | undefined, x: number, y: number): void {
   if (target === e || !e.mover) return;
-  let t = unitType(e.type);
-  let task = targetTask(t, e, target);
+  let t = typeOf(ctx, e);
+  let task = targetTask(ctx, t, e, target);
   if (task === -1 && t.action && t.action.taskSwapGroup !== 0) {
-    for (const other of swapTypes(t)) {
-      const i = targetTask(other, e, target);
+    for (const other of swapTypes(ctx, e.owner, t)) {
+      const i = targetTask(ctx, other, e, target);
       if (i !== -1) {
         transform(ctx, e, other);
         t = other;
@@ -194,7 +197,7 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
   }
   if (e.attack && !e.work && target && e.attack.target === target.id && attackWork(ctx, e, target)) return ACTION_ATTACK;
   const kind = task === -1 ? -1 : t.action!.tasks[task]!.actionType;
-  deleteActions(e);
+  deleteActions(ctx, e);
   if (kind === ACTION_BUILD || kind === ACTION_GATHER || kind === ACTION_HUNT) {
     const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x, y, z: 0 };
     e.work = a;
@@ -209,7 +212,7 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
     return ACTION_ATTACK;
   }
   // No task, or one this port does not run yet (repair, ...): `move_to` the target or the point.
-  startMoveTo(e, target ?? null, x, y, 0, MOVE_RANGE, null, false, ctx.rng);
+  startMoveTo(e, target ?? null, x, y, 0, MOVE_RANGE, null, false, ctx);
   return ACTION_MOVE;
 }
 
@@ -225,8 +228,8 @@ export function aiWork(ctx: GameContext, e: Entity, target: Entity, kind: number
     else workRetarget(ctx, e, w, target, target.x, target.y);
     return true;
   }
-  const t = unitType(e.type);
-  const task = targetTask(t, e, target);
+  const t = typeOf(ctx, e);
+  const task = targetTask(ctx, t, e, target);
   if (task === -1 || t.action!.tasks[task]!.actionType !== kind) return false;
   startTask(ctx, e, t, task, target, target.x, target.y);
   return true;
@@ -268,7 +271,7 @@ function workRetarget(ctx: GameContext, e: Entity, a: WorkAction, target: Entity
   }
   const gather = a.type === ACTION_GATHER;
   if (gather && target.id === a.target && (a.state === WORK_TO_TARGET || a.state === WORK_TURNING || a.state === WORK_WORKING)) return true;
-  if (target.owner === e.owner && isDropSite(unitType(e.type), target) && e.heldAmount > 0) {
+  if (target.owner === e.owner && isDropSite(typeOf(ctx, e), target) && e.heldAmount > 0) {
     a.timer = 0;
     a.target = -1;
     a.x = a.y = a.z = -1;
@@ -289,12 +292,12 @@ function workRetarget(ctx: GameContext, e: Entity, a: WorkAction, target: Entity
 
 /** `first_in_stack(1)` (src/act_gath.cpp:57, src/tact_hnt.cpp:55). */
 function firstInStack(ctx: GameContext, e: Entity, a: WorkAction): void {
-  const task = taskOf(e, a);
+  const task = taskOf(ctx, e, a);
   // Switching task throws the load away (economy.md §3.1).
   if (e.heldType !== task.resourceIn) setHeld(e, task.resourceIn, 0);
   const target = object(ctx, a.target);
   if (!target) return setState(ctx, e, a, WORK_WAITING);
-  if (target.owner === e.owner && isDropSite(unitType(e.type), target) && e.heldAmount > 0) {
+  if (target.owner === e.owner && isDropSite(typeOf(ctx, e), target) && e.heldAmount > 0) {
     a.target2 = target.id;
     a.target = -1;
     a.x = a.y = a.z = -1;
@@ -315,9 +318,9 @@ function moveSprite(e: Entity, task: Task): SpriteInfo | null {
 }
 
 /** `get_wait_sprite`: the carry sprite under the same test, else the standing sprite. */
-function waitSprite(e: Entity, task: Task): SpriteInfo {
+function waitSprite(ctx: PlayerMasters, e: Entity, task: Task): SpriteInfo {
   if (task.resourceIn !== -1 && e.heldType === task.resourceIn && Math.trunc(e.heldAmount) > 0 && task.carrying) return task.carrying;
-  return unitType(e.type).standing;
+  return typeOf(ctx, e).standing;
 }
 
 /** Delete the sub-actions: the walk (its destructor stops the unit) and the attack. */
@@ -330,16 +333,16 @@ function deleteSubActions(e: Entity): void {
 function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): void {
   deleteSubActions(e);
   a.state = state;
-  const task = taskOf(e, a);
+  const task = taskOf(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   switch (state) {
     case WORK_WAITING:
       a.timer = f32(-10);
-      newSprite(e, waitSprite(e, task), ctx.rng);
+      newSprite(ctx, e, waitSprite(ctx, e, task));
       return;
     case WORK_IDLE:
       a.timer = 0;
-      newSprite(e, waitSprite(e, task), ctx.rng);
+      newSprite(ctx, e, waitSprite(ctx, e, task));
       a.target = -1;
       a.target2 = -1;
       a.x = a.y = a.z = -1;
@@ -347,7 +350,7 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
     case WORK_TO_POINT:
     case WORK_MOVE_ORDER:
       a.timer = 0;
-      startMoveTo(e, null, a.x, a.y, a.z, task.workRange, moveSprite(e, task), true, ctx.rng);
+      startMoveTo(e, null, a.x, a.y, a.z, task.workRange, moveSprite(e, task), true, ctx);
       return;
     case WORK_TO_TARGET: {
       a.timer = 0;
@@ -357,7 +360,7 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
       a.y = target.y;
       a.z = target.z;
       if (hunt && target.state <= ObjectState.Active) return setState(ctx, e, a, WORK_KILLING);
-      startMoveTo(e, target, 0, 0, 0, task.workRange, moveSprite(e, task), true, ctx.rng);
+      startMoveTo(e, target, 0, 0, 0, task.workRange, moveSprite(e, task), true, ctx);
       return;
     }
     case WORK_KILLING: {
@@ -368,12 +371,12 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
     }
     case WORK_TURNING:
       a.timer = 0;
-      newSprite(e, moveSprite(e, task), ctx.rng);
+      newSprite(ctx, e, moveSprite(e, task));
       return;
     case WORK_WORKING:
       a.timer = 0;
       if (e.heldType !== task.resourceIn) setHeld(e, task.resourceIn, 0);
-      newSprite(e, hunt ? task.working : task.proceeding, ctx.rng);
+      newSprite(ctx, e, hunt ? task.working : task.proceeding);
       return;
     case WORK_DROP_OFF: {
       if (e.heldAmount > 0) {
@@ -383,7 +386,7 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
         }
         const site = object(ctx, a.target2);
         if (site) {
-          startMoveTo(e, site, 0, 0, 0, task.workRange, moveSprite(e, task), true, ctx.rng);
+          startMoveTo(e, site, 0, 0, 0, task.workRange, moveSprite(e, task), true, ctx);
           return;
         }
         // No drop site: a human player's gatherer fails (13), its hunter goes idle (2).
@@ -397,7 +400,7 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
     case WORK_FAILED:
     case 14:
       a.timer = 0;
-      newSprite(e, waitSprite(e, task), ctx.rng);
+      newSprite(ctx, e, waitSprite(ctx, e, task));
       return;
   }
 }
@@ -412,7 +415,7 @@ function keepsWorker(target: Entity): boolean {
  * the active drop site with the smallest squared centre distance; ties keep the earlier object in the list.
  */
 function findDropSite(ctx: GameContext, e: Entity): Entity | undefined {
-  const [site, backup] = unitType(e.type).action!.dropSites;
+  const [site, backup] = typeOf(ctx, e).action!.dropSites;
   if (site === -1) return undefined;
   let best: Entity | undefined;
   let bestDistance = 0;
@@ -430,8 +433,8 @@ function findDropSite(ctx: GameContext, e: Entity): Entity | undefined {
 }
 
 /** Edge-to-edge distance above the drop threshold, compared squared (economy.md §3.5). */
-function tooFarToDrop(e: Entity, site: Entity): boolean {
-  const d = distanceToObject(e, site);
+function tooFarToDrop(ctx: PlayerMasters, e: Entity, site: Entity): boolean {
+  const d = distanceToObject(ctx, e, site);
   return mul32(d, d) > DROP_DISTANCE;
 }
 
@@ -464,7 +467,7 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
     setState(ctx, e, a, WORK_DONE);
     return ActionResult.TargetInvalid;
   }
-  const task = taskOf(e, a);
+  const task = taskOf(ctx, e, a);
   switch (a.state) {
     case WORK_WAITING:
       if (a.timer < 0) {
@@ -570,7 +573,7 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
             setState(ctx, e, a, WORK_DROP_OFF);
             return ActionResult.Continue;
           }
-          if (tooFarToDrop(e, site)) {
+          if (tooFarToDrop(ctx, e, site)) {
             a.timer = f32(-3);
             e.mover!.speed = 0;
             return ActionResult.Continue;
@@ -597,7 +600,7 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
 
 /** State 7: one step's take (economy.md §3.3). */
 function transfer(ctx: GameContext, e: Entity, a: WorkAction, task: Task, target: Entity): void {
-  const t = unitType(e.type);
+  const t = typeOf(ctx, e);
   let give = mul32(mul32(task.workValue1, t.action!.workRate), ctx.deltaSeconds);
   if (give > target.heldAmount) give = target.heldAmount;
   const modifier = task.resourceMultiplier === -1 ? 1 : ctx.attributes[e.owner]![task.resourceMultiplier]!;
@@ -610,7 +613,7 @@ function transfer(ctx: GameContext, e: Entity, a: WorkAction, task: Task, target
     give = sub32(give, div32(excess, modifier));
   }
   target.heldAmount = add32(-give, target.heldAmount);
-  const cap = f32(Math.trunc(unitType(target.type).resourceCapacity));
+  const cap = f32(Math.trunc(typeOf(ctx, target).resourceCapacity));
   if (cap < target.heldAmount) target.heldAmount = cap;
   e.heldAmount = add32(adjusted, e.heldAmount);
   const more = target.heldAmount > 0 || (a.type === ACTION_GATHER && keepsWorker(target));
@@ -628,18 +631,18 @@ function deposit(ctx: GameContext, e: Entity, task: Task, earned: boolean): void
 }
 
 /** For the client: the type a work order on `target` would make `e` (after any swap), or -1 when it has no task. */
-export function workTaskType(e: Entity, target: Entity): number {
-  const t = unitType(e.type);
-  if (targetTask(t, e, target) !== -1) return t.id;
+export function workTaskType(ctx: PlayerMasters, e: Entity, target: Entity): number {
+  const t = typeOf(ctx, e);
+  if (targetTask(ctx, t, e, target) !== -1) return t.id;
   if (!t.action || t.action.taskSwapGroup === 0) return -1;
-  for (const other of swapTypes(t)) if (targetTask(other, e, target) !== -1) return other.id;
+  for (const other of swapTypes(ctx, e.owner, t)) if (targetTask(ctx, other, e, target) !== -1) return other.id;
   return -1;
 }
 
 /** Masters a unit of type `t` may become, in ascending id order (`master_objects`, src/act_obj.cpp:160-172). */
-function swapTypes(t: UnitType): UnitType[] {
+function swapTypes(ctx: PlayerMasters, owner: number, t: UnitType): UnitType[] {
   const group = t.action!.taskSwapGroup;
-  return [...UNIT_TYPES.values()]
+  return Object.values(ctx.masters[owner]!)
     .filter((o) => o.group === t.group && o.masterType === t.masterType && o.action?.taskSwapGroup === group)
     .sort((a, b) => a.id - b.id);
 }

@@ -5,6 +5,7 @@ import { MOVE_MOVING, MOVE_NEED_PATH, orderMove, updateMover, type MoveContext }
 import { add32, f32, mul32, sub32, toInt } from './num';
 import { runReplay, sampleReplay } from './replay';
 import { CrtRand } from './rng';
+import { TECH_DONE, TECH_RESEARCHING } from './techs';
 import { BARRACKS, CLUBMAN, HOUSE, unitType, VILLAGER } from './units';
 import { startingUnits, World, type StartUnit } from './world';
 
@@ -68,9 +69,9 @@ describe('random draws of the Villager sprites (sprites.md §4)', () => {
   test('a walk draws nothing to start (the walk sprite has no random start) and one draw to stand again', () => {
     const world = new World({ players: 2, units: [villager(1, 10.5, 10.5)] });
     const rng = new CountingRand();
-    const ctx: MoveContext = { map: world.map, entities: world.entities, pathing: world.pathing, rng, deltaSeconds: f32(0.09), attempts: 0 };
+    const ctx: MoveContext = { map: world.map, entities: world.entities, pathing: world.pathing, rng, deltaSeconds: f32(0.09), attempts: 0, masters: world.masters };
     const e = world.entities.get(1)!;
-    orderMove(e, 14.5, 10.5, rng);
+    orderMove(ctx, e, 14.5, 10.5);
     updateMover(ctx, e);
     expect([e.mover!.action!.state, walking(e), rng.draws]).toEqual([MOVE_MOVING, true, 0]);
     while (e.mover!.action) updateMover(ctx, e);
@@ -150,9 +151,12 @@ describe('move orders on the test map', () => {
   });
 });
 
-describe('fuzz: random move, work, build, queue and cancel orders', () => {
+/** The fuzz replays take seconds each; the suite runs files in parallel. */
+const FUZZ_TIMEOUT = 30_000;
+
+describe('fuzz: random move, work, build, queue, cancel, research and stop orders', () => {
   for (const seed of [1, 2, 3, 4]) {
-    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained`, () => {
+    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained, techs researched`, () => {
       const log = sampleReplay(240, seed, false);
       const first = runReplay(log);
       expect(runReplay(log)).toEqual(first);
@@ -162,12 +166,15 @@ describe('fuzz: random move, work, build, queue and cancel orders', () => {
       let deposits = 0;
       const built = new Set<number>();
       const trained = new Set<number>();
+      let researched = 0;
       while (world.turn < log.turns) {
         for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
         const before = new Map([...world.entities.all()].map((e) => [e.id, [e.x, e.y]] as const));
         const loads = [...world.entities.all()].filter((e) => e.owner > 0 && e.heldType >= 0 && e.heldType <= 3 && e.heldAmount >= 1);
         const resources = world.attributes.map((a) => a.slice(0, 4));
+        const researching = world.techs.map((states) => states.flatMap((s, id) => (s === TECH_RESEARCHING ? [id] : [])));
         world.runTurn();
+        researching.forEach((ids, p) => (researched += ids.filter((id) => world.techs[p]![id] === TECH_DONE).length));
         // A load gone while the owner's stock of it grew by at least as much: a drop-off.
         for (const was of loads.map((e) => ({ e, type: e.heldType, amount: e.heldAmount }))) {
           const now = world.entities.get(was.e.id);
@@ -195,7 +202,8 @@ describe('fuzz: random move, work, build, queue and cancel orders', () => {
       expect(deposits).toBeGreaterThan(0);
       expect(built.size).toBeGreaterThan(0);
       expect(trained.size).toBeGreaterThan(0);
-    });
+      expect(researched).toBeGreaterThan(0);
+    }, FUZZ_TIMEOUT);
   }
 });
 
@@ -211,6 +219,6 @@ describe('fuzz: the same orders plus a mid-map skirmish and attack orders', () =
       // Kills (player attribute 20) only count combat deaths of another player's objects, not cancels.
       expect(world.attributes[1]![20]!).toBeGreaterThan(0);
       expect(world.attributes[2]![20]!).toBeGreaterThan(0);
-    });
+    }, FUZZ_TIMEOUT);
   }
 });

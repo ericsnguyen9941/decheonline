@@ -4,8 +4,14 @@
  */
 import { add32, div32, f32, mul32, sub32 } from './num';
 import type { Entity } from './entities';
+import { typeOf, type PlayerMasters } from './masters';
 import type { CrtRand } from './rng';
-import { unitType, type SpriteInfo } from './units';
+import type { SpriteInfo } from './units';
+
+/** What a new sprite needs: the object's master (its owner's) and the RNG. */
+export interface SpriteContext extends PlayerMasters {
+  rng: CrtRand;
+}
 
 /** `RGE_Active_Animated_Sprite` fields (sprites.md §3.2), for the object's main sprite. */
 export interface ActiveSprite {
@@ -99,12 +105,12 @@ export function isAnimating(a: ActiveSprite, s: SpriteInfo): boolean {
  * happens when `s` is already the main sprite or the main sprite is the master's death sprite; otherwise a fresh
  * active sprite replaces it (one `rand()` for a random start frame).
  */
-export function newSprite(e: Entity, s: SpriteInfo | null, rng: CrtRand): void {
-  const t = unitType(e.type);
+export function newSprite(ctx: SpriteContext, e: Entity, s: SpriteInfo | null): void {
+  const t = typeOf(ctx, e);
   const next = s ?? t.standing;
   if (e.sprite) {
     if (e.sprite.graphic === next.graphic) return;
     if (t.dying && e.sprite.graphic === t.dying.graphic) return;
   }
-  e.sprite = makeActiveSprite(next, rng);
+  e.sprite = makeActiveSprite(next, ctx.rng);
 }

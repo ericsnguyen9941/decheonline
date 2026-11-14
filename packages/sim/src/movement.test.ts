@@ -48,10 +48,10 @@ const UNIT: UnitType = {
 function setup(waypoint: [number, number], seed = 14) {
   const map = new TileMap(32, 32);
   const entities = new EntityStore();
-  const pathing = new PathingSystem(map, entities);
+  const pathing = new PathingSystem(map, entities, () => UNIT);
   const rng = new CrtRand();
   rng.srand(seed);
-  const ctx: MoveContext = { map, entities, pathing, rng, deltaSeconds: f32(200 * f32(0.001)), attempts: 0 };
+  const ctx: MoveContext = { map, entities, pathing, rng, deltaSeconds: f32(200 * f32(0.001)), attempts: 0, masters: [{}, { 1: UNIT }] };
   const add = (x: number, y: number): Entity => {
     const e = entities.create({ owner: 1, type: 1, x, y, z: 0, hp: 1, mover: newMover() });
     teleport(ctx, e, UNIT, e.x, e.y, 0);
