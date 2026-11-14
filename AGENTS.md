@@ -5,9 +5,9 @@ Browser remake of Age of Empires 1 (target: AoE1 + Rise of Rome 1.0a), determini
 ## Layout
 - `packages/sim` pure deterministic rules: no DOM, no Node, no deps.
 - `packages/data` dat reader and typed rule set.
-- `packages/protocol` client/server messages.
+- `packages/protocol` client/server messages (`messages.ts` types, `codec.ts` validation).
 - `packages/formats` DRS / SLP / palette decoders.
-- `apps/client` Vite + PixiJS. `apps/server` Node + `ws` (health route `/health`; no rooms yet).
+- `apps/client` Vite + PixiJS. `apps/server` Node + `ws` (`/health`; relay on WebSocket `/ws`, rooms in `src/rooms.ts`).
 - `tools/` repo scripts (`check-tracked-files.mjs`). `docs/spec/` reverse-engineering specs. `e2e/` Playwright. `assets-local/` gitignored game files.
 
 Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there is no per-package build step. The client is built by Vite, the server bundled by esbuild into `apps/server/dist/`.
