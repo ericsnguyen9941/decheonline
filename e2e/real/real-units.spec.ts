@@ -26,8 +26,8 @@ test('villagers render with their real sprites, standing and walking', async ({ 
   await host.getByTestId('ready').click();
   await guest.getByTestId('ready').click();
   await host.getByTestId('start').click();
-  // Every unit of both players drawn from the pack.
-  await host.waitForFunction(() => window.__game?.packSprites() === 6, undefined, { timeout: 30_000 });
+  // Every object of both players (6 villagers, 2 Town Centers) and Gaia's drawn from the pack.
+  await host.waitForFunction(() => window.__game?.packSprites() === 40, undefined, { timeout: 30_000 });
   expect(await host.evaluate(() => window.__map!.source)).toBe('pack');
   mkdirSync(shots, { recursive: true });
   const canvas = host.getByTestId('game-canvas');
@@ -43,8 +43,8 @@ test('villagers render with their real sprites, standing and walking', async ({ 
   expect((await host.evaluate(() => window.__game!.selection()))!.length).toBe(3);
   await canvas.screenshot({ path: join(shots, 'units.png') });
 
-  // Right click a few tiles south-east on screen and catch them walking.
-  const target = await host.evaluate(() => window.__map!.tileScreenPos(13, 14));
+  // Right click a few tiles east of them (open ground) and catch them walking.
+  const target = await host.evaluate(() => window.__map!.tileScreenPos(14, 9));
   await host.mouse.click(box.x + target.x, box.y + target.y, { button: 'right' });
   await host.waitForFunction(() => window.__game!.units().some((u) => u.owner === 1 && u.moving && u.x > 11));
   await canvas.screenshot({ path: join(shots, 'units-walking.png') });

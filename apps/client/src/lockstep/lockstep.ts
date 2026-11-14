@@ -1,4 +1,4 @@
-import { COMMAND_DELAY_TURNS, STEP_MS, startingUnits, stepsInTurn, World, type Command } from '@aoe/sim';
+import { COMMAND_DELAY_TURNS, STEP_MS, startingObjects, stepsInTurn, World, type Command } from '@aoe/sim';
 import { TURN_MS, type EndReason, type TurnBatch } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
@@ -62,7 +62,7 @@ export class Lockstep {
     this.timers = timers;
     this.paceScale = start.turnMs / TURN_MS / speed;
     const players = start.playerCount + 1;
-    this.world = new World({ players, randomSeed: start.seed, units: startingUnits(players) });
+    this.world = new World({ players, randomSeed: start.seed, units: startingObjects(players) });
     this.unsubscribe = link.onMessage((m) => {
       if (this.stopped) return;
       if (m.t === 'turn') {

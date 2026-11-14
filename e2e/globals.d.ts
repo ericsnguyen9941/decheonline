@@ -23,6 +23,11 @@ interface Window {
     selection(): number[] | null;
     unitScreenPos(id: number): { x: number; y: number } | null;
     packSprites(): number;
+    resources(player?: number): { food: number; wood: number; gold: number; stone: number };
+    resourcesAt(turn: number, player: number): { food: number; wood: number; gold: number; stone: number } | undefined;
+    objects(): { id: number; owner: number; type: number; x: number; y: number; state: number; heldType: number; heldAmount: number; graphic: number; frame: number }[];
+    issueWork(units: number[], target: number, x: number, y: number): void;
+    objectScreenPos(id: number): { x: number; y: number } | null;
   };
 }
 
