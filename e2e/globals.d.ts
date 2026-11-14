@@ -62,3 +62,13 @@ interface Window {
     tileAt(canvasX: number, canvasY: number): { col: number; row: number } | null;
   };
 }
+
+// The slice of `window.__skirmish` (apps/client/src/skirmish.ts, `?debug=combat`) that tests read.
+interface Window {
+  __skirmish?: {
+    turn(): number;
+    objects(): { id: number; owner: number; type: number; x: number; y: number; z: number; state: number; graphic: number }[];
+    packSprites(): number;
+    objectScreenPos(id: number): { x: number; y: number } | null;
+  };
+}

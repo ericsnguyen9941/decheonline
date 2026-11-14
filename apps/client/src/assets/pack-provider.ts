@@ -43,7 +43,10 @@ class PackProvider implements AssetProvider {
   }
 
   async graphicFrames(graphicId: number, owner = 1): Promise<SpriteFrame[]> {
-    return this.slpFrames(this.manifest.graphics[graphicId]?.slp ?? null, owner);
+    const g = this.manifest.graphics[graphicId];
+    // A dat graphic with no SLP and no parts (the Flare's "Blank", 787) shows nothing: one empty frame.
+    if (g && !g.slp && g.deltas.length === 0) return [{ texture: Texture.EMPTY, hotspotX: 0, hotspotY: 0 }];
+    return this.slpFrames(g?.slp ?? null, owner);
   }
 
   interfaceFrame(slp: number, frame: number, owner = 1): ImageFrame | null {

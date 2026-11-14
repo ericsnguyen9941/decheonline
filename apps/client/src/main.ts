@@ -4,6 +4,7 @@ import { createAssetProvider } from './assets';
 import { renderAssetsDebug, type DebugViewReport } from './assets/debug-view';
 import { exposeMapDebug, MapView } from './map';
 import { startMultiplayer } from './multiplayer';
+import { startSkirmish } from './skirmish';
 import { createTestMap } from '@aoe/sim';
 import { GAME_TITLE } from './title';
 
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
   // The canvas stays hidden behind the lobby until a game starts; the debug views have no lobby.
   const setGameVisible = (visible: boolean) => (host.hidden = !visible);
-  setGameVisible(params.get('debug') === 'assets' || params.get('debug') === 'map');
+  setGameVisible(['assets', 'map', 'combat'].includes(params.get('debug') ?? ''));
   if (params.get('debug') === 'assets') {
     // Unit 83 is the villager in the shipped dat; terrain 0 is Grass.
     const view = await renderAssetsDebug(app, await createAssetProvider(), {
@@ -46,6 +47,12 @@ async function main(): Promise<void> {
     const debug = exposeMapDebug(view);
     if (params.has('col') && params.has('row')) debug.centerOnTile(Number(params.get('col')), Number(params.get('row')));
     app.canvas.dataset.assetsSource = view.source;
+    return;
+  }
+
+  if (params.get('debug') === 'combat') {
+    // A local fight without a lobby (Bowmen, Clubmen, Villagers); `speed` multiplies the pace.
+    window.__skirmish = await startSkirmish(app, Number(params.get('speed') ?? 1) || 1);
     return;
   }
 

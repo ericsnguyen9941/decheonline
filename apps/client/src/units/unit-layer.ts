@@ -1,12 +1,15 @@
 import { Graphics, Sprite, type Application, type Texture, type Ticker } from 'pixi.js';
-import { buildingFacet, checkPlacement, spriteInfo, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { buildingFacet, checkPlacement, ObjectState, spriteInfo, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
 import { canBuild } from '../hud/commands';
+import { frameCursor } from '../hud/frame-image';
+import { SLP } from '../hud/layout';
 import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import { composeGraphic } from './composite';
 import { facingFrame } from './facing';
+import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
 import { alignBuilding } from './placement';
 
 /** Pointer travel (CSS px) after which a left press becomes a selection box instead of a click. */
@@ -46,9 +49,12 @@ interface Track {
   pack: boolean;
 }
 
-/** Buildings carry a mover in the sim but are not units: they cannot be selected or ordered (`master_type` 80). */
+/**
+ * A unit that can be selected and ordered (`master_type` 70). Buildings (80), missiles (60) and dead units (30) carry a
+ * mover in the sim too but are not.
+ */
 export function isUnit(e: Entity): boolean {
-  return e.mover !== undefined && unitType(e.type).masterType < 80;
+  return e.mover !== undefined && unitType(e.type).masterType === 70;
 }
 
 /** A building (foundations too) of the sim's table. */
@@ -91,12 +97,15 @@ export interface Ghost {
 
 /** Alpha of a pixel of `sprite`'s texture under canvas point (x, y) is above this to count as a hit. */
 const HIT_ALPHA = 8;
+/** Pixels a tile of height (`world_z`) raises a drawn object: `tile_half_height` (src/stat_obj.cpp:1637). */
+const Z_PIXELS = 16;
 
 /**
  * Draws every sim object on the map layer (units, buildings, trees, mines, animals, carcasses) with its real sprite
  * as the sim reports it (owner colour, facing, task animation) and handles the original's mouse scheme: left click or
- * drag a box to select own units, or click an own building, right click to order the selected units to work on the
- * object under the pointer (a `work` command) or, over bare ground, to move there. While a building is being placed its
+ * drag a box to select own units, or click an own building, right click to order the selected units to attack the
+ * enemy object under the pointer (an `attack` command), to work on any other object there (a `work` command) or, over
+ * bare ground, to move there. While a building is being placed its
  * ghost follows the pointer; a left click issues `build`, a right click stops placing.
  */
 export class UnitLayer {
@@ -117,6 +126,8 @@ export class UnitLayer {
   private ghostAt: Ghost | null = null;
   /** Canvas pixel of the pointer while it is over the canvas. */
   private pointer: { x: number; y: number } | null = null;
+  /** CSS cursor over an attack target: the original's sword, or the browser's crosshair without art. */
+  private attackCursor = 'crosshair';
 
   constructor(private readonly o: UnitLayerOptions) {
     this.seenTurn = o.world.turn;
@@ -130,6 +141,8 @@ export class UnitLayer {
     o.app.ticker.add(this.tick);
     this.listen(o.app.canvas);
     this.draw();
+    const sword = o.provider.interfaceFrame(SLP.cursors, ATTACK_CURSOR_FRAME);
+    if (sword) void frameCursor(sword, 'crosshair').then((c) => (this.attackCursor = c)).catch(() => undefined);
   }
 
   /** Own units, for centring the view at the start. */
@@ -261,6 +274,8 @@ export class UnitLayer {
       const art = this.loadArt(graphic, e.owner);
       const at = this.drawnAt(t, now);
       const pos = tileCoordsToPixel(at.x, at.y, width);
+      // Missiles fly above the ground: `world_z` raises the sprite (the map is flat, so others stay at 0).
+      const lift = Math.round(e.z * Z_PIXELS);
       t.sprite.visible = art !== null;
       if (!art) continue;
       t.pack = art.pack;
@@ -279,7 +294,7 @@ export class UnitLayer {
       const frame = art.frames[pick.index] ?? art.frames[0]!;
       t.sprite.texture = frame.texture;
       t.sprite.scale.x = pick.flipped ? -1 : 1;
-      t.sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - frame.hotspotY);
+      t.sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - lift - frame.hotspotY);
       // Above every terrain tile; nearer the bottom of the screen draws later.
       t.sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
     }
@@ -347,7 +362,7 @@ export class UnitLayer {
   /**
    * The selection marker of the original's default outline (`outline_type` 2, RGE_Static_Object::capture_frame_3d_square):
    * a white diamond on the ground, the unit's outline radii wide, and a 24x2 hit point bar (green, red where hurt) over
-   * its top corner.
+   * its top corner while it has hit points left. Only selected objects show the bar (`selected & 1`, outline type 2).
    */
   private drawHighlight(): void {
     const g = this.highlight.clear();
@@ -365,14 +380,14 @@ export class UnitLayer {
       const point = (x: number, y: number, z: number) => ({ x: Math.round(o.x + (y + x) * 32), y: Math.round(o.y + (y - x - z) * 16) });
       const corners = [point(rx, -ry, 0), point(rx, ry, 0), point(-rx, ry, 0), point(-rx, -ry, 0)];
       g.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: SELECTION_COLOUR });
-      if (type.hitPoints <= 0) continue;
+      const hp = Math.floor(e.hp);
+      if (type.hitPoints <= 0 || hp <= 0) continue;
       const bar = point(rx, -ry, rz);
       const left = bar.x - 12;
       const top = bar.y - 2;
-      const hp = Math.max(0, Math.floor(e.hp));
-      const filled = hp >= type.hitPoints ? BAR_WIDTH : hp === 0 ? 0 : Math.min(BAR_WIDTH - 1, Math.floor((hp * BAR_WIDTH) / type.hitPoints) + 1);
+      const filled = hp >= type.hitPoints ? BAR_WIDTH : Math.min(BAR_WIDTH - 1, Math.floor((hp * BAR_WIDTH) / type.hitPoints) + 1);
       g.rect(left, top, BAR_WIDTH, 2).fill(BAR_EMPTY);
-      if (filled > 0) g.rect(left, top, filled, 2).fill(BAR_FILLED);
+      g.rect(left, top, filled, 2).fill(BAR_FILLED);
     }
   }
 
@@ -406,7 +421,7 @@ export class UnitLayer {
       this.pointer = p;
       if (this.placing !== null) return;
       if (!this.press) {
-        canvas.style.cursor = this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
+        canvas.style.cursor = this.attackTarget(p.x, p.y) ? this.attackCursor : this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
         return;
       }
       if (!this.press.boxing && Math.hypot(p.x - this.press.x, p.y - this.press.y) < BOX_THRESHOLD) return;
@@ -477,18 +492,32 @@ export class UnitLayer {
     return data.pixels[(py * data.width + px) * 4 + 3]! > HIT_ALPHA;
   }
 
-  /** Topmost object a work order can target (Gaia's or an own non-unit) whose drawn pixels cover canvas point (x, y). */
-  private workTarget(x: number, y: number): Entity | undefined {
-    if (!this.hasOwnSelection()) return undefined;
+  /**
+   * Topmost enemy object the selection can attack whose drawn pixels cover canvas point (x, y): another player's (not
+   * Gaia's), alive (`object_state` up to active), of a group the right-click table attacks, with an attacker selected.
+   */
+  private attackTarget(x: number, y: number): Entity | undefined {
+    const { world, player } = this.o;
+    if (!this.selectedOwn().some((id) => canAttack(unitType(world.entities.get(id)!.type)))) return undefined;
+    return this.topmostAt(x, y, (e) => e.owner > 0 && e.owner !== player && e.state <= ObjectState.Active && isAttackable(unitType(e.type)));
+  }
+
+  /** Topmost drawn object passing `test` whose pixels cover canvas point (x, y). */
+  private topmostAt(x: number, y: number, test: (e: Entity) => boolean): Entity | undefined {
     const hits: [Entity, Track][] = [];
     for (const [id, t] of this.tracks) {
       const e = this.o.world.entities.get(id);
-      if (!e || !t.sprite.visible || this.selected.has(id)) continue;
-      if (e.owner !== 0 && (e.owner !== this.o.player || isUnit(e))) continue;
+      if (!e || !t.sprite.visible || this.selected.has(id) || !test(e)) continue;
       if (t.sprite.getBounds().containsPoint(x, y) && this.opaque(t.sprite, x, y)) hits.push([e, t]);
     }
     hits.sort((a, b) => b[1].sprite.zIndex - a[1].sprite.zIndex);
     return hits[0]?.[0];
+  }
+
+  /** Topmost object a work order can target (Gaia's or an own non-unit) whose drawn pixels cover canvas point (x, y). */
+  private workTarget(x: number, y: number): Entity | undefined {
+    if (!this.hasOwnSelection()) return undefined;
+    return this.topmostAt(x, y, (e) => e.owner === 0 || (e.owner === this.o.player && !isUnit(e)));
   }
 
   private selectedOwn(): number[] {
@@ -499,7 +528,10 @@ export class UnitLayer {
     return this.selectedOwn().some((id) => isUnit(this.o.world.entities.get(id)!));
   }
 
-  /** Right click: the selected units work on the object under the pointer, or else walk to the map point there. */
+  /**
+   * Right click: the selected units attack the enemy object under the pointer, or work on the object there, or else walk
+   * to the map point there.
+   */
   private orderAt(x: number, y: number): void {
     const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
     if (units.length === 0) return;
@@ -507,6 +539,8 @@ export class UnitLayer {
     const { col, row } = pixelToTileCoords(x + camera.x, y + camera.y, this.o.world.map.width);
     const { width, height } = this.o.world.map;
     if (col < 0 || row < 0 || col >= width || row >= height) return;
+    const enemy = this.attackTarget(x, y);
+    if (enemy) return this.o.issue({ type: 'attack', units, target: enemy.id });
     const target = this.workTarget(x, y);
     if (target) this.o.issue({ type: 'work', units, target: target.id, x: col, y: row });
     else this.o.issue({ type: 'move', units, x: col, y: row });
