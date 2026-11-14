@@ -55,15 +55,14 @@ test('the camera scrolls by dragging, by keys and at the screen edge, and stays 
   // Keys.
   const beforeKeys = await camera(page);
   await page.keyboard.down('ArrowLeft');
-  await page.waitForTimeout(300);
+  // Held until it has moved: how far it gets in a fixed time depends on how many frames a loaded machine draws.
+  await expect.poll(async () => (await camera(page)).x).toBeLessThan(beforeKeys.x - 50);
   await page.keyboard.up('ArrowLeft');
-  expect((await camera(page)).x).toBeLessThan(beforeKeys.x - 50);
 
   // Pointer at the right edge.
   const beforeEdge = await camera(page);
   await page.mouse.move(box.x + box.width - 3, box.y + 225);
-  await page.waitForTimeout(300);
-  expect((await camera(page)).x).toBeGreaterThan(beforeEdge.x + 50);
+  await expect.poll(async () => (await camera(page)).x).toBeGreaterThan(beforeEdge.x + 50);
   await page.mouse.move(box.x + 400, box.y + 225);
 
   // Pushed past the top corner of the map, the view centre stops on its corner tile, and the sprites follow the camera.

@@ -62,7 +62,8 @@ test('outside the map is black', async ({ page }) => {
   await openMap(page);
   // Pushed past the top corner of the map: the upper part of the canvas is off the map, the lower middle is over it.
   await page.evaluate(() => window.__map!.setCamera(-9999, -9999));
-  await page.waitForTimeout(100);
+  // Two animation frames: the second starts after the renderer drew the first with the new camera.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   const corners = [await pixel(page, 2, 2), await pixel(page, 1277, 2), await pixel(page, 640, 2), await pixel(page, 300, 200)];
   console.log('corner pixels:', JSON.stringify(corners));
   for (const c of corners) expect(c).toEqual([0, 0, 0]);
