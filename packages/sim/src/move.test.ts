@@ -169,6 +169,7 @@ describe('fuzz: random move, work, build, queue, cancel, research and stop order
       let researched = 0;
       while (world.turn < log.turns) {
         for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
+        for (const c of log.speeds ?? []) if (c.turn === world.turn) world.setSpeedChange(c);
         const before = new Map([...world.entities.all()].map((e) => [e.id, [e.x, e.y]] as const));
         const loads = [...world.entities.all()].filter((e) => e.owner > 0 && e.heldType >= 0 && e.heldType <= 3 && e.heldAmount >= 1);
         const resources = world.attributes.map((a) => a.slice(0, 4));

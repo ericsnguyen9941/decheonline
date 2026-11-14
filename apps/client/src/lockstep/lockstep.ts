@@ -1,10 +1,9 @@
-import { COMMAND_DELAY_TURNS, STEP_MS, startingObjects, stepsInTurn, World, type Command } from '@aoe/sim';
-import { TURN_MS, type EndReason, type TurnBatch } from '@aoe/protocol';
+import { COMMAND_DELAY_TURNS, SINGLE_STEP_TURNS, startingObjects, World, type Command } from '@aoe/sim';
+import type { EndReason, SpeedChange, TurnBatch } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
 export interface LockstepStart {
   seed: number;
-  turnMs: number;
   commandDelay: number;
   /** Number of human players; protocol slot s is sim player s + 1 (player 0 is Gaia). */
   playerCount: number;
@@ -18,9 +17,13 @@ export interface Timers {
 export interface LockstepOptions {
   link: Link;
   start: LockstepStart;
-  /** Pace multiplier (debug/tests); 1 runs at the server's turnMs. */
+  /** Pace multiplier (debug/tests); 1 runs at the original's wall pace. */
   speed?: number;
   timers?: Timers;
+  /** Wall clock, ms. */
+  now?: () => number;
+  /** This machine's mean frame time, ms; 0 while unknown (docs/spec/turn-timing.md §3.2). */
+  frameMs?: () => number;
 }
 
 const browserTimers: Timers = {
@@ -29,9 +32,11 @@ const browserTimers: Timers = {
 };
 
 /**
- * Client side of the lockstep loop. Each turn this client submits one batch, the relay releases the turn once both
- * clients have, and both batches are applied to the `World`, which then runs the turn and reports its hash. Turns
- * 0 and 1 are submitted empty on start; the batch for turn N + 2 goes out as turn N is executed.
+ * Client side of the lockstep loop (docs/spec/turn-timing.md §2, §8.5). A turn is a boundary step plus the world's
+ * `frames` buffer steps of `granularity` ms. The boundary step of turn N runs once the relay has released the batches
+ * issued during turn N - 2; buffer step k runs once k · G ms of wall time passed since the boundary. After a turn's
+ * last step this client reports its hash and submits the commands issued during it, and the next boundary waits for
+ * the next frame.
  */
 export class Lockstep {
   readonly world: World;
@@ -41,33 +46,51 @@ export class Lockstep {
   onTurn: (turn: number, hash: number) => void = () => {};
   onDesync: (turn: number, hashes: number[]) => void = () => {};
   onEnded: (reason: EndReason) => void = () => {};
-  /** Total command batches applied, per slot (debug and tests). */
+  /** Total command batches received, per slot (debug and tests). */
   readonly applied: Command[][] = [];
+  /** The server's latest round trip to each slot, ms. */
+  rtt: number[] = [];
+  /** Hold each pong this long (debug: fakes a slow link). */
+  pongDelayMs = 0;
 
   private readonly link: Link;
   private readonly paceScale: number;
   private readonly timers: Timers;
-  private readonly released = new Map<number, TurnBatch[]>();
+  private readonly now: () => number;
+  private readonly frameMs: () => number;
+  private readonly released = new Map<number, { batches: TurnBatch[]; speed?: SpeedChange }>();
   private pending: Command[] = [];
-  private gateOpen = true;
+  /** Wall time of the current turn's boundary step. */
+  private boundaryAt = 0;
+  /** Wall time the next boundary step is due: a frame after the last buffer step was due. */
+  private nextBoundaryAt = 0;
   private timer: unknown;
   private stopped = false;
   private readonly unsubscribe: () => void;
 
-  constructor({ link, start, speed = 1, timers = browserTimers }: LockstepOptions) {
+  constructor({ link, start, speed = 1, timers = browserTimers, now = () => performance.now(), frameMs = () => 0 }: LockstepOptions) {
     if (start.commandDelay !== COMMAND_DELAY_TURNS) {
       throw new Error(`server command delay ${start.commandDelay} != sim's ${COMMAND_DELAY_TURNS}`);
     }
     this.link = link;
     this.timers = timers;
-    this.paceScale = start.turnMs / TURN_MS / speed;
+    this.now = now;
+    this.frameMs = frameMs;
+    this.paceScale = 1 / speed;
     const players = start.playerCount + 1;
     this.world = new World({ players, randomSeed: start.seed, units: startingObjects(players) });
     this.unsubscribe = link.onMessage((m) => {
       if (this.stopped) return;
       if (m.t === 'turn') {
-        this.released.set(m.turn, m.batches);
+        this.released.set(m.turn, m.speed ? { batches: m.batches, speed: m.speed } : { batches: m.batches });
+        for (const batch of m.batches) (this.applied[batch.slot] ??= []).push(...batch.commands);
         this.pump();
+      } else if (m.t === 'ping') {
+        const pong = () => link.send({ t: 'pong', n: m.n });
+        if (this.pongDelayMs > 0) this.timers.set(pong, this.pongDelayMs);
+        else pong();
+      } else if (m.t === 'rtt') {
+        this.rtt = m.rtt;
       } else if (m.t === 'desync') {
         this.stop();
         this.onDesync(m.turn, m.hashes);
@@ -81,7 +104,8 @@ export class Lockstep {
       this.stop();
       this.onEnded('peer-left');
     });
-    for (let turn = 0; turn < COMMAND_DELAY_TURNS; turn++) link.send({ t: 'turn', turn, commands: [] });
+    // Start on the next pass, once the caller has set its handlers.
+    this.wait(0);
   }
 
   /** Turn the next executed turn will be. */
@@ -89,12 +113,13 @@ export class Lockstep {
     return this.world.turn;
   }
 
-  /** Wall time the loop spends on `turn` before running the next one. */
+  /** Wall time a turn of `turn`'s length takes at the current step size: (F − 1) · G plus a frame (turn-timing.md §2). */
   turnMs(turn: number): number {
-    return stepsInTurn(turn) * STEP_MS * this.paceScale;
+    const steps = turn <= SINGLE_STEP_TURNS ? 0 : (this.world.frames - 1) * this.world.granularity;
+    return (steps + this.frameMs()) * this.paceScale;
   }
 
-  /** Queue a command; it goes out in the next batch and executes COMMAND_DELAY_TURNS later on both clients. */
+  /** Queue a command; it goes out after the current turn and executes COMMAND_DELAY_TURNS later on both clients. */
   issue(command: Command): void {
     this.pending.push(command);
   }
@@ -105,29 +130,53 @@ export class Lockstep {
     if (this.timer !== undefined) this.timers.clear(this.timer);
   }
 
+  /** Run every step that is due, then wait for the next one's time or batch. A late loop catches up at once. */
   private pump(): void {
-    if (!this.gateOpen || this.stopped) return;
-    const turn = this.world.turn;
-    const batches = this.released.get(turn);
-    if (!batches) return;
-    this.released.delete(turn);
-    for (const batch of batches) {
-      this.world.addBatch(turn, batch.slot + 1, batch.commands);
-      (this.applied[batch.slot] ??= []).push(...batch.commands);
+    if (this.stopped || this.timer !== undefined) return;
+    const world = this.world;
+    for (;;) {
+      const due = world.turnStep === 0 ? this.nextBoundaryAt : this.boundaryAt + (world.turnStep - 1) * world.granularity * this.paceScale;
+      const wait = due - this.now();
+      if (wait > 0) return this.wait(wait);
+      if (world.turnStep === 0) {
+        if (!this.takeBatches(world.turn)) return;
+        this.boundaryAt = this.now();
+      }
+      world.runStep();
+      if (world.turnStep === 0) {
+        this.endTurn(world.turn - 1);
+        // The next boundary comes on the following pass of the game loop: a frame after the last step was due.
+        this.nextBoundaryAt = Math.max(due, this.boundaryAt) + this.frameMs() * this.paceScale;
+      }
     }
-    this.world.runTurn();
+  }
+
+  /** Give the world the batches issued during `turn - COMMAND_DELAY_TURNS`; false while the relay has not released them. */
+  private takeBatches(turn: number): boolean {
+    const issued = turn - COMMAND_DELAY_TURNS;
+    if (issued < 0) return true;
+    const release = this.released.get(issued);
+    if (!release) return false;
+    this.released.delete(issued);
+    for (const batch of release.batches) this.world.addBatch(issued, batch.slot + 1, batch.commands);
+    if (release.speed) this.world.setSpeedChange(release.speed);
+    return true;
+  }
+
+  private endTurn(turn: number): void {
     const hash = this.world.hash();
     this.hashes.set(turn, hash);
     this.link.send({ t: 'hash', turn, hash });
-    this.link.send({ t: 'turn', turn: turn + COMMAND_DELAY_TURNS, commands: this.pending });
+    const frameMs = Math.min(255, Math.round(this.frameMs()));
+    this.link.send(frameMs > 0 ? { t: 'turn', turn, commands: this.pending, frameMs } : { t: 'turn', turn, commands: this.pending });
     this.pending = [];
     this.onTurn(turn, hash);
-    // Hold the next turn until this one's share of wall time has passed.
-    this.gateOpen = false;
+  }
+
+  private wait(ms: number): void {
     this.timer = this.timers.set(() => {
       this.timer = undefined;
-      this.gateOpen = true;
       this.pump();
-    }, this.turnMs(turn));
+    }, ms);
   }
 }

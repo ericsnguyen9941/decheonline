@@ -38,6 +38,43 @@ test('turns 0..6 are one step, later turns the boundary step plus 10 buffer fram
   expect(world.worldTime).toBe(7 * STEP_MS + 11 * STEP_MS);
 });
 
+test('a speed change agreed for turn E runs from turn E + 1: boundary step and buffer frames at the new G and F', () => {
+  const world = new World({ players: 2 });
+  for (let i = 0; i < 10; i++) world.runTurn();
+  world.setSpeedChange({ turn: 10, granularity: 30, frames: 9 });
+  const before = world.worldTime;
+  world.runTurn();
+  expect(world.worldTime - before).toBe(11 * STEP_MS);
+  expect(world.granularity).toBe(STEP_MS);
+  world.runStep();
+  expect(world.worldTime - before).toBe(11 * STEP_MS + 30);
+  expect([world.granularity, world.frames, world.turnStep]).toEqual([30, 9, 1]);
+  for (let i = 0; i < 9; i++) world.runStep();
+  expect(world.turn).toBe(12);
+  expect(world.worldTime - before).toBe(11 * STEP_MS + 10 * 30);
+  expect(world.speedChanges).toEqual([]);
+});
+
+test('a pending speed change is not hashed: a world that hears of it later, before it applies, stays in step', () => {
+  const early = new World({ players: 2 });
+  const late = new World({ players: 2 });
+  const change = { turn: 9, granularity: 20, frames: 13 };
+  early.setSpeedChange(change);
+  for (let i = 0; i < 9; i++) {
+    early.runTurn();
+    late.runTurn();
+    expect(late.hash()).toBe(early.hash());
+  }
+  late.setSpeedChange(change);
+  early.runTurn();
+  late.runTurn();
+  expect(late.hash()).toBe(early.hash());
+  early.runTurn();
+  late.runTurn();
+  expect(late.hash()).toBe(early.hash());
+  expect(early.frames).toBe(13);
+});
+
 test('parseCommand accepts the vocabulary and rejects anything else', () => {
   expect(parseCommand({ type: 'noop', extra: 1 })).toEqual({ type: 'noop' });
   expect(parseCommand({ type: 'test', x: 1.5, y: -2 })).toEqual({ type: 'test', x: 1.5, y: -2 });

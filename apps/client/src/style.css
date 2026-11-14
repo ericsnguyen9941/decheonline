@@ -179,6 +179,9 @@ button.primary {
   color: var(--parchment);
   background: rgba(0, 0, 0, 0.6);
 }
+[data-testid='net-speed'] {
+  margin: 0 0.6rem;
+}
 
 dialog {
   padding: 1.5rem 2rem;

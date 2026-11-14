@@ -2,7 +2,7 @@ import type { Command } from './commands';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
-import { startingObjects, World, type StartUnit } from './world';
+import { startingObjects, World, type SpeedChange, type StartUnit } from './world';
 
 /** Everything needed to rerun a game: start state plus every batch, keyed by the turn it was issued on. */
 export interface ReplayLog {
@@ -12,6 +12,8 @@ export interface ReplayLog {
   units?: StartUnit[];
   turns: number;
   batches: { turn: number; player: number; commands: Command[] }[];
+  /** Step size and buffer frame changes, each given to the world on the turn it was agreed for (turn-timing.md §8.7). */
+  speeds?: SpeedChange[];
 }
 
 /** Run a log from the start; returns the state hash after every turn. */
@@ -22,11 +24,23 @@ export function runReplay(
   const hashes: number[] = [];
   while (world.turn < log.turns) {
     for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
+    for (const c of log.speeds ?? []) if (c.turn === world.turn) world.setSpeedChange(c);
     world.runTurn();
     hashes.push(world.hash());
   }
   return hashes;
 }
+
+/**
+ * `(G, F)` changes the sample replays, as the host would agree them (turn-timing.md §5, §7): from the defaults down
+ * to small steps and back up, so every engine also runs 20, 30 and 150 ms steps.
+ */
+const SAMPLE_SPEEDS: readonly SpeedChange[] = [
+  { turn: 24, granularity: 30, frames: 9 },
+  { turn: 30, granularity: 20, frames: 13 },
+  { turn: 36, granularity: 150, frames: 8 },
+  { turn: 60, granularity: 90, frames: 10 },
+];
 
 /** Two Clubmen and a Bowman per player, facing each other across the middle of the test map, after the starting objects. */
 const SKIRMISH: readonly StartUnit[] = [
@@ -52,7 +66,7 @@ const SKIRMISH: readonly StartUnit[] = [
  * rarely a `cancel` of an object made during the game; and, from a third generator, now and then a `research` at their
  * Town Center (sometimes the other's or an object made during the game) of a building's 2-second tech (Granary,
  * Storage Pit or Barracks built: two make the Tool Age available), the Tool Age or any tech id, and rarely a `stop` of
- * their Town Center.
+ * their Town Center. The step size and buffer frames change on the way (`SAMPLE_SPEEDS`).
  */
 export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLog {
   const players = 3;
@@ -121,5 +135,5 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
       if (commands.length > 0) batches.push({ turn, player, commands });
     }
   }
-  return { players, randomSeed: 4242, units, turns, batches };
+  return { players, randomSeed: 4242, units, turns, batches, speeds: SAMPLE_SPEEDS.filter((c) => c.turn < turns).map((c) => ({ ...c })) };
 }

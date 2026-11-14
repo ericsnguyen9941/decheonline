@@ -44,6 +44,8 @@ interface Window {
     }[];
     queue(id: number): { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null } | null;
     ghost(): { unit: number; x: number; y: number; fits: boolean } | null;
+    net(): { granularity: number; frames: number; frameMs: number; rtt: number[] };
+    delayPongs(ms: number): void;
   };
 }
 

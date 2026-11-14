@@ -5,7 +5,6 @@ import {
   COMMAND_DELAY_TURNS,
   MAX_PLAYERS,
   MAX_TURNS_AHEAD,
-  TURN_MS,
   isValidCode,
   normalizeCode,
   type ClientMessage,
@@ -13,8 +12,13 @@ import {
   type ErrorCode,
   type PlayerInfo,
   type ServerMessage,
+  type SpeedChange,
   type TurnBatch,
 } from '@aoe/protocol';
+import { highLatencyMs, SpeedHost } from './speed';
+
+/** A player is pinged when this long passed since the last ping to it (`CheckPingTime`, turn-timing.md §3.1). */
+export const PING_INTERVAL_MS = 8000;
 
 /** One connected client, as the room logic sees it. */
 export interface Peer {
@@ -25,6 +29,7 @@ export interface Peer {
 export interface TurnRecord {
   turn: number;
   batches: TurnBatch[];
+  speed?: SpeedChange;
 }
 
 interface Member {
@@ -36,6 +41,13 @@ interface Member {
   /** Submitted but not yet released batches. */
   pending: Map<number, Command[]>;
   hashes: Map<number, number>;
+  /** Latest round trip to this member, ms; 0 before the first. */
+  rtt: number;
+  /** Latest mean frame time the member reported, ms; 0 before the first. */
+  frameMs: number;
+  /** Number and send time of the latest ping. */
+  pingN: number;
+  pingAt: number;
 }
 
 export class Room {
@@ -45,6 +57,8 @@ export class Room {
   readonly desyncs: number[] = [];
   started = false;
   seed = 0;
+  /** Step size and buffer frames: the server plays the host (docs/spec/turn-timing.md §8.2). */
+  readonly speed = new SpeedHost();
 
   constructor(readonly code: string) {}
 
@@ -67,6 +81,8 @@ export interface RoomRegistryOptions {
   generateCode?: () => string;
   /** Override the game seed (tests). */
   generateSeed?: () => number;
+  /** Clock for round trips, ms (tests). */
+  now?: () => number;
 }
 
 function randomCode(): string {
@@ -81,10 +97,12 @@ export class RoomRegistry {
   private readonly byPeer = new Map<Peer, Room>();
   private readonly generateCode: () => string;
   private readonly generateSeed: () => number;
+  private readonly now: () => number;
 
   constructor(options: RoomRegistryOptions = {}) {
     this.generateCode = options.generateCode ?? randomCode;
     this.generateSeed = options.generateSeed ?? (() => randomInt(2 ** 32));
+    this.now = options.now ?? (() => performance.now());
   }
 
   roomOf(peer: Peer): Room | undefined {
@@ -107,6 +125,7 @@ export class RoomRegistry {
     const slot = room.members.findIndex((m) => m.peer === peer);
     const member = room.members[slot];
     if (!member) return reject(peer, 'not-in-room', 'join or create a room first');
+    if (room.started) this.ping(member, false);
     switch (message.t) {
       case 'ready':
         if (room.started) return reject(peer, 'room-started', 'game already started');
@@ -115,7 +134,10 @@ export class RoomRegistry {
       case 'start':
         return this.start(room, slot, peer);
       case 'turn':
+        if (message.frameMs !== undefined && room.started) member.frameMs = message.frameMs;
         return this.submitTurn(room, member, peer, message.turn, message.commands);
+      case 'pong':
+        return this.pong(room, member, message.n);
       case 'hash':
         return this.reportHash(room, member, peer, message.turn, message.hash);
     }
@@ -155,6 +177,10 @@ export class RoomRegistry {
       nextTurn: 0,
       pending: new Map(),
       hashes: new Map(),
+      rtt: 0,
+      frameMs: 0,
+      pingN: 0,
+      pingAt: 0,
     };
   }
 
@@ -193,10 +219,25 @@ export class RoomRegistry {
     room.broadcast({
       t: 'start',
       seed: room.seed,
-      turnMs: TURN_MS,
       commandDelay: COMMAND_DELAY_TURNS,
       players: room.players(),
     });
+    for (const m of room.members) this.ping(m, true);
+  }
+
+  /** Ping `member` when forced or when `PING_INTERVAL_MS` passed since the last ping (`CheckPingTime`). */
+  private ping(member: Member, force: boolean): void {
+    const now = this.now();
+    if (!force && now - member.pingAt <= PING_INTERVAL_MS) return;
+    member.pingN++;
+    member.pingAt = now;
+    member.peer.send({ t: 'ping', n: member.pingN });
+  }
+
+  private pong(room: Room, member: Member, n: number): void {
+    if (n !== member.pingN) return;
+    member.rtt = Math.max(0, Math.round(this.now() - member.pingAt));
+    room.broadcast({ t: 'rtt', rtt: room.members.map((m) => m.rtt) });
   }
 
   private submitTurn(room: Room, member: Member, peer: Peer, turn: number, commands: Command[]): void {
@@ -212,15 +253,23 @@ export class RoomRegistry {
     this.release(room);
   }
 
-  /** Release every turn for which all members have submitted, in order. */
+  /**
+   * Release every turn for which all members have submitted, in order. Once turn N is released every member has run
+   * it, which is the host's boundary N + 1: the speed analysis runs there, and its change rides on this release.
+   */
   private release(room: Room): void {
     for (;;) {
       const turn = room.log.length;
       if (room.members.some((m) => !m.pending.has(turn))) return;
       const batches = room.members.map((m, slot) => ({ slot, commands: m.pending.get(turn) ?? [] }));
       for (const m of room.members) m.pending.delete(turn);
-      room.log.push({ turn, batches });
-      room.broadcast({ t: 'turn', turn, batches });
+      // Through the relay a round trip between players is the sum of both legs (turn-timing.md §8.3).
+      const latency = highLatencyMs(room.members.reduce((sum, m) => sum + m.rtt, 0));
+      const frameMs = Math.max(...room.members.map((m) => m.frameMs));
+      const speed = room.speed.boundary(turn + 1, frameMs, latency);
+      const record: TurnRecord = speed ? { turn, batches, speed } : { turn, batches };
+      room.log.push(record);
+      room.broadcast({ t: 'turn', ...record });
     }
   }
 

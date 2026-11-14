@@ -73,9 +73,15 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
       return { ok: true, message: { t: 'leave' } };
     case 'turn': {
       const cmds = commands(v['commands']);
+      const frameMs = v['frameMs'];
       if (!isTurn(v['turn']) || cmds === null) return fail('bad turn batch');
-      return { ok: true, message: { t: 'turn', turn: v['turn'], commands: cmds } };
+      if (frameMs === undefined) return { ok: true, message: { t: 'turn', turn: v['turn'], commands: cmds } };
+      if (!isTurn(frameMs) || frameMs > 255) return fail('bad frame time');
+      return { ok: true, message: { t: 'turn', turn: v['turn'], commands: cmds, frameMs } };
     }
+    case 'pong':
+      if (!isTurn(v['n'])) return fail('bad pong');
+      return { ok: true, message: { t: 'pong', n: v['n'] } };
     case 'hash': {
       const h = v['hash'];
       if (!isTurn(v['turn']) || typeof h !== 'number' || !Number.isInteger(h) || h < 0 || h > 0xffffffff) {
@@ -88,7 +94,7 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
   }
 }
 
-const SERVER_TAGS = new Set(['lobby', 'start', 'turn', 'desync', 'ended', 'error']);
+const SERVER_TAGS = new Set(['lobby', 'start', 'turn', 'ping', 'rtt', 'desync', 'ended', 'error']);
 
 /** Parse a frame from the server. Checks the tag only; the server is trusted to send well-formed bodies. */
 export function decodeServerMessage(raw: string): Decoded<ServerMessage> {

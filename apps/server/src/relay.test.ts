@@ -2,17 +2,18 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocket } from 'ws';
-import { CODE_LENGTH, isValidCode, TURN_MS, type ClientMessage, type ServerMessage } from '@aoe/protocol';
+import { CODE_LENGTH, isValidCode, type ClientMessage, type ServerMessage } from '@aoe/protocol';
 import { createApp } from './app';
-import { RoomRegistry } from './rooms';
+import { PING_INTERVAL_MS, RoomRegistry, type Peer } from './rooms';
 
-/** A ws client that queues server messages so tests can await them in order. */
+/** A ws client that queues server messages so tests can await them in order. Pings are left unanswered and skipped. */
 class TestClient {
   private readonly queue: ServerMessage[] = [];
   private waiter: ((m: ServerMessage) => void) | undefined;
   private constructor(readonly socket: WebSocket) {
     socket.on('message', (data) => {
       const message = JSON.parse(data.toString()) as ServerMessage;
+      if (message.t === 'ping') return;
       if (this.waiter) {
         const w = this.waiter;
         this.waiter = undefined;
@@ -164,7 +165,7 @@ describe('rooms', () => {
     expect((await guest.expect('error')).code).toBe('not-host');
     host.send({ t: 'start' });
     const start = await host.expect('start');
-    expect(start).toMatchObject({ seed: 1234, turnMs: TURN_MS, commandDelay: 2 });
+    expect(start).toMatchObject({ seed: 1234, commandDelay: 2 });
     await guest.expect('start');
   });
 
@@ -281,5 +282,61 @@ describe('turn relay', () => {
     expect(await host.next()).toEqual({ t: 'ended', reason: 'peer-left' });
     await host.expectSilence();
     expect(rooms.rooms.has(code)).toBe(false);
+  });
+});
+
+describe('speed control', () => {
+  class FakePeer implements Peer {
+    messages: ServerMessage[] = [];
+    send(m: ServerMessage): void {
+      this.messages.push(m);
+    }
+    take<T extends ServerMessage['t']>(t: T): Extract<ServerMessage, { t: T }>[] {
+      const out = this.messages.filter((m): m is Extract<ServerMessage, { t: T }> => m.t === t);
+      this.messages = this.messages.filter((m) => m.t !== t);
+      return out;
+    }
+  }
+
+  function started(now: () => number) {
+    const registry = new RoomRegistry({ generateSeed: () => 1, now });
+    const peers = [new FakePeer(), new FakePeer()];
+    registry.handle(peers[0]!, { t: 'create', name: 'A' });
+    const code = peers[0]!.take('lobby')[0]!.code;
+    registry.handle(peers[1]!, { t: 'join', code, name: 'B' });
+    for (const p of peers) registry.handle(p, { t: 'ready', ready: true });
+    registry.handle(peers[0]!, { t: 'start' });
+    return { registry, peers, room: registry.rooms.get(code)! };
+  }
+
+  test('pings each player at start and every 8 s, and reports the round trips to both', () => {
+    let clock = 1000;
+    const { registry, peers } = started(() => clock);
+    const pings = peers.map((p) => p.take('ping'));
+    expect(pings).toEqual([[{ t: 'ping', n: 1 }], [{ t: 'ping', n: 1 }]]);
+    clock += 12;
+    registry.handle(peers[0]!, { t: 'pong', n: 1 });
+    clock += 30;
+    registry.handle(peers[1]!, { t: 'pong', n: 1 });
+    expect(peers[0]!.take('rtt')).toEqual([{ t: 'rtt', rtt: [12, 0] }, { t: 'rtt', rtt: [12, 42] }]);
+    clock += PING_INTERVAL_MS;
+    registry.handle(peers[1]!, { t: 'hash', turn: 0, hash: 0 });
+    expect(peers[1]!.take('ping')).toEqual([{ t: 'ping', n: 2 }]);
+    expect(peers[0]!.take('ping')).toEqual([]);
+  });
+
+  test('the change agreed at boundary T rides on the release of turn T - 1, for turn T + 2', () => {
+    const clock = 0;
+    const { registry, peers, room } = started(() => clock);
+    for (const p of peers) registry.handle(p, { t: 'pong', n: 1 });
+    for (let turn = 0; turn < 40; turn++) {
+      for (const p of peers) registry.handle(p, { t: 'turn', turn, commands: [], frameMs: 17 });
+    }
+    // Example 7.4: boundaries 22 and 28 (releases of turns 21 and 27).
+    expect(room.log.filter((r) => r.speed)).toEqual([
+      { turn: 21, batches: expect.any(Array), speed: { turn: 24, granularity: 20, frames: 9 } },
+      { turn: 27, batches: expect.any(Array), speed: { turn: 30, granularity: 20, frames: 13 } },
+    ]);
+    expect(peers[1]!.take('turn').filter((m) => m.speed).map((m) => m.speed!.turn)).toEqual([24, 30]);
   });
 });

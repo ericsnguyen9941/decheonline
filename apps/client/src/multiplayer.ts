@@ -2,6 +2,7 @@ import type { Application } from 'pixi.js';
 import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { Lockstep, showEndDialog } from './lockstep';
+import { FrameClock } from './lockstep/frame-clock';
 import { LobbyView, Session } from './lobby';
 import { exposeMapDebug, MapView } from './map';
 import { tileCoordsToPixel } from './map/iso';
@@ -52,6 +53,18 @@ export interface NetDebug {
   queue(id: number): DebugQueue | null;
   /** The building being placed and where its ghost stands; null when not placing. */
   ghost(): Ghost | null;
+  /** Step size and buffer frames the sim runs at now, this client's mean frame time and the server's round trips. */
+  net(): DebugNet;
+  /** Hold every pong this long, faking a slow link to the server. */
+  delayPongs(ms: number): void;
+}
+
+export interface DebugNet {
+  granularity: number;
+  frames: number;
+  frameMs: number;
+  /** Round trip from the server to each slot, ms. */
+  rtt: number[];
 }
 
 export interface DebugPopulation {
@@ -157,18 +170,23 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     showEndDialog(kind, detail, () => undefined);
   };
 
+  // Mean frame time the server tunes the step size to (docs/spec/turn-timing.md §3.2).
+  const frames = new FrameClock();
+  app.ticker.add((ticker) => frames.sample(ticker.elapsedMS));
+
   session.onStart = (start, you) => {
     const player = you + 1;
     const game = new Lockstep({
       link,
       speed,
-      start: { seed: start.seed, turnMs: start.turnMs, commandDelay: start.commandDelay, playerCount: start.players.length },
+      start: { seed: start.seed, commandDelay: start.commandDelay, playerCount: start.players.length },
+      frameMs: () => frames.average(),
     });
     lockstep = game;
     setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
     game.onEnded = () => end('peer-left', 'Your opponent left the game.');
-    if (debug) panel = debugPanel(host, game, player, () => units);
+    if (debug) panel = debugPanel(host, game, player, () => units, frames);
     void createAssetProvider().then(async (provider) => {
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
@@ -207,11 +225,14 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   };
 }
 
-function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: () => UnitLayer | undefined): HTMLElement {
+function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: () => UnitLayer | undefined, frames: FrameClock): HTMLElement {
   const panel = document.createElement('div');
   panel.dataset.testid = 'net-debug';
   const status = document.createElement('span');
   status.dataset.testid = 'net-status';
+  const speed = document.createElement('span');
+  speed.dataset.testid = 'net-speed';
+  const net = (): DebugNet => ({ granularity: game.world.granularity, frames: game.world.frames, frameMs: frames.average(), rtt: game.rtt });
   const button = document.createElement('button');
   button.dataset.testid = 'send-test';
   button.textContent = 'Send test command';
@@ -221,9 +242,11 @@ function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: ()
   const stock = new Map<number, Resources[]>();
   game.onTurn = (turn, hash) => {
     status.textContent = `turn ${turn} hash ${hash}`;
+    const n = net();
+    speed.textContent = `G ${n.granularity} ms F ${n.frames} frame ${n.frameMs} ms RTT ${n.rtt.length > 0 ? n.rtt.join(' + ') : '?'} ms`;
     stock.set(turn, Array.from({ length: game.world.players }, (_, p) => resourcesOf(game.world, p)));
   };
-  panel.append(status, button);
+  panel.append(status, speed, button);
   host.append(panel);
   window.__game = {
     issueTest: issue,
@@ -292,6 +315,8 @@ function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: ()
       })),
     queue: (id) => queueOf(game.world, id),
     ghost: () => layer()?.ghost ?? null,
+    net,
+    delayPongs: (ms) => (game.pongDelayMs = ms),
   };
   return panel;
 }

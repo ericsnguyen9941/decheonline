@@ -48,6 +48,8 @@ in the clone; specs that depend on it say so.
 - `INDEX.md` — subsystem → decomp files/functions map with match status.
 - `core.md` — update loop, time step, turns and command scheduling, numeric
   types, RNG.
+- `turn-timing.md` — turn length, step size and buffer frames, latency and
+  frame-time measurement, the host's speed retuning, click-to-action delay.
 - `movement.md` — movement and pathing.
 - `economy.md` — gather, drop-off, build, train.
 - `combat.md` — attacks, damage, projectiles, line of sight.

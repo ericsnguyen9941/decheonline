@@ -35,7 +35,9 @@ describe('client message decoding', () => {
     { t: 'ready', ready: true },
     { t: 'start' },
     { t: 'turn', turn: 3, commands: [{ type: 'test', x: 10.5, y: 12 }, { type: 'noop' }] },
+    { t: 'turn', turn: 9, commands: [], frameMs: 17 },
     { t: 'hash', turn: 3, hash: 0xdeadbeef },
+    { t: 'pong', n: 4 },
     { t: 'leave' },
   ];
   test.each(roundTrips)('round-trips $t', (m) => {
@@ -55,6 +57,8 @@ describe('client message decoding', () => {
     ['bad command field', JSON.stringify({ t: 'turn', turn: 0, commands: [{ type: 'test', x: '1', y: 2 }] })],
     ['too many commands', JSON.stringify({ t: 'turn', turn: 0, commands: Array(257).fill({ type: 'noop' }) })],
     ['hash out of range', JSON.stringify({ t: 'hash', turn: 0, hash: 2 ** 32 })],
+    ['frame time out of range', JSON.stringify({ t: 'turn', turn: 0, commands: [], frameMs: 256 })],
+    ['pong without number', JSON.stringify({ t: 'pong' })],
   ])('rejects %s', (_label, raw) => {
     expect(decodeClientMessage(raw).ok).toBe(false);
   });

@@ -119,33 +119,39 @@ simulation; only commands and control messages travel.
 
 ### 2.2 Turn length (`src/com_spd.cpp`)
 
+Full account, with the speed analysis and worked examples:
+[turn-timing.md](turn-timing.md).
+
 Defaults set in the constructor `RGE_Communications_Speed`
-(`src/com_spd.cpp:11-25`, M): frame granularity 90 ms, 10 buffer frames per
-turn, target turn length 500 ms.
+(`src/com_spd.cpp:11-45`, M): frame granularity `G` 90 ms, 10 buffer frames
+`F` per turn. Its `TargetTurnLengthMsec` (500) is never read.
 
 - `ReloadBufferFrames` (`src/com_spd.cpp:140`, M): restart the turn's wall
   timer, apply any scheduled speed change, set frames remaining to
   `CurrentBufferFrames`.
 - `BufferTimeToUse` (`src/com_spd.cpp:147`, M): returns the granularity and
   decrements frames remaining only when wall time since the turn started has
-  caught up with `(frames used) * granularity` (plus an overhead factor);
-  otherwise returns 0 and counts a dropped frame.
+  caught up with `(frames used) * granularity` (`OverheadFactor` is always
+  0); otherwise returns 0 and counts a dropped frame.
 - Reading of the code (unverified by running): one turn = the boundary
   frame plus `CurrentBufferFrames` buffer frames, each stepping
-  `granularity` ms of base time, so 11 × 90 = 990 ms of base time per turn at
-  defaults. For the first 6 turns the buffer path is skipped
+  `granularity` ms of base time, so `(F + 1) · G` = 11 × 90 = 990 ms of base
+  time per turn at defaults, and about `(F − 1) · G` + one loop pass of wall
+  time. For the first 6 turns the buffer path is skipped
   (`src/com_hand.cpp:509`), so each early turn is a single step.
-- The host may retune: `AnalyzeGameSpeed` (`src/com_spd.cpp:326`, **L**)
-  picks new granularity/frame count; peers receive an `'S'` message and
-  schedule it with `SetFutureSpeedChange` for a given turn
-  (`src/com_hand.cpp:1352-1355`, `src/com_spd.cpp:81`); `AdjustLocalSpeed`
-  applies it when that turn starts (`src/com_spd.cpp:114`, M).
+- The host retunes `G` and `F` during the game: `AnalyzeGameSpeed`
+  (`src/com_spd.cpp:326`, **L**) picks them from the players' frame times and
+  round trips; peers receive an `'S'` message stamped for turn `E` and
+  schedule it with `SetFutureSpeedChange` (`src/com_hand.cpp:1352-1355`,
+  `src/com_spd.cpp:81`); `AdjustLocalSpeed` (`src/com_spd.cpp:114`, M)
+  applies it at the boundary `E → E + 1`, so turn `E + 1` is the first to run
+  at the new values. With 30 ms frames on a LAN this settles at `G` = 30,
+  `F` = 9 from turn 25.
 
-**Implication for the port:** because the step size in multiplayer is the
-agreed granularity (never wall time), `world_time` advances identically on
-every peer. Our server-relayed lockstep can fix granularity and frames per
-turn as constants (or reproduce the retune messages); either way the step
-sequence must be identical on both clients.
+**Implication for the port:** the step size is the agreed granularity (never
+wall time), so `world_time` advances identically on every peer, but it is not
+a constant: `G` and `F` must travel in the turn stream and every peer must
+switch on the same turn (turn-timing.md §8). The command delay stays 2 turns.
 
 ### 2.3 Issuing a command
 

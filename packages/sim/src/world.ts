@@ -29,9 +29,9 @@ import { checkForNewTech, doEffect, newResearchDone, newTechStates } from './tec
 import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState } from './unit-ai';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
 
-/** Base time per step: the network frame granularity (src/com_spd.cpp:11-25). Never wall time. */
+/** Default base time per step: the network frame granularity `G` (src/com_spd.cpp:11-25). Never wall time. */
 export const STEP_MS = 90;
-/** Buffer frames after each turn's boundary step (src/com_spd.cpp:11-25). */
+/** Default buffer frames `F` after each turn's boundary step (src/com_spd.cpp:11-25). */
 export const BUFFER_FRAMES = 10;
 /** Turns up to this one are a single step: the buffer path needs `current_turn > 6` (src/com_hand.cpp:509). */
 export const SINGLE_STEP_TURNS = 6;
@@ -42,9 +42,16 @@ const GROUP_EXTENT_LIMIT = 8.0;
 /** `random_seed` set by the world constructor (src/world.cpp:95). */
 export const DEFAULT_RANDOM_SEED = 14;
 
-/** Steps in a turn: the boundary step plus the buffer frames (docs/spec/core.md §2.2). */
-export function stepsInTurn(turn: number): number {
-  return turn <= SINGLE_STEP_TURNS ? 1 : 1 + BUFFER_FRAMES;
+/** Steps in a turn: the boundary step plus `frames` buffer frames (docs/spec/turn-timing.md §2). */
+export function stepsInTurn(turn: number, frames = BUFFER_FRAMES): number {
+  return turn <= SINGLE_STEP_TURNS ? 1 : 1 + frames;
+}
+
+/** Step size `G` (ms) and buffer frames `F` agreed for turn `turn` (`E`); turn `E + 1` is the first to run at them. */
+export interface SpeedChange {
+  turn: number;
+  granularity: number;
+  frames: number;
 }
 
 export interface WorldOptions {
@@ -147,9 +154,12 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 7;
+  version: 8;
   players: number;
   turn: number;
+  granularity: number;
+  frames: number;
+  speedChanges: SpeedChange[];
   worldTime: number;
   randomSeed: number;
   gameSpeed: number;
@@ -181,13 +191,21 @@ export interface Snapshot {
 const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9 };
 
 /**
- * The simulation: `RGE_Game_World` in the original. Advances in whole turns of fixed-size steps
- * (`runTurn`), each step following `RGE_Game_World::update` (src/world.cpp:1206) on its multiplayer path.
+ * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
+ * `runStep` at a time), each step following `RGE_Game_World::update` (src/world.cpp:1206) on its multiplayer path.
  */
 export class World {
   readonly players: number;
   /** Turn the next `runTurn` call executes. */
   turn = 0;
+  /** Steps of `turn` already run; 0 between turns. */
+  turnStep = 0;
+  /** `CurrentBufferGranularity` `G`: base ms per step of the current turn (docs/spec/turn-timing.md §1). */
+  granularity = STEP_MS;
+  /** `CurrentBufferFrames` `F`: buffer steps after the current turn's boundary step. */
+  frames = BUFFER_FRAMES;
+  /** Agreed changes not yet applied, by turn. Not hashed: peers may learn of a change at different turns before it applies. */
+  speedChanges: SpeedChange[] = [];
   /** Game clock, unsigned 32-bit ms (include/world.h:134). */
   worldTime = 0;
   /** The only RNG state carried between steps: a 15-bit value (docs/spec/core.md §4.2). */
@@ -370,10 +388,40 @@ export class World {
     return this.queue.size;
   }
 
+  /** Schedule `(G, F)` agreed for turn `change.turn`; it applies from the next turn on (docs/spec/turn-timing.md §5). */
+  setSpeedChange(change: SpeedChange): void {
+    this.speedChanges = this.speedChanges.filter((c) => c.turn !== change.turn);
+    this.speedChanges.push({ ...change });
+    this.speedChanges.sort((a, b) => a.turn - b.turn);
+  }
+
   runTurn(): void {
-    const steps = stepsInTurn(this.turn);
-    for (let i = 0; i < steps; i++) this.step(STEP_MS);
-    this.turn++;
+    const turn = this.turn;
+    while (this.turn === turn) this.runStep();
+  }
+
+  /** Run the next step of the current turn: its boundary step first, which applies any due speed change. */
+  runStep(): void {
+    if (this.turnStep === 0) {
+      // `AdjustLocalSpeed` at the boundary `E -> E + 1` (src/com_spd.cpp:114-138).
+      const { granularity, frames } = this.speedAtBoundary();
+      this.speedChanges = this.speedChanges.filter((c) => c.turn >= this.turn);
+      this.granularity = granularity;
+      this.frames = frames;
+    }
+    this.step(this.granularity);
+    this.turnStep++;
+    if (this.turnStep >= stepsInTurn(this.turn, this.frames)) {
+      this.turnStep = 0;
+      this.turn++;
+    }
+  }
+
+  /** `(G, F)` the current turn runs at once its boundary step applies the changes agreed before it. */
+  private speedAtBoundary(): { granularity: number; frames: number } {
+    let speed = { granularity: this.granularity, frames: this.frames };
+    for (const c of this.speedChanges) if (c.turn < this.turn) speed = c;
+    return { granularity: speed.granularity, frames: speed.frames };
   }
 
   /** One `RGE_Game_World::update` with a non-zero cycle (src/world.cpp:1206). */
@@ -628,6 +676,9 @@ export class World {
     const h = new Hasher()
       .u32(this.players)
       .u32(this.turn)
+      .u32(this.turnStep)
+      .u32(this.granularity)
+      .u32(this.frames)
       .u32(this.worldTime)
       .u32(this.randomSeed)
       .f32(this.gameSpeed)
@@ -667,9 +718,12 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 7,
+      version: 8,
       players: this.players,
       turn: this.turn,
+      granularity: this.granularity,
+      frames: this.frames,
+      speedChanges: this.speedChanges.map((c) => ({ ...c })),
       worldTime: this.worldTime,
       randomSeed: this.randomSeed,
       gameSpeed: this.gameSpeed,
@@ -693,7 +747,7 @@ export class World {
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 7) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 8) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -703,6 +757,9 @@ export class World {
     });
     w.pathing.cells.set(s.obstruction);
     w.turn = s.turn;
+    w.granularity = s.granularity;
+    w.frames = s.frames;
+    w.speedChanges = s.speedChanges.map((c) => ({ ...c }));
     w.worldTime = s.worldTime;
     w.gameSpeed = s.gameSpeed;
     w.playerTurn = s.playerTurn;

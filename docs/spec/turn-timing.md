@@ -256,8 +256,8 @@ to reproduce §§2–6; they are not decomp behaviour.
 
 1. **Per-turn `G` and `F` in the turn stream.** The sim must step `G` ms
    (not a constant 90) and a turn must be 1 + `F` steps, with turns 0–6 one
-   step each. Today the port fixes 11 × 90 ms (`TURN_MS = 990`), which equals
-   the original only before the first adjustment (turns 7–24).
+   step each. (Before the port implemented this it fixed 11 × 90 ms, which
+   equals the original only before the first adjustment, turns 7–24.)
 2. **The server plays the host.** Only one party may decide. The server runs
    §4 with the same constants (gate `SyncTurn >= 20`, every 5th boundary,
    reset while pending, round to 10, cap 150, frames `[4, 20]`, 250 ms
@@ -282,8 +282,31 @@ to reproduce §§2–6; they are not decomp behaviour.
    not `(F + 1) · G`.
 6. **Command delay stays 2 turns** (`COMMAND_DELAY_TURNS`); it never adapts.
    Responsiveness comes from shorter turns: ≈ 0.4 s average click-to-action
-   on LAN-like links once adjusted, versus 1–2 s (≈ 1.5 s average) now with
+   on LAN-like links once adjusted, versus 1–2 s (≈ 1.5 s average) with
    990 ms wall turns.
 7. **Determinism check.** Since `G` changes `world_time` per step, any
    replay or golden recording must record the `(turn, G, F)` changes with
    the commands.
+
+### 8.1 Where the port does this
+
+- Sim (`packages/sim/src/world.ts`): `World.granularity` / `frames` are the
+  current `G` / `F`; `setSpeedChange({ turn: E, granularity, frames })`
+  schedules a change, which the boundary step of turn `E + 1` applies
+  (`runStep` runs one step, `runTurn` a whole turn). Pending changes are not
+  hashed: peers may learn of one at different turns before it applies.
+  `ReplayLog.speeds` records them (item 7).
+- Wire (`packages/protocol`): a client sends the batch of commands issued
+  during turn `N` once it has run `N` (they execute on `N + 2`), with its
+  `frameMs`; the boundary step of `N + 2` waits for the server's release of
+  `N`. The server pings (`ping` / `pong`) and reports round trips (`rtt`).
+- Server (`apps/server/src/speed.ts`, `rooms.ts`): releasing turn `N` means
+  every client has run it, which is the host's boundary `T = N + 1`;
+  `SpeedHost.boundary` runs §4 there and the change for `E = T + 2` rides on
+  that release as `speed`. Clients hand it to the sim with the batch at the
+  boundary of `N + 2 = E − 1`, two turns before it applies.
+- Client (`apps/client/src/lockstep/lockstep.ts`): item 5 pacing; a late loop
+  runs every step that is due in one pass. Frame time is the mean of the
+  last 50 `requestAnimationFrame` intervals (`frame-clock.ts`), so it rises
+  with rendering cost and machine load, and `G` with it, as in the original.
+  `?debug=net` shows `G`, `F`, the frame time and the round trips.
