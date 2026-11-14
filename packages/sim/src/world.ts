@@ -1,12 +1,16 @@
-import { CommandQueue, type Command, type MoveCommand, type QueuedCommand } from './commands';
+import { CommandQueue, type Command, type MoveCommand, type QueuedCommand, type WorkCommand } from './commands';
+import type { GameContext } from './context';
 import { EntityStore, type Entity } from './entities';
+import { orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
 import { createTestMap, TileMap, type MapSnapshot } from './map';
-import { initialFacing, newMover, orderMove, showSprite, teleport, updateMover, type MoveContext, type Mover } from './movement';
+import { initialFacing, newMover, orderMove, teleport } from './movement';
+import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { CrtRand } from './rng';
-import { unitType, VILLAGER } from './units';
+import { newSprite } from './sprites';
+import { ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TOWN_CENTER, TREES, UNIT_TYPES, unitType, VILLAGER } from './units';
 
 /** Base time per step: the network frame granularity (src/com_spd.cpp:11-25). Never wall time. */
 export const STEP_MS = 90;
@@ -33,7 +37,7 @@ export interface WorldOptions {
   randomSeed?: number;
   /** The tile map; defaults to the fixed test map. */
   map?: TileMap;
-  /** Units placed before the first step, in this order (see `startingUnits`). */
+  /** Objects placed before the first step, in this order (see `startingObjects`). */
   units?: readonly StartUnit[];
   /** "Path Finding" budget per search: 2500 low, 5000 medium, 7500 high (docs/spec/movement.md §3). */
   pathingIterations?: number;
@@ -47,6 +51,22 @@ export interface StartUnit {
   y: number;
 }
 
+/**
+ * `RGE_Player` attributes at game start: the civilization's resource table (empires.dat civ 1, Egyptians; every
+ * playable civ has the same table). Food 200, wood 200, stone 150, gold 0; attribute 47 (gold mining multiplier) 1.
+ * Gaia's table (civ 0) is all zeros.
+ */
+export const START_ATTRIBUTES: readonly number[] = [
+  200, 200, 150, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102, 103, 101, 10, 0, 0, 0, 0, 0, 0, 0, 0, 2, 250,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+].map(f32);
+export const ATTRIBUTE_COUNT = START_ATTRIBUTES.length;
+/** Player attribute indices the client shows (`PLAYER_ATTRIBUTE_*`). */
+export const ATTR_FOOD = 0;
+export const ATTR_WOOD = 1;
+export const ATTR_STONE = 2;
+export const ATTR_GOLD = 3;
+
 /** Villagers each player starts with (the original's default start: 3 per player). */
 export const STARTING_VILLAGERS = 3;
 
@@ -55,23 +75,47 @@ export const STARTING_VILLAGERS = 3;
  * on adjacent tile centres. Player 1 starts north-west of the lake, player 2 south-east of it.
  */
 export function startingUnits(players: number): StartUnit[] {
-  const bases = [
-    [10, 10],
-    [30, 30],
-    [10, 40],
-    [40, 8],
-  ];
   const units: StartUnit[] = [];
   for (let owner = 1; owner < players; owner++) {
-    const [bx, by] = bases[(owner - 1) % bases.length]!;
+    const [bx, by] = BASES[(owner - 1) % BASES.length]!;
     for (let i = 0; i < STARTING_VILLAGERS; i++) units.push({ owner, type: VILLAGER, x: bx! + i + 0.5, y: by! + 0.5 });
   }
   return units;
 }
 
+/**
+ * The fixed test map's start until the random map generator places objects: per player three Villagers, a Town
+ * Center below them, and (owned by Gaia) eight trees, three forage bushes, two gold mines, a stone mine, a gazelle
+ * and an elephant around the base. All on land; ids follow this order (players first, then Gaia's objects).
+ */
+export function startingObjects(players: number): StartUnit[] {
+  const out = startingUnits(players);
+  const gaia: StartUnit[] = [];
+  for (let owner = 1; owner < players; owner++) {
+    const [bx, by] = BASES[(owner - 1) % BASES.length]!;
+    out.push({ owner, type: TOWN_CENTER, x: bx! + 1.5, y: by! + 3.5 });
+    const at = (type: number, dx: number, dy: number) => gaia.push({ owner: 0, type, x: bx! + dx, y: by! + dy });
+    for (let i = 0; i < 8; i++) at(TREES[i % TREES.length]!, -4.5 + (i % 4), 7.5 + (i >> 2));
+    for (let i = 0; i < 3; i++) at(FORAGE, 4.5 + i, 7.5);
+    at(MINE_GOLD, 6.5, 0.5);
+    at(MINE_GOLD, 7.5, 0.5);
+    at(MINE_STONE, 6.5, 4.5);
+    at(GAZELLE, 9.5, 6.5);
+    at(ELEPHANT, 3.5, 11.5);
+  }
+  return [...out, ...gaia];
+}
+
+const BASES = [
+  [10, 10],
+  [30, 30],
+  [10, 40],
+  [40, 8],
+];
+
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 3;
+  version: 4;
   players: number;
   turn: number;
   worldTime: number;
@@ -86,9 +130,13 @@ export interface Snapshot {
   pathingIterations: number;
   /** Obstruction counters, one per cell (`PathingSystem.cells`). */
   obstruction: number[];
+  /** Player attributes, `[player][attribute]`. */
+  attributes: number[][];
+  /** Each player's updated object list, by id, in update order. */
+  awake: number[][];
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in whole turns of fixed-size steps
@@ -114,6 +162,13 @@ export class World {
   map: TileMap;
   /** Obstruction map and path search; its cells are state. */
   readonly pathing: PathingSystem;
+  /** Player attributes (`RGE_Player::attributes`): resources and counters, float32. */
+  attributes: number[][];
+  /**
+   * Each player's object list as the update walks it: head first, which is the newest object or the latest woken one
+   * (src/obj_list.cpp:57). Sleeping objects (living trees) are not in it until damage wakes them.
+   */
+  awake: number[][];
   private queue = new CommandQueue();
   private readonly rng = new CrtRand();
 
@@ -122,6 +177,8 @@ export class World {
     this.randomSeed = options.randomSeed ?? DEFAULT_RANDOM_SEED;
     this.map = options.map ?? createTestMap();
     this.playerTimeDelta = new Array<number>(this.players).fill(0);
+    this.attributes = Array.from({ length: this.players }, (_, p) => (p === 0 ? new Array<number>(ATTRIBUTE_COUNT).fill(0) : [...START_ATTRIBUTES]));
+    this.awake = Array.from({ length: this.players }, () => []);
     this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) });
     this.pathing.iterations = options.pathingIterations ?? DEFAULT_PATHING_ITERATIONS;
     if (options.units?.length) {
@@ -132,23 +189,69 @@ export class World {
     }
   }
 
-  /**
-   * Make a moving unit at (x, y): `RGE_Moving_Object::setup`. The static part shows the standing sprite (one draw if
-   * it has a random start frame, sprites.md §4), draws one `rand()` and reseeds with it (economy.md §8), then the
-   * facing takes one more draw (movement.md §11).
-   */
   createUnit({ owner, type, x, y }: StartUnit): Entity {
+    return this.createObject(owner, type, x, y, 0);
+  }
+
+  /**
+   * `make_new_obj` + `setup` (src/stat_obj.cpp:200-286): place the object, show its standing sprite (one draw if it
+   * has a random start frame, sprites.md §4), load its own starting resource, give the owner its flag 1/2 storages,
+   * draw one `rand()` and reseed with it (economy.md §7); a moving object then draws its facing (movement.md §11).
+   * Animated objects, and static ones without hit points, join the owner's updated list at the front; living trees
+   * sleep.
+   */
+  createObject(owner: number, type: number, x: number, y: number, z: number): Entity {
     const t = unitType(type);
-    const e = this.entities.create({ owner, type, x, y, z: 0, hp: t.hitPoints, mover: newMover() });
-    teleport(this.moveContext(), e, t, e.x, e.y, e.z);
-    showSprite(t.standing, this.rng);
+    const own = t.storages.find((s) => s.flag === 0);
+    const e = this.entities.create({
+      owner,
+      type,
+      x,
+      y,
+      z,
+      hp: t.hitPoints,
+      heldType: own ? own.type : -1,
+      heldAmount: own ? own.amount : 0,
+      mover: isMoving(t) ? newMover() : undefined,
+    });
+    if (t.combat) e.attackTimer = 0;
+    if (isMoving(t)) e.turnTowardsTime = 0;
+    teleport(this.gameContext(), e, t, e.x, e.y, e.z);
+    newSprite(e, null, this.rng);
+    giveStorages(this.attributes[owner]!, t, 1, [1, 2]);
     this.rng.srand(this.rng.rand());
-    initialFacing(t, e.mover!, this.rng);
+    if (e.mover) initialFacing(e, e.mover, this.rng);
+    if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     return e;
   }
 
-  private moveContext(): MoveContext {
-    return { map: this.map, entities: this.entities, pathing: this.pathing, rng: this.rng, deltaSeconds: this.deltaSeconds, attempts: 0 };
+  /** The context object updates and orders run with (current RNG, delta and clock). */
+  gameContext(): GameContext {
+    return {
+      map: this.map,
+      entities: this.entities,
+      pathing: this.pathing,
+      rng: this.rng,
+      deltaSeconds: this.deltaSeconds,
+      attempts: 0,
+      attributes: this.attributes,
+      worldTime: this.worldTime,
+      create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
+      wake: (e) => {
+        const list = this.awake[e.owner]!;
+        if (!list.includes(e.id)) list.unshift(e.id);
+      },
+      objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
+    };
+  }
+
+  /** Remove an object that is ready (`recycle_out_of_game`): off the obstruction map, the lists and the store. */
+  private removeObject(e: Entity): void {
+    this.pathing.unstamp(e, unitType(e.type));
+    const list = this.awake[e.owner]!;
+    const i = list.indexOf(e.id);
+    if (i !== -1) list.splice(i, 1);
+    this.entities.remove(e.id);
   }
 
   /** Queue the commands `player` issued during `issueTurn`; they run on `issueTurn + COMMAND_DELAY_TURNS`. */
@@ -176,14 +279,16 @@ export class World {
     if (delta !== 0) {
       for (const queued of this.queue.take(this.turn)) this.execute(queued);
       this.deltaSeconds = mul32(delta, MS_TO_SECONDS);
-      const ctx = this.moveContext();
+      const ctx = this.gameContext();
       for (let i = 0; i < this.players; i++) {
         this.playerTimeDelta[i] = u32(this.playerTimeDelta[i]! + delta);
-        // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates.
-        // The list prepends new objects (src/obj_list.cpp:57), so it runs newest first.
+        // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates
+        // from its head. Objects created or woken during the walk go in front of it and wait for the next step.
         ctx.attempts = 0;
-        const own = [...this.entities.ofPlayer(i)].filter((e) => e.mover?.action);
-        for (let k = own.length - 1; k >= 0; k--) updateMover(ctx, own[k]!);
+        for (const id of [...this.awake[i]!]) {
+          const e = this.entities.get(id);
+          if (e && updateObject(ctx, e)) this.removeObject(e);
+        }
       }
       // Fog ghost updates draw from the RNG on each peer's local view; the original fences them so the
       // stream afterwards depends only on this draw (src/world.cpp:1283-1294).
@@ -202,13 +307,15 @@ export class World {
         return;
       case 'move':
         return this.doCommandMove(player, command);
+      case 'work':
+        return this.doCommandWork(player, command);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
         this.entities.create({ owner: player, type: 0, x: tx, y: ty, z: 0, hp: 1 + (this.rng.rand() % 100) });
         for (const e of this.entities.ofPlayer(player)) {
-          // Units move only through orders: teleporting them here would desync the obstruction map.
-          if (e.mover) continue;
+          // Only the probe's own objects: game objects move only through orders.
+          if (e.type !== 0) continue;
           const dx = sub32(tx, e.x);
           const dy = sub32(ty, e.y);
           const len = sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));
@@ -272,7 +379,27 @@ export class World {
         if (ty < 0) ty = 1;
         else if (ty >= height) ty = sub32(height, 1);
       }
-      orderMove(e, tx, ty, this.rng);
+      // `move_to`: a gather or hunt action takes the order itself (src/act_obj.cpp:111-113).
+      if (!workMoveTo(this.gameContext(), e, tx, ty)) orderMove(e, tx, ty, this.rng);
+    });
+  }
+
+  /**
+   * `RGE_Command::do_command_work` (src/Command.cpp:295): each listed unit of the sender joins the others' pathing
+   * group and is ordered to work on the target (`work2`, economy.md §3.1). A missing target leaves a walk to (x, y).
+   */
+  private doCommandWork(player: number, command: WorkCommand): void {
+    // `test` probe objects are not game objects: an order on one is an order on nothing.
+    const found = this.entities.get(command.target);
+    const target = found && UNIT_TYPES.has(found.type) ? found : undefined;
+    const ids = command.units;
+    const ctx = this.gameContext();
+    ids.forEach((id, index) => {
+      const e = this.entities.get(id);
+      if (!e?.mover || e.owner !== player || e.state !== 2) return;
+      e.mover.group = ids.filter((_, other) => other !== index);
+      e.mover.waitingToMove = true;
+      orderWork(ctx, e, target, command.x, command.y);
     });
   }
 
@@ -288,11 +415,9 @@ export class World {
       .f32(this.deltaSeconds);
     for (const d of this.playerTimeDelta) h.u32(d);
     h.u32(this.entities.nextEntityId).u32(this.entities.size);
-    for (const e of this.entities.all()) {
-      h.u32(e.id).u32(e.owner).u32(e.type).f32(e.x).f32(e.y).f32(e.z).f32(e.hp);
-      if (e.mover) hashMover(h, e.mover);
-      else h.u32(0xffffffff);
-    }
+    for (const e of this.entities.all()) hashValue(h, e);
+    hashValue(h, this.attributes);
+    hashValue(h, this.awake);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -301,18 +426,19 @@ export class World {
     for (const q of queued) {
       h.u32(q.turn).u32(q.player).u32(q.seq).u32(COMMAND_TYPE_IDS[q.command.type]);
       if (q.command.type === 'test') h.f64(q.command.x).f64(q.command.y);
-      if (q.command.type === 'move') {
+      if (q.command.type === 'move' || q.command.type === 'work') {
         h.u32(q.command.units.length);
         for (const id of q.command.units) h.u32(id);
         h.f64(q.command.x).f64(q.command.y);
       }
+      if (q.command.type === 'work') h.u32(q.command.target);
     }
     return h.digest();
   }
 
   snapshot(): Snapshot {
     return {
-      version: 3,
+      version: 4,
       players: this.players,
       turn: this.turn,
       worldTime: this.worldTime,
@@ -326,11 +452,13 @@ export class World {
       map: this.map.toJSON(),
       pathingIterations: this.pathing.iterations,
       obstruction: Array.from(this.pathing.cells),
+      attributes: this.attributes.map((a) => [...a]),
+      awake: this.awake.map((a) => [...a]),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 3) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 4) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -346,22 +474,33 @@ export class World {
     w.deltaSeconds = s.deltaSeconds;
     w.entities = EntityStore.fromJSON(s.entities);
     w.queue = CommandQueue.fromJSON(s.queue);
+    w.attributes = s.attributes.map((a) => [...a]);
+    w.awake = s.awake.map((a) => [...a]);
     return w;
   }
 }
 
-function hashMover(h: Hasher, m: Mover): void {
-  h.f32(m.angle).u32(m.facet).f32(m.speed).u32(m.walking ? 1 : 0).f32(m.turnTimer).f32(m.collisionAvoidanceDistance);
-  h.u32(m.lastFacet).u32(m.lastFacet2).f32(m.closestDistanceToWaypoint).u32(m.continueCounter).u32(m.numberWaitDelays);
-  h.u32((m.waitingToMove ? 1 : 0) | (m.stamped ? 2 : 0) | (m.finalUserWaypoint ? 4 : 0));
-  h.f32(m.goalX).f32(m.goalY).f32(m.goalZ).f32(m.actionRange);
-  h.u32(m.path.length).u32(m.pathIndex);
-  for (const w of m.path) h.f32(w.x).f32(w.y).f32(w.z).u32(w.facet);
-  h.u32(m.userWaypoints.length);
-  for (const w of m.userWaypoints) h.u32(w.x).u32(w.y).u32(w.z);
-  h.u32(m.group.length);
-  for (const id of m.group) h.u32(id);
-  const a = m.action;
-  if (a) h.u32(a.state).f32(a.x).f32(a.y).f32(a.z).f32(a.range);
-  else h.u32(0xffffffff);
+/**
+ * Hash any plain state value: numbers as float64 (every sim number is a float32 or a 32-bit integer, so this is
+ * exact), booleans and null as markers, arrays by length then items, objects by sorted key. Absent, undefined and null
+ * fields hash alike.
+ */
+function hashValue(h: Hasher, v: unknown): void {
+  if (v === undefined || v === null) h.u32(0xfffffffe);
+  else if (typeof v === 'number') h.f64(v);
+  else if (typeof v === 'boolean') h.u32(v ? 0xfffffffd : 0xfffffffc);
+  else if (Array.isArray(v)) {
+    h.u32(v.length);
+    for (const x of v) hashValue(h, x);
+  } else if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o)
+      .filter((k) => o[k] !== undefined && o[k] !== null)
+      .sort();
+    h.u32(keys.length);
+    for (const k of keys) {
+      for (let i = 0; i < k.length; i++) h.u32(k.charCodeAt(i));
+      hashValue(h, o[k]);
+    }
+  }
 }

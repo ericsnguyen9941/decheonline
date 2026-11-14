@@ -1,0 +1,546 @@
+/**
+ * Attacking, as far as hunting needs it (docs/spec/combat.md §2-§5, sprites.md §5): the attack action, the hit roll,
+ * damage, and missiles. Every float store is rounded to float32; trig goes through `trig.ts`.
+ */
+import type { GameContext } from './context';
+import { ObjectState, type Entity } from './entities';
+import { ActionResult, currentSprite, endAction, facetOf, maximumSpeed, startMoveTo, updateMover } from './movement';
+import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
+import { framePassed, newSprite } from './sprites';
+import { atan2, cos, sin } from './trig';
+import { spriteInfo, unitType, type SpriteInfo } from './units';
+
+/** `RGE_Action_Attack` states (combat.md §3.2). */
+export const ATTACK_DONE = 1;
+export const ATTACK_TARGET_LOST = 2;
+export const ATTACK_MOVING = 4;
+export const ATTACK_WAITING = 6;
+export const ATTACK_ATTACKING = 7;
+export const ATTACK_FAILED = 13;
+export const ATTACK_INVALID = 14;
+
+export interface AttackAction {
+  state: number;
+  target: number;
+  /** Remembered target point. */
+  x: number;
+  y: number;
+  z: number;
+  range: number;
+  minRange: number;
+  timer: number;
+  needToAttack: boolean;
+  moveSprite: number;
+  fightSprite: number;
+  waitSprite: number;
+  sub: boolean;
+}
+
+/** `RGE_Action_Missile` state: 3 aim, 4 flying, 1 done. */
+export interface MissileAction {
+  state: number;
+  target: number;
+  launcher: number;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  timer: number;
+  ballisticVelocity: number;
+  ballisticAcceleration: number;
+  /** `RGE_Missile_Object::max_range`. */
+  maxRange: number;
+}
+
+const RANGE_SLACK = f32(-0.3);
+const MISSILE_RANGE_SLACK = f32(-6);
+const DEFAULT_RANGE = f32(0.4);
+const TIME_SCALE = f32(0.001);
+const TWO_PI_F = f32(6.2831855);
+const FULL_CIRCLE = 6.2831853;
+const PI_D = 3.14159265;
+const INV_FULL_CIRCLE = f32(0.15915494);
+const HALF = f32(0.5);
+const MELEE_LOW = f32(0.6666);
+const MISSILE_SPAN = f32(3);
+const MISSILE_DZ = f32(-0.1);
+/** `OBJECT_GROUP_CIVILIAN`: the only killers whose kills keep their food (`produceWhenKilledBy`). */
+const GROUP_CIVILIAN = 4;
+/** Player attribute 0x14: kills. */
+const ATTR_KILLS = 20;
+
+function length32(dx: number, dy: number): number {
+  return sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));
+}
+
+/** `distance_to_object` (src/stat_obj.cpp:2299): edge to edge. */
+export function distanceToObject(e: Entity, target: Entity): number {
+  const a = unitType(e.type);
+  const b = unitType(target.type);
+  let gx = sub32(sub32(Math.abs(sub32(target.x, e.x)), a.radiusX), b.radiusX);
+  let gy = sub32(sub32(Math.abs(sub32(target.y, e.y)), a.radiusY), b.radiusY);
+  if (gx < 0) gx = 0;
+  if (gy < 0) gy = 0;
+  return length32(gx, gy);
+}
+
+/** `angle_to_object` (src/move_obj.cpp:340): the turn still needed, in facets of the current sprite. */
+function angleToObject(e: Entity, x: number, y: number): number {
+  const s = currentSprite(e);
+  if (!s.hasFacings || s.facets <= 0) return 0;
+  let a = f32(atan2(sub32(y, e.y), sub32(x, e.x)));
+  if (a < 0) a = sub32(a, -TWO_PI_F);
+  a = sub32(a, e.mover!.angle);
+  if (a > PI_D) a = sub32(a, TWO_PI_F);
+  if (a < -PI_D) a = sub32(a, -TWO_PI_F);
+  return mul32(mul32(s.facets, INV_FULL_CIRCLE), a);
+}
+
+/**
+ * `turn_towards` (src/move_obj.cpp:368): true when facing within half a facet; otherwise turn one facet, at most once
+ * per `turn_speed` seconds of world time, and test again.
+ */
+export function turnTowards(ctx: GameContext, e: Entity, x: number, y: number): boolean {
+  const m = e.mover!;
+  let delta = angleToObject(e, x, y);
+  if (delta <= 0.5 && delta >= -0.5) return true;
+  const now = mul32(f32(ctx.worldTime), TIME_SCALE);
+  if (sub32(now, e.turnTowardsTime ?? 0) < unitType(e.type).turnSpeed) return false;
+  const s = currentSprite(e);
+  const step = f32(FULL_CIRCLE / s.facets);
+  m.angle = delta < 0 ? sub32(m.angle, step) : add32(m.angle, step);
+  if (m.angle < 0) m.angle = sub32(m.angle, -TWO_PI_F);
+  else if (m.angle > TWO_PI_F) m.angle = sub32(m.angle, TWO_PI_F);
+  m.facet = facetOf(m.angle, s);
+  e.turnTowardsTime = now;
+  delta = angleToObject(e, x, y);
+  return delta <= 0.5 && delta >= -0.5;
+}
+
+/**
+ * Make an `RGE_Action_Attack` on `target` and run `first_in_stack` (combat.md §3.1): a unit that can move starts by
+ * walking into range. Null sprites default to the master's move, fight and standing sprites; a range of 0 to the
+ * weapon range, or 0.4.
+ */
+export function startAttack(
+  ctx: GameContext,
+  e: Entity,
+  target: Entity,
+  moveSprite: SpriteInfo | null,
+  fightSprite: SpriteInfo | null,
+  range: number,
+  sub: boolean,
+): AttackAction {
+  const t = unitType(e.type);
+  const c = t.combat!;
+  let r = f32(range);
+  if (r === 0) r = c.range === 0 ? DEFAULT_RANGE : c.range;
+  const a: AttackAction = {
+    state: 0,
+    target: target.id,
+    x: target.x,
+    y: target.y,
+    z: target.z,
+    range: r,
+    minRange: c.minRange,
+    timer: 0,
+    needToAttack: false,
+    moveSprite: (moveSprite ?? t.walking ?? t.standing).graphic,
+    fightSprite: (fightSprite ?? c.attackSprite ?? t.standing).graphic,
+    waitSprite: t.standing.graphic,
+    sub,
+  };
+  e.attack = a;
+  if (maximumSpeed(e, t) !== 0) setAttackState(ctx, e, a, ATTACK_MOVING);
+  else if (!readyToAttack(ctx, e, a)) {
+    if (a.state === 0) setAttackState(ctx, e, a, ATTACK_WAITING);
+  } else {
+    e.attackTimer = c.reloadTime;
+    setAttackState(ctx, e, a, ATTACK_ATTACKING);
+  }
+  return a;
+}
+
+/** `RGE_Action_Attack::set_state` (src/act_atak.cpp:195): every change first deletes the sub-action. */
+function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, state: number): void {
+  if (e.mover?.action) endAction(e.mover);
+  a.state = state;
+  const c = unitType(e.type).combat!;
+  switch (state) {
+    case ATTACK_MOVING: {
+      const target = a.target === -1 ? null : (ctx.entities.get(a.target) ?? null);
+      startMoveTo(e, target, a.x, a.y, a.z, a.range, spriteInfo(a.moveSprite), true, ctx.rng);
+      a.timer = 0;
+      return;
+    }
+    case ATTACK_WAITING:
+      if (readyToAttack(ctx, e, a)) {
+        e.attackTimer = c.reloadTime;
+        setAttackState(ctx, e, a, ATTACK_ATTACKING);
+        return;
+      }
+      // `ready_to_attack` may itself have switched to 4 or 13.
+      if (a.state !== ATTACK_WAITING) return;
+      newSprite(e, spriteInfo(c.projectileUnitId === -1 ? a.fightSprite : a.waitSprite), ctx.rng);
+      return;
+    case ATTACK_ATTACKING:
+      newSprite(e, spriteInfo(a.fightSprite), ctx.rng);
+      a.needToAttack = true;
+      return;
+    case ATTACK_DONE:
+    case ATTACK_FAILED:
+    case ATTACK_INVALID:
+      newSprite(e, spriteInfo(a.waitSprite), ctx.rng);
+      return;
+  }
+}
+
+/** `ready_to_attack` (combat.md §3.4) for a unit target owned by Gaia (no visibility test). */
+function readyToAttack(ctx: GameContext, e: Entity, a: AttackAction): boolean {
+  const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
+  if (!turnTowards(ctx, e, target ? target.x : a.x, target ? target.y : a.y)) return false;
+  const t = unitType(e.type);
+  const reach = sub32(add32(length32(t.radiusX, t.radiusY), a.range), RANGE_SLACK);
+  let ready = false;
+  if (!target) {
+    let gx = sub32(Math.abs(sub32(a.x, e.x)), t.radiusX);
+    let gy = sub32(Math.abs(sub32(a.y, e.y)), t.radiusY);
+    if (gx < 0) gx = 0;
+    if (gy < 0) gy = 0;
+    const d = length32(gx, gy);
+    if (d < a.minRange) return tooClose(ctx, e, a);
+    ready = d <= reach;
+  } else {
+    const dx = sub32(target.x, a.x);
+    const dy = sub32(target.y, a.y);
+    const dz = sub32(target.z, a.z);
+    if (dx <= HALF && dx >= -HALF && dy <= HALF && dy >= -HALF && dz <= HALF && dz >= -HALF) ready = true;
+    else {
+      const d = distanceToObject(e, target);
+      if (d < a.minRange) return tooClose(ctx, e, a);
+      if (d <= reach) {
+        a.x = target.x;
+        a.y = target.y;
+        a.z = target.z;
+        ready = true;
+      }
+    }
+  }
+  if (!ready) {
+    setAttackState(ctx, e, a, maximumSpeed(e, t) === 0 ? ATTACK_FAILED : ATTACK_MOVING);
+    return false;
+  }
+  return (e.attackTimer ?? 0) <= 0;
+}
+
+/** Too close: a mobile unit without a unit AI just waits (src/act_atak.cpp:499-512). */
+function tooClose(ctx: GameContext, e: Entity, a: AttackAction): boolean {
+  if (maximumSpeed(e, unitType(e.type)) !== 0) return false;
+  setAttackState(ctx, e, a, ATTACK_FAILED);
+  return false;
+}
+
+/** `RGE_Action_Attack::update` (combat.md §3.2, sprites.md §5.2). */
+export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
+  const a = e.attack;
+  if (!a) return ActionResult.Remove;
+  a.timer = add32(a.timer, ctx.deltaSeconds);
+  if (a.target !== -1) {
+    const target = ctx.entities.get(a.target);
+    if (!target || target.state >= ObjectState.Dying) {
+      a.target = -1;
+      setAttackState(ctx, e, a, ATTACK_TARGET_LOST);
+      return ActionResult.TargetLost;
+    }
+  }
+  switch (a.state) {
+    case ATTACK_DONE:
+      return ActionResult.Remove;
+    case ATTACK_TARGET_LOST:
+      if (e.sprite?.looped) {
+        a.target = -1;
+        setAttackState(ctx, e, a, ATTACK_DONE);
+        return a.sub ? ActionResult.TargetLost : ActionResult.Completed;
+      }
+      return ActionResult.Continue;
+    case ATTACK_MOVING:
+      switch (updateMover(ctx, e)) {
+        case ActionResult.Remove:
+        case ActionResult.Completed:
+          setAttackState(ctx, e, a, ATTACK_WAITING);
+          return ActionResult.Continue;
+        case ActionResult.Failed:
+          setAttackState(ctx, e, a, ATTACK_FAILED);
+          return ActionResult.Failed;
+        case ActionResult.TargetInvalid:
+          setAttackState(ctx, e, a, ATTACK_INVALID);
+          return ActionResult.TargetInvalid;
+        default:
+          return ActionResult.Continue;
+      }
+    case ATTACK_WAITING:
+      if (readyToAttack(ctx, e, a)) {
+        e.attackTimer = unitType(e.type).combat!.reloadTime;
+        setAttackState(ctx, e, a, ATTACK_ATTACKING);
+      }
+      return ActionResult.Continue;
+    case ATTACK_ATTACKING: {
+      if (!a.needToAttack) {
+        if ((e.attackTimer ?? 0) <= 0) {
+          if (a.target === -1) {
+            setAttackState(ctx, e, a, ATTACK_TARGET_LOST);
+            return ActionResult.Continue;
+          }
+          e.attackTimer = unitType(e.type).combat!.reloadTime;
+          setAttackState(ctx, e, a, ATTACK_WAITING);
+          // `set_state(6)` may have moved on to 13 or 4 (src/act_atak.cpp:345-350).
+          const now = a.state as number;
+          if (now === ATTACK_FAILED || now === ATTACK_MOVING) return ActionResult.Continue;
+          setAttackState(ctx, e, a, ATTACK_ATTACKING);
+        }
+        if (!a.needToAttack) {
+          if (!e.sprite?.looped && (currentSprite(e).flags & 1) !== 0) return ActionResult.Continue;
+          setAttackState(ctx, e, a, a.target === -1 ? ATTACK_TARGET_LOST : ATTACK_WAITING);
+          return ActionResult.Continue;
+        }
+      }
+      const c = unitType(e.type).combat!;
+      const frame = c.frameDelay !== 0 ? c.frameDelay : toInt(mul32(currentSprite(e).frames, HALF)) << 16 >> 16;
+      if (e.sprite && framePassed(e.sprite, frame)) {
+        const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
+        if (target) launch(ctx, e, target);
+        a.needToAttack = false;
+      }
+      return ActionResult.Continue;
+    }
+    case ATTACK_FAILED:
+      return ActionResult.Failed;
+    default:
+      return ActionResult.Continue;
+  }
+}
+
+/** `RGE_Combat_Object::attack(target, attacker)` (combat.md §4.2): melee hits now, a missile user throws. */
+function launch(ctx: GameContext, e: Entity, target: Entity): void {
+  const t = unitType(e.type);
+  const c = t.combat!;
+  if (c.projectileUnitId < 0) {
+    doAttack(ctx, e, target);
+    return;
+  }
+  const maxRange = sub32(add32(length32(t.radiusX, t.radiusY), c.range), MISSILE_RANGE_SLACK);
+  const angle = e.mover!.angle;
+  const co = f32(cos(angle));
+  const si = f32(sin(angle));
+  const [offX, offY, offZ] = c.displacement;
+  const mx = sub32(add32(e.x, mul32(co, offY)), mul32(si, offX));
+  const my = add32(add32(e.y, mul32(si, offY)), mul32(co, offX));
+  const missile = ctx.create(e.owner, c.projectileUnitId, mx, my, add32(e.z, offZ));
+  const action: MissileAction = {
+    state: 3,
+    target: target.id,
+    launcher: e.id,
+    x: target.x,
+    y: target.y,
+    z: target.z,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    timer: 0,
+    ballisticVelocity: 0,
+    ballisticAcceleration: 0,
+    maxRange,
+  };
+  missile.missile = action;
+  aim(ctx, missile, action);
+}
+
+/** `do_attack` (combat.md §4.3) without blast: one hit roll, then damage on a hit. */
+function doAttack(ctx: GameContext, attacker: Entity, target: Entity): void {
+  const c = unitType(attacker.type).combat!;
+  const chance = Math.trunc((ctx.rng.rand() * 100) / 0x7fff);
+  if (chance > c.accuracy) return;
+  damage(ctx, target, attacker, attackModifier(attacker, target));
+}
+
+/** `calc_attack_modifier` (combat.md §2.3) on flat ground: only the attacker's and target's z decide. */
+function attackModifier(attacker: Entity, target: Entity): number {
+  const c = unitType(attacker.type).combat!;
+  if (c.projectileUnitId >= 0) return attacker.z > target.z ? f32(1.5) : 1;
+  return attacker.z < target.z ? MELEE_LOW : 1;
+}
+
+/** `calculateDamage` (combat.md §2.2) with the defence terrain multiplier 1. */
+function armouredDamage(attacker: Entity, target: Entity, modifier: number): number {
+  const weapon = unitType(attacker.type).combat!;
+  const defence = unitType(target.type).combat!;
+  let total = 0;
+  for (const w of weapon.attacks) {
+    let armour = defence.baseArmour;
+    for (const a of defence.armours) if (a.group === w.group) armour = a.amount;
+    const d = mul32(sub32(w.amount, armour), modifier);
+    if (d > 0) total = add32(total, d);
+  }
+  return total;
+}
+
+/** `damage` on the target (combat.md §2.1; static objects `src/stat_obj.cpp:2161`). */
+function damage(ctx: GameContext, target: Entity, attacker: Entity, modifier: number): void {
+  const tt = unitType(target.type);
+  if (!tt.combat) {
+    // `RGE_Static_Object::damage`: plain sum of the weapon values, no armour, no minimum; a kill wakes it.
+    let total = 0;
+    for (const w of unitType(attacker.type).combat!.attacks) total = add32(mul32(w.amount, modifier), total);
+    target.hp = sub32(target.hp, total);
+    if (target.hp < 1) {
+      target.hp = 0;
+      ctx.wake(target);
+    }
+    return;
+  }
+  const before = target.hp;
+  if (before < 1) return;
+  target.hp = sub32(target.hp, armouredDamage(attacker, target, modifier));
+  if (target.hp < 1) target.hp = 0;
+  if (target.hp < 1 && unitType(attacker.type).group !== GROUP_CIVILIAN) target.heldAmount = 0;
+  if (sub32(before, target.hp) < 1) target.hp = sub32(before, 1);
+  if (target.owner > 0 && target.hp < 1) {
+    const kills = ctx.attributes[attacker.owner]!;
+    kills[ATTR_KILLS] = add32(kills[ATTR_KILLS]!, 1);
+  }
+}
+
+/** `RGE_Action_Missile::set_state(3)` (combat.md §5.2): aim at the target and fly (state 4). */
+function aim(ctx: GameContext, e: Entity, a: MissileAction): void {
+  const t = unitType(e.type);
+  const mi = t.missile!;
+  const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
+  const tx = target ? target.x : a.x;
+  const ty = target ? target.y : a.y;
+  const tz = target ? add32(mul32(unitType(target.type).radiusZ, HALF), target.z) : a.z;
+  let dx = sub32(tx, e.x);
+  let dy = sub32(ty, e.y);
+  const dz = sub32(tz, e.z);
+  const len = (x: number, y: number) => sqrt32(add32(add32(mul32(x, x), mul32(y, y)), mul32(dz, dz)));
+  let d = len(dx, dy);
+  const targetSpeed = target?.mover?.speed ?? 0;
+  if (mi.targetting === 1 && target && targetSpeed > 0) {
+    const angle = target.mover!.angle;
+    const tvx = mul32(f32(cos(angle)), targetSpeed);
+    const tvy = mul32(f32(sin(angle)), targetSpeed);
+    const k = add32(sub32(d, len(add32(dx, tvx), add32(dy, tvy))), t.speed);
+    if (k > mul32(t.speed, HALF)) {
+      const adjust = div32(d, k);
+      dx = add32(dx, mul32(tvx, adjust));
+      dy = add32(dy, mul32(tvy, adjust));
+      d = len(dx, dy);
+    }
+  }
+  if (mi.type === 0 || mi.type === 3) {
+    a.vx = mi.type === 0 ? div32(dx, d) : dx;
+    a.vy = mi.type === 0 ? div32(dy, d) : dy;
+    a.vz = mi.type === 0 ? div32(dz, d) : dz;
+    e.mover!.angle = f32(atan2(a.vy, a.vx));
+    e.mover!.facet = facetOf(e.mover!.angle, currentSprite(e));
+    if (mi.type === 0) a.timer = 0;
+  }
+  if (mi.ballistics > 0) {
+    const time = mul32(t.speed > 0 ? div32(d, t.speed) : 0, HALF);
+    const acceleration = -mul32(d, mi.ballistics);
+    a.ballisticAcceleration = div32(add32(acceleration, acceleration), mul32(time, time));
+    a.ballisticVelocity = -mul32(time, a.ballisticAcceleration);
+  } else {
+    a.ballisticVelocity = 0;
+    a.ballisticAcceleration = 0;
+  }
+  a.state = 4;
+}
+
+/** `RGE_Action_Missile::update` (combat.md §5.3) for hit info 0 (only the intended target can be hit). */
+export function updateMissile(ctx: GameContext, e: Entity): ActionResult {
+  const a = e.missile;
+  if (!a) return ActionResult.Remove;
+  const t = unitType(e.type);
+  const mi = t.missile!;
+  const dt = ctx.deltaSeconds;
+  const s = mul32(t.speed, dt);
+  const live = (id: number) => {
+    const o = id === -1 ? undefined : ctx.entities.get(id);
+    return o && o.state < ObjectState.Dying ? o : undefined;
+  };
+  if (!live(a.target)) a.target = -1;
+  if (!live(a.launcher)) a.launcher = -1;
+  if (a.state === 1) return ActionResult.Remove;
+  if (a.state !== 4) return ActionResult.Continue;
+  let vx = 0;
+  let vy = 0;
+  let vz = 0;
+  if (mi.type === 0) {
+    a.timer = add32(a.timer, s);
+    vx = mul32(a.vx, s);
+    vy = mul32(a.vy, s);
+    vz = mul32(a.vz, s);
+    if (a.timer >= a.maxRange) die(ctx, e, a);
+  } else if (mi.type === 3) {
+    vx = a.vx;
+    vy = a.vy;
+    vz = a.vz;
+  }
+  if (mi.ballistics > 0) {
+    const change = mul32(a.ballisticAcceleration, dt);
+    const average = add32(a.ballisticVelocity, mul32(change, HALF));
+    a.ballisticVelocity = add32(a.ballisticVelocity, change);
+    vz = add32(vz, mul32(average, dt));
+  }
+  const hitGround = missileMove(ctx, e, a, vx, vy, vz);
+  const source = (a.launcher === -1 ? undefined : ctx.entities.get(a.launcher)) ?? e;
+  const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
+  if ((mi.type === 0 || mi.type === 2) && target && collides(e, target, s)) {
+    doAttack(ctx, source, target);
+    die(ctx, e, a);
+  } else if (mi.type === 3 && target) {
+    doAttack(ctx, source, target);
+    die(ctx, e, a);
+  }
+  // Hitting the ground: `area_attack` at the missile, which does nothing without a blast radius.
+  if (hitGround && (a.state as number) !== 1) die(ctx, e, a);
+  return ActionResult.Continue;
+}
+
+/** `missile_move` (src/misl_obj.cpp:77-92) on flat ground: true when it ends on the ground. */
+function missileMove(ctx: GameContext, e: Entity, a: MissileAction, vx: number, vy: number, vz: number): boolean {
+  const nx = add32(e.x, vx);
+  const ny = add32(e.y, vy);
+  const nz = add32(e.z, vz);
+  if (nx < 0 || nx >= ctx.map.width || ny < 0 || ny >= ctx.map.height) die(ctx, e, a);
+  e.x = f32(Math.min(Math.max(nx, 0), sub32(ctx.map.width, f32(0.001))));
+  e.y = f32(Math.min(Math.max(ny, 0), sub32(ctx.map.height, f32(0.001))));
+  e.z = nz < 0 ? 0 : nz;
+  return e.z === 0;
+}
+
+/** `make_object_collision_list` (src/misl_obj.cpp:94) for one candidate: within 3 tiles and inside the swept box. */
+function collides(e: Entity, o: Entity, s: number): boolean {
+  const t = unitType(e.type);
+  const ot = unitType(o.type);
+  if (t.radiusX <= 0 || t.radiusY <= 0 || ot.radiusX <= 0 || ot.radiusY <= 0) return false;
+  const minX = Math.max(0, toInt(sub32(e.x, MISSILE_SPAN)));
+  const minY = Math.max(0, toInt(sub32(e.y, MISSILE_SPAN)));
+  const maxX = toInt(add32(e.x, MISSILE_SPAN));
+  const maxY = toInt(add32(e.y, MISSILE_SPAN));
+  const tx = toInt(o.x);
+  const ty = toInt(o.y);
+  if (tx < minX || tx > maxX || ty < minY || ty > maxY) return false;
+  const dz = sub32(o.z, e.z);
+  if (dz < -sub32(ot.radiusZ, MISSILE_DZ) || dz > sub32(t.radiusZ, MISSILE_DZ)) return false;
+  return Math.abs(sub32(o.x, e.x)) <= add32(add32(ot.radiusX, t.radiusX), s) && Math.abs(sub32(o.y, e.y)) <= add32(add32(ot.radiusY, t.radiusY), s);
+}
+
+/** State 1: `die_die_die` — hp 0; the object's own update then runs it through dying to removal. */
+function die(ctx: GameContext, e: Entity, a: MissileAction): void {
+  a.state = 1;
+  e.hp = 0;
+  ctx.wake(e);
+}

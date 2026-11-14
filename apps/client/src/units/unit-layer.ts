@@ -139,7 +139,7 @@ export class UnitLayer {
         Object.assign(t, { fromX: at.x, fromY: at.y, toX: e.x, toY: e.y, start: now, duration });
       }
       const sliding = now - t.start < t.duration && (t.fromX !== t.toX || t.fromY !== t.toY);
-      const walking = (m.walking && m.speed > 0) || sliding;
+      const walking = (e.sprite?.graphic === unitType(e.type).walking?.graphic && m.speed > 0) || sliding;
       if (walking !== t.walking) {
         t.walking = walking;
         t.animStart = now;

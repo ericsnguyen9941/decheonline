@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Command } from './commands';
+import type { Entity } from './entities';
 import { MOVE_MOVING, MOVE_NEED_PATH, orderMove, updateMover, type MoveContext } from './movement';
 import { add32, f32, mul32, sub32, toInt } from './num';
 import { runReplay, sampleReplay } from './replay';
@@ -21,12 +22,17 @@ function order(world: World, player: number, command: Command, limit = 80): void
   }
 }
 
+/** The unit shows its walking sprite. */
+function walking(e: Entity): boolean {
+  return e.sprite?.graphic === unitType(e.type).walking!.graphic;
+}
+
 /** Obstruction counts rebuilt from the stamped footprints, the way `addToObstructionMap` stamps them. */
 function expectedCells(world: World): Uint8Array {
   const { cellsX, cellsY } = world.pathing;
   const cells = new Uint8Array(cellsX * cellsY);
   for (const e of world.entities.all()) {
-    if (!e.mover?.stamped) continue;
+    if (!e.stamped) continue;
     const t = unitType(e.type);
     const minX = Math.max(0, toInt(mul32(sub32(e.x, t.radiusX), 4)));
     const minY = Math.max(0, toInt(mul32(sub32(e.y, t.radiusY), 4)));
@@ -65,9 +71,9 @@ describe('random draws of the Villager sprites (sprites.md §4)', () => {
     const e = world.entities.get(1)!;
     orderMove(e, 14.5, 10.5, rng);
     updateMover(ctx, e);
-    expect([e.mover!.action!.state, e.mover!.walking, rng.draws]).toEqual([MOVE_MOVING, true, 0]);
+    expect([e.mover!.action!.state, walking(e), rng.draws]).toEqual([MOVE_MOVING, true, 0]);
     while (e.mover!.action) updateMover(ctx, e);
-    expect([e.mover!.walking, rng.draws]).toEqual([false, 1]);
+    expect([walking(e), rng.draws]).toEqual([false, 1]);
   });
 });
 
@@ -82,7 +88,7 @@ describe('move orders on the test map', () => {
     expect(length(dx, dy)).toBeLessThanOrEqual(0.4);
     expect(length(16.3 - unit.x, 14.7 - unit.y)).toBeGreaterThan(0.4);
     expect(unit.mover!.action).toBeNull();
-    expect(unit.mover!.walking).toBe(false);
+    expect(walking(unit)).toBe(false);
     expect(unit.mover!.speed).toBe(0);
   });
 
@@ -143,7 +149,7 @@ describe('move orders on the test map', () => {
   });
 });
 
-describe('fuzz: random move orders', () => {
+describe('fuzz: random move and work orders', () => {
   for (const seed of [1, 2, 3, 4]) {
     test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land`, () => {
       const log = sampleReplay(240, seed);
@@ -154,10 +160,14 @@ describe('fuzz: random move orders', () => {
       let moved = 0;
       while (world.turn < log.turns) {
         for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
-        const before = [...world.entities.all()].filter((e) => e.mover).map((e) => [e.x, e.y]);
+        const before = new Map([...world.entities.all()].map((e) => [e.id, [e.x, e.y]] as const));
         world.runTurn();
-        const units = [...world.entities.all()].filter((e) => e.mover);
-        units.forEach((e, i) => (moved += e.x !== before[i]![0] || e.y !== before[i]![1] ? 1 : 0));
+        // Missiles fly over anything and stamp nothing.
+        const units = [...world.entities.all()].filter((e) => e.mover && unitType(e.type).masterType !== 60);
+        for (const e of units) {
+          const was = before.get(e.id);
+          moved += was && (e.x !== was[0] || e.y !== was[1]) ? 1 : 0;
+        }
         expect(world.pathing.cells).toEqual(expectedCells(world));
         expect(Math.max(...world.pathing.cells)).toBeLessThanOrEqual(1);
         for (const e of units) expect(unitType(e.type).terrainTable[world.map.terrainAt(toInt(e.x), toInt(e.y))]).toBeGreaterThan(0);

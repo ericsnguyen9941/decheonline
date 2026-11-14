@@ -133,6 +133,18 @@ export class OpenList {
 }
 
 /** The per-tile search arrays and the obstruction map of one map. Only the obstruction counts are game state. */
+/** Cells of the search target (`minTarget`/`maxTarget`, inclusive) and its object id, -1 for a point goal. */
+interface TargetBox {
+  id: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+const Sweep = { Clear: 0, Blocked: 1, Touching: 2 } as const;
+type Sweep = (typeof Sweep)[keyof typeof Sweep];
+
 export class PathingSystem {
   /** Per cell a saturating counter 0..3, indexed `cx * cellsY + cy`. A cell is blocked when non-zero. */
   readonly cells: Uint8Array;
@@ -181,21 +193,19 @@ export class PathingSystem {
     for (let x = minX; x < maxX; x++) for (let y = minY; y < maxY; y++) this.bump(x, y, by);
   }
 
-  /** `addToObstructionMap`: only colliding units, only once. Returns whether it stamped. */
+  /** `addToObstructionMap`: only colliding objects, only once. Returns whether it stamped. */
   stamp(e: Entity, t: UnitType): boolean {
-    const m = e.mover;
-    if (t.radiusZ <= 0 || !m || m.stamped) return false;
+    if (t.radiusZ <= 0 || e.stamped) return false;
     this.footprint(e, t, 1);
-    m.stamped = true;
+    e.stamped = true;
     return true;
   }
 
   /** `removeFromObstructionMap`. Returns whether it was stamped. */
   unstamp(e: Entity, t: UnitType): boolean {
-    const m = e.mover;
-    if (t.radiusZ <= 0 || !m || !m.stamped) return false;
+    if (t.radiusZ <= 0 || !e.stamped) return false;
     this.footprint(e, t, -1);
-    m.stamped = false;
+    e.stamped = false;
     return true;
   }
 
@@ -236,11 +246,11 @@ export class PathingSystem {
   }
 
   /**
-   * `findTilePath` from tile (sx, sy) to tile (gx, gy) for a point move (no target object), copying the result into
-   * a waypoint list (movement.md §7). `range` is the action range; `group` the unit's pathing group, unstamped during
-   * the search when `continueCounter >= 10`.
+   * `findTilePath` from tile (sx, sy) to tile (gx, gy), copying the result into a waypoint list (movement.md §7).
+   * `range` is the action range; `targetId` the target object (-1 none), whose footprint box counts as reached when a
+   * step touches it; `group` the unit's pathing group, unstamped during the search when `continueCounter >= 10`.
    */
-  findTilePath(e: Entity, t: UnitType, sx: number, sy: number, gx: number, gy: number, range: number): PathResult {
+  findTilePath(e: Entity, t: UnitType, sx: number, sy: number, gx: number, gy: number, range: number, targetId = -1): PathResult {
     const m = e.mover!;
     const w = this.map.width;
     // Both axes are compared with the x size (movement.md §7.1).
@@ -270,7 +280,18 @@ export class PathingSystem {
       }
     }
 
-    const result = this.run(e, t, sx, sy, gx, gy, range, offX, offY);
+    // Target box in cells: the goal tile, or a live target object's footprint (src/pathsys.cpp:345-358).
+    const box = { id: -1, minX: gx * 4, minY: gy * 4, maxX: gx * 4 + 3, maxY: gy * 4 + 3 };
+    const target = targetId === -1 ? undefined : this.objects.get(targetId);
+    if (target) {
+      const tt = unitType(target.type);
+      box.id = targetId;
+      box.minX = toInt(mul32(sub32(target.x, tt.radiusX), 4));
+      box.minY = toInt(mul32(sub32(target.y, tt.radiusY), 4));
+      box.maxX = toInt(mul32(add32(tt.radiusX, target.x), 4));
+      box.maxY = toInt(mul32(add32(tt.radiusY, target.y), 4));
+    }
+    const result = this.run(e, t, sx, sy, gx, gy, range, offX, offY, box);
 
     for (const other of unstamped) this.stamp(other, unitType(other.type));
     if (selfStamped) this.stamp(e, t);
@@ -287,6 +308,7 @@ export class PathingSystem {
     range: number,
     offX: number,
     offY: number,
+    box: TargetBox,
   ): PathResult {
     const { width: w, height: h } = this.map;
     const gen = ++this.generation;
@@ -365,13 +387,17 @@ export class PathingSystem {
         if (minX4 < 0) minX4++;
         if (minY4 < 0) minY4++;
         if (!this.sweepTerrainOk(t, minScanX, minScanY, maxScanX, maxScanY, sx, sy)) continue;
-        if (!this.cellsClear(minX4, maxX4, minY4, maxY4)) continue;
+        const sweep = this.sweepCells(minX4, maxX4, minY4, maxY4, box);
+        if (sweep === Sweep.Blocked) continue;
 
         if (i !== from) total++;
+        if (sweep === Sweep.Touching) total = 0;
         cost[ni] = total;
         facet[ni] = i;
         visited[ni] = gen;
         open.push(nx, ny, total);
+        // Touching the target ends the search with the step just pushed on top (src/pathsys.cpp:903-933).
+        if (sweep === Sweep.Touching) return this.copyPath(e, sx, sy, offX, offY, true);
       }
       iterations++;
     }
@@ -379,6 +405,27 @@ export class PathingSystem {
     // Exhausted or capped: path to the tile that came closest, and report failure (movement.md §7.5).
     open.push(bestX, bestY, 0);
     return this.copyPath(e, sx, sy, offX, offY, false);
+  }
+
+  /**
+   * Collision sweep of a step (src/pathsys.cpp:757-817). Boxes shorter than 25 cells that miss the target box take the
+   * mask path (any blocked cell fails); the others are scanned cell by cell, where a blocked cell inside a target
+   * object's box means the step touches the target.
+   */
+  private sweepCells(minX: number, maxX: number, minY: number, maxY: number, box: TargetBox): Sweep {
+    const h = maxY - minY - 1;
+    if (h < 0) return Sweep.Clear;
+    const missesTarget = box.maxX < minX || box.maxY < minY || maxX < box.minX || maxY < box.minY;
+    if (h < 0x18 && missesTarget) return this.cellsClear(minX, maxX, minY, maxY) ? Sweep.Clear : Sweep.Blocked;
+    let touching = false;
+    for (let cx = minX; cx < maxX; cx++) {
+      for (let cy = minY; cy < maxY; cy++) {
+        if (this.obstruction(cx, cy) === 0) continue;
+        if (box.id === -1 || cx < box.minX || box.maxX < cx || cy < box.minY || box.maxY < cy) return Sweep.Blocked;
+        touching = true;
+      }
+    }
+    return touching ? Sweep.Touching : Sweep.Clear;
   }
 
   /** Terrain sweep of a step; the scan bounds are bytes in the original, so they wrap like `& 0xff`. */

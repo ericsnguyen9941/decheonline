@@ -1,5 +1,19 @@
+import type { AttackAction, MissileAction } from './combat';
+import type { WorkAction } from './gather';
 import { copyMover, type Mover } from './movement';
 import { f32 } from './num';
+import type { ActiveSprite } from './sprites';
+
+/** `object_state` values (include/stat_obj.h). */
+export const ObjectState = {
+  Unbuilt: 0,
+  Active: 2,
+  Dying: 3,
+  DeathAnimation: 4,
+  Dead: 5,
+  PendingRemoval: 7,
+  ReadyToRemove: 8,
+} as const;
 
 /** Simulation object. Float fields hold float32 values (`f32`); ids and integers are 32-bit. */
 export interface Entity {
@@ -12,11 +26,30 @@ export interface Entity {
   y: number;
   z: number;
   hp: number;
+  /** `object_state` (`ObjectState`); objects start active. */
+  state: number;
+  /** Carried or held resource: `attribute_type_held` (-1 none) and `attribute_amount_held` (float). */
+  heldType: number;
+  heldAmount: number;
+  /** Footprint is in the obstruction map. */
+  stamped: boolean;
+  /** Main sprite and its animation state; null before setup shows one. */
+  sprite: ActiveSprite | null;
   /** Movement state of a moving unit; absent for other objects. */
   mover?: Mover;
+  /** Combat objects: reload timer (`attack_timer`). */
+  attackTimer?: number;
+  /** World time (s) of the last `turn_towards` facet turn. */
+  turnTowardsTime?: number;
+  /** Gather or hunt action at the top of the action list. */
+  work?: WorkAction | null;
+  /** Attack action: a hunt's sub-action. */
+  attack?: AttackAction | null;
+  /** A missile's flight action. */
+  missile?: MissileAction | null;
 }
 
-export type EntityInit = Omit<Entity, 'id'>;
+export type EntityInit = Pick<Entity, 'owner' | 'type' | 'x' | 'y' | 'z' | 'hp'> & Partial<Omit<Entity, 'id'>>;
 
 /**
  * All live entities. Ids are handed out in increasing order and never reused, and iteration is
@@ -43,6 +76,11 @@ export class EntityStore {
       y: f32(init.y),
       z: f32(init.z),
       hp: f32(init.hp),
+      state: init.state ?? ObjectState.Active,
+      heldType: init.heldType ?? -1,
+      heldAmount: f32(init.heldAmount ?? 0),
+      stamped: init.stamped ?? false,
+      sprite: init.sprite ? { ...init.sprite } : null,
     };
     if (init.mover) e.mover = copyMover(init.mover);
     this.byId.set(e.id, e);
@@ -80,7 +118,10 @@ export class EntityStore {
 }
 
 function copyEntity(e: Entity): Entity {
-  const copy = { ...e };
+  const copy = { ...e, sprite: e.sprite && { ...e.sprite } };
   if (e.mover) copy.mover = copyMover(e.mover);
+  if (e.work) copy.work = { ...e.work };
+  if (e.attack) copy.attack = { ...e.attack };
+  if (e.missile) copy.missile = { ...e.missile };
   return copy;
 }

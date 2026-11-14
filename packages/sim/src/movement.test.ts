@@ -19,8 +19,20 @@ const UNIT: UnitType = {
   turnSpeed: 0,
   terrainRestriction: 0,
   terrainTable: [f32(1)],
-  standing: { graphic: 0, facets: 8, baseSpeed: 0, hasFacings: true, randomStart: false },
+  standing: { graphic: 0, frames: 1, facets: 8, baseSpeed: 0, duration: 0, pause: 0, flags: 2, hasFacings: true, randomStart: false },
   walking: null,
+  masterType: 70,
+  group: 0,
+  flying: false,
+  combatLevel: 0,
+  dying: null,
+  deadUnitId: -1,
+  storages: [],
+  resourceCapacity: 0,
+  resourceDecay: 0,
+  action: null,
+  combat: null,
+  missile: null,
 };
 
 function setup(waypoint: [number, number], seed = 14) {

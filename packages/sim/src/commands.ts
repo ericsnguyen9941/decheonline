@@ -29,10 +29,26 @@ export interface MoveCommand {
   y: number;
 }
 
+/**
+ * Work order (`RGE_Command::do_command_work`, docs/spec/economy.md §3.1): the listed units of the sender work on
+ * object `target` (gather, hunt, drop off); (x, y) is the clicked map point.
+ */
+export interface WorkCommand {
+  type: 'work';
+  units: number[];
+  target: number;
+  x: number;
+  y: number;
+}
+
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand;
+export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand;
+
+function isId(v: unknown): v is number {
+  return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
+}
 
 /** Validate untrusted input (from the wire). Returns a fresh object with only known fields, or null. */
 export function parseCommand(v: unknown): Command | null {
@@ -46,12 +62,15 @@ export function parseCommand(v: unknown): Command | null {
       if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
       return { type: 'test', x, y };
     }
-    case 'move': {
-      const { units, x, y } = o;
+    case 'move':
+    case 'work': {
+      const { units, x, y, target } = o;
       if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return null;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS) return null;
-      if (!units.every((id) => Number.isInteger(id) && id > 0 && id <= 0x7fffffff)) return null;
-      return { type: 'move', units: [...(units as number[])], x, y };
+      if (!units.every(isId)) return null;
+      if (o['type'] === 'move') return { type: 'move', units: [...(units as number[])], x, y };
+      if (!isId(target)) return null;
+      return { type: 'work', units: [...(units as number[])], target, x, y };
     }
     default:
       return null;

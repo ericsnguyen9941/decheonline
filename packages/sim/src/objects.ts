@@ -1,0 +1,112 @@
+/**
+ * One object's update in its owner's list (economy.md §3, combat.md §5): the `RGE_Static_Object` →
+ * `RGE_Animated_Object` → `RGE_Action_Object` → `RGE_Combat_Object` chain. Dying, death animation, resource decay,
+ * removal and the spawned dead object live here; actions are gather/hunt (`gather.ts`), a plain walk, or a missile.
+ */
+import { updateMissile } from './combat';
+import type { GameContext } from './context';
+import { ObjectState, type Entity } from './entities';
+import { deleteActions, updateWork } from './gather';
+import { ActionResult, endAction, updateMover } from './movement';
+import { add32, f32, mul32, sub32 } from './num';
+import { advanceSprite, isAnimating, newSprite } from './sprites';
+import { spriteInfo, unitType, type UnitType } from './units';
+
+/** Master types (`master_type`): 20 animated, 30 moving, 40 action, 50 combat, 60 missile, 70 unit, 80 building. */
+export function isAnimated(t: UnitType): boolean {
+  return t.masterType >= 20 && t.masterType <= 80;
+}
+
+export function isMoving(t: UnitType): boolean {
+  return t.masterType >= 30 && t.masterType <= 80;
+}
+
+function isActionObject(t: UnitType): boolean {
+  return t.masterType >= 40 && t.masterType <= 80;
+}
+
+/** Storage slots given to the owner: flag 1 and 2 on creation (economy.md §6.3), flag 2 taken back on dying. */
+export function giveStorages(attributes: number[], t: UnitType, sign: 1 | -1, flags: readonly number[]): void {
+  for (const s of t.storages) {
+    if (s.type < 0 || !flags.includes(s.flag)) continue;
+    attributes[s.type] = add32(attributes[s.type] ?? 0, sign * s.amount);
+  }
+}
+
+/** `set_object_state` side effects the sim keeps: a unit starting to die returns its flag-2 storages. */
+function setObjectState(ctx: GameContext, e: Entity, state: number): void {
+  if (e.state === state) return;
+  if (state >= ObjectState.Dying && e.state < ObjectState.Dying) giveStorages(ctx.attributes[e.owner]!, unitType(e.type), -1, [2]);
+  e.state = state;
+}
+
+/**
+ * Update `e` for one step; true when it is ready to be removed (`update` returned non-zero, src/obj_list.cpp:226).
+ */
+export function updateObject(ctx: GameContext, e: Entity): boolean {
+  const t = unitType(e.type);
+  // `RGE_Combat_Object::update`: the reload timer runs first.
+  if (e.attackTimer !== undefined && e.attackTimer > 0) {
+    e.attackTimer = sub32(e.attackTimer, ctx.deltaSeconds);
+    if (e.attackTimer < 0) e.attackTimer = 0;
+  }
+  const remove = staticUpdate(ctx, e, t);
+  if (isAnimated(t)) {
+    if (e.state === ObjectState.Dying) setObjectState(ctx, e, t.dying ? ObjectState.DeathAnimation : ObjectState.Dead);
+    else if (e.state === ObjectState.DeathAnimation && !(e.sprite && isAnimating(e.sprite, spriteInfo(e.sprite.graphic)))) {
+      e.state = ObjectState.Dead;
+      if (e.mover) e.mover.speed = 0;
+    }
+    if (e.sprite) advanceSprite(e.sprite, spriteInfo(e.sprite.graphic), ctx.deltaSeconds, e.mover?.speed ?? 0);
+  }
+  if (!isActionObject(t)) return remove;
+  if (e.state > ObjectState.Active) {
+    deleteActions(e);
+    e.missile = null;
+    return remove;
+  }
+  if (e.missile) {
+    if (updateMissile(ctx, e) === ActionResult.Remove) e.missile = null;
+  } else if (e.work) {
+    const r = updateWork(ctx, e);
+    if (r === ActionResult.Failed || r === ActionResult.Remove) deleteActions(e);
+  } else if (e.mover?.action) {
+    const r = updateMover(ctx, e);
+    if (r === ActionResult.Failed || r === ActionResult.Remove) endAction(e.mover);
+  }
+  return remove;
+}
+
+/** `RGE_Static_Object::update` (src/stat_obj.cpp:1166). */
+function staticUpdate(ctx: GameContext, e: Entity, t: UnitType): boolean {
+  switch (e.state) {
+    case ObjectState.Active:
+    case ObjectState.Unbuilt:
+      if (e.hp < 1) {
+        setObjectState(ctx, e, ObjectState.Dying);
+        newSprite(e, t.dying, ctx.rng);
+        // The death sound is fenced off the stream (src/stat_obj.cpp:1796-1806).
+        ctx.rng.srand(ctx.rng.rand());
+      }
+      return false;
+    case ObjectState.Dying:
+    case ObjectState.Dead:
+      if (e.heldType === -1 || e.heldAmount <= 0) {
+        setObjectState(ctx, e, ObjectState.PendingRemoval);
+        // `spawn_death_obj` (src/stat_obj.cpp:1329): the dead object takes this one's place and owner.
+        if (t.deadUnitId >= 0) ctx.create(e.owner, t.deadUnitId, e.x, e.y, e.z);
+        return false;
+      }
+      if (t.resourceDecay > 0) {
+        e.heldAmount = sub32(e.heldAmount, mul32(ctx.deltaSeconds, t.resourceDecay));
+        if (e.heldAmount < 0) e.heldAmount = f32(0);
+      }
+      return false;
+    case ObjectState.PendingRemoval:
+      e.state = ObjectState.ReadyToRemove;
+      return false;
+    case ObjectState.ReadyToRemove:
+      return true;
+  }
+  return false;
+}
