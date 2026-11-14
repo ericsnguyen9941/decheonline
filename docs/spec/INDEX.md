@@ -40,7 +40,7 @@ tasks).
 | `src/com_sync.cpp` | 11/0/1/0 | `RGE_Communications_Synchronize::DoChecksum` :132 [M] | core.md §2.5 |
 | `src/Command.cpp` | 44/5/2/0 | `RGE_Command::do_commands` :67 [M], `do_command` :80 [M], `command_order` :845 | core.md §2.4; R2 per command |
 | `src/tcommand.cpp` | 39/3/0/0 | `TRIBE_Command::do_command` :36 [M], `command_make` :545 | R2 per command |
-| `src/com_obj.cpp`, `com_sess.cpp`, `com_serv.cpp`, `com_loby.cpp`, `dpl_obj.cpp` | (DirectPlay sessions/lobby) | not simulation; our transport replaces them | — |
+| `src/com_sess.cpp`, `com_serv.cpp`, `com_loby.cpp`, `dpl_obj.cpp` | (DirectPlay sessions/lobby) | not simulation; our transport replaces them | — |
 
 ## RNG
 
@@ -91,6 +91,7 @@ Spec: `combat.md`.
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
+| `src/com_obj.cpp` | 47/1/2/0 | `RGE_Combat_Object` (combat base class, not DirectPlay): `damage` :292 [M], `calculateDamage` :305 [M], `update` :425 [M], `attack` :195/:237 [L] | combat.md |
 | `src/act_atak.cpp` | 9/0/2/2 | `RGE_Action_Attack::update` :263 [L], `ready_to_attack` [L], `do_attack` [M]; two constructors [N] | R2 |
 | `src/t_c_obj.cpp` | 38/0/1/0 | `TRIBE_Combat_Object::update` :146 [M], `damage` :212 [M], `do_attack` :308 [M] | R2 |
 | `src/stat_obj.cpp` | 106/4/5/0 | `RGE_Static_Object::damage` :2161 [M], `heal` [M] | R2 |

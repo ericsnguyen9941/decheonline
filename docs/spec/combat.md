@@ -50,7 +50,7 @@ Depends on `core.md` for the step loop, `world_time_delta_seconds` and the RNG.
 | | `RGE_Static_Object::explore_terrain` / `unexplore_terrain` | `src/stat_obj.cpp:2114`, `:2138` | M |
 
 Note: `src/com_obj.cpp` is `RGE_Combat_Object` (the combat unit base
-class), **not** DirectPlay as the `INDEX.md` "not simulation" row says.
+class), not DirectPlay; `INDEX.md` lists it under Combat.
 
 Status counts that matter: the whole attack state machine
 (`RGE_Action_Attack::update`, `ready_to_attack`), both missile-action bodies,
