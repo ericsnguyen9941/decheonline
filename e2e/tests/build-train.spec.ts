@@ -125,8 +125,17 @@ test('one player builds a House and trains a Villager; both clients show the sam
   // The guest's Town Center: five clicks, but 200 food pays for four; a right click takes one off and refunds it.
   const guestTc = (await guest.evaluate(() => window.__game!.buildings())).find((b) => b.owner === 2 && b.type === TOWN_CENTER)!;
   await select(guest, guestTc.id);
+  const guestPop = (await guest.evaluate(() => window.__game!.population(2))).count;
   for (let i = 0; i < 5; i++) await slot(guest, 'train', VILLAGER).click();
-  await expect.poll(() => guest.evaluate((id) => window.__game!.queue(id)?.records, guestTc.id)).toEqual([{ unit: VILLAGER, count: 4 }]);
+  // Queued plus already trained: the first may finish while the clicks go in.
+  await expect
+    .poll(() =>
+      guest.evaluate(
+        ([id, pop]) => (window.__game!.queue(id)?.records[0]?.count ?? 0) + window.__game!.population(2).count - pop!,
+        [guestTc.id, guestPop] as const,
+      ),
+    )
+    .toBe(4);
   expect((await guest.evaluate(() => window.__game!.resources(2))).food).toBe(0);
   // (The first of them may finish meanwhile: the refund, not the count, tells the right click worked.)
   await slot(guest, 'train', VILLAGER).click({ button: 'right' });
