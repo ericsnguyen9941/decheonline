@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import type { Command } from './commands';
-import type { Entity } from './entities';
+import { ObjectState, type Entity } from './entities';
 import { MOVE_MOVING, MOVE_NEED_PATH, orderMove, updateMover, type MoveContext } from './movement';
 import { add32, f32, mul32, sub32, toInt } from './num';
 import { runReplay, sampleReplay } from './replay';
 import { CrtRand } from './rng';
-import { unitType, VILLAGER } from './units';
+import { BARRACKS, CLUBMAN, HOUSE, unitType, VILLAGER } from './units';
 import { startingUnits, World, type StartUnit } from './world';
 
 const length = (dx: number, dy: number): number => Math.sqrt(dx * dx + dy * dy);
@@ -28,11 +28,11 @@ function walking(e: Entity): boolean {
 }
 
 /** Obstruction counts rebuilt from the stamped footprints, the way `addToObstructionMap` stamps them. */
-function expectedCells(world: World): Uint8Array {
+function expectedCells(world: World, live = false): Uint8Array {
   const { cellsX, cellsY } = world.pathing;
   const cells = new Uint8Array(cellsX * cellsY);
   for (const e of world.entities.all()) {
-    if (!e.stamped) continue;
+    if (!e.stamped || (live && e.state >= ObjectState.PendingRemoval)) continue;
     const t = unitType(e.type);
     const minX = Math.max(0, toInt(mul32(sub32(e.x, t.radiusX), 4)));
     const minY = Math.max(0, toInt(mul32(sub32(e.y, t.radiusY), 4)));
@@ -149,19 +149,35 @@ describe('move orders on the test map', () => {
   });
 });
 
-describe('fuzz: random move and work orders', () => {
+describe('fuzz: random move, work, build, queue and cancel orders', () => {
   for (const seed of [1, 2, 3, 4]) {
-    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land`, () => {
+    test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained`, () => {
       const log = sampleReplay(240, seed);
       const first = runReplay(log);
       expect(runReplay(log)).toEqual(first);
 
       const world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units });
       let moved = 0;
+      let deposits = 0;
+      const built = new Set<number>();
+      const trained = new Set<number>();
       while (world.turn < log.turns) {
         for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
         const before = new Map([...world.entities.all()].map((e) => [e.id, [e.x, e.y]] as const));
+        const loads = [...world.entities.all()].filter((e) => e.owner > 0 && e.heldType >= 0 && e.heldType <= 3 && e.heldAmount >= 1);
+        const resources = world.attributes.map((a) => a.slice(0, 4));
         world.runTurn();
+        // A load gone while the owner's stock of it grew by at least as much: a drop-off.
+        for (const was of loads.map((e) => ({ e, type: e.heldType, amount: e.heldAmount }))) {
+          const now = world.entities.get(was.e.id);
+          const gain = world.attributes[was.e.owner]![was.type]! - resources[was.e.owner]![was.type]!;
+          if (now && now.heldAmount === 0 && gain >= was.amount) deposits++;
+        }
+        for (const e of world.entities.all()) {
+          if (e.id <= log.units!.length || e.owner === 0) continue;
+          if ((e.type === HOUSE || e.type === BARRACKS) && e.state === ObjectState.Active) built.add(e.id);
+          if (e.type === VILLAGER || e.type === CLUBMAN) trained.add(e.id);
+        }
         // Missiles fly over anything and stamp nothing.
         const units = [...world.entities.all()].filter((e) => e.mover && unitType(e.type).masterType !== 60);
         for (const e of units) {
@@ -169,11 +185,15 @@ describe('fuzz: random move and work orders', () => {
           moved += was && (e.x !== was[0] || e.y !== was[1]) ? 1 : 0;
         }
         expect(world.pathing.cells).toEqual(expectedCells(world));
-        expect(Math.max(...world.pathing.cells)).toBeLessThanOrEqual(1);
+        // A foundation destroys the trees under it; they keep their footprint until removed (2 steps later).
+        expect(Math.max(...expectedCells(world, true))).toBeLessThanOrEqual(1);
         for (const e of units) expect(unitType(e.type).terrainTable[world.map.terrainAt(toInt(e.x), toInt(e.y))]).toBeGreaterThan(0);
       }
       expect(world.hash()).toBe(first.at(-1));
       expect(moved).toBeGreaterThan(100);
+      expect(deposits).toBeGreaterThan(0);
+      expect(built.size).toBeGreaterThan(0);
+      expect(trained.size).toBeGreaterThan(0);
     });
   }
 });

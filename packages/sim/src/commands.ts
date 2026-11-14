@@ -41,13 +41,54 @@ export interface WorkCommand {
   y: number;
 }
 
+/**
+ * Build order (`TRIBE_Command::do_command_build`, docs/spec/economy.md §4.1): place a foundation of master `unitType`
+ * centred on (x, y), paid by the sender, and send the listed units of the sender to build it.
+ */
+export interface BuildCommand {
+  type: 'build';
+  units: number[];
+  unitType: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Production queue order (`TRIBE_Command::do_command_queue`, economy.md §5.1): `count` > 0 queues that many units of
+ * master `unit` at `building`, `count` < 0 removes that many.
+ */
+export interface QueueCommand {
+  type: 'queue';
+  building: number;
+  unit: number;
+  count: number;
+}
+
+/**
+ * Cancel order (`TRIBE_Command::do_command_cancel_build`, economy.md §4.4): a foundation is cancelled with a partial
+ * refund; any other unit or building is destroyed.
+ */
+export interface CancelCommand {
+  type: 'cancel';
+  target: number;
+}
+
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand;
+export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand;
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
+}
+
+/** A master object id (`short` on the wire). */
+function isMasterId(v: unknown): v is number {
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 0x7fff;
+}
+
+function isPoint(x: unknown, y: unknown): boolean {
+  return typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y);
 }
 
 /** Validate untrusted input (from the wire). Returns a fresh object with only known fields, or null. */
@@ -71,6 +112,24 @@ export function parseCommand(v: unknown): Command | null {
       if (o['type'] === 'move') return { type: 'move', units: [...(units as number[])], x, y };
       if (!isId(target)) return null;
       return { type: 'work', units: [...(units as number[])], target, x, y };
+    }
+    case 'build': {
+      const { units, unitType, x, y } = o;
+      if (!isPoint(x, y) || !isMasterId(unitType)) return null;
+      if (!Array.isArray(units) || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'build', units: [...(units as number[])], unitType, x: x as number, y: y as number };
+    }
+    case 'queue': {
+      const { building, unit, count } = o;
+      if (!isId(building) || !isMasterId(unit)) return null;
+      // `train_count` is a short; 0 would remove nothing.
+      if (!Number.isInteger(count) || count === 0 || (count as number) < -0x7fff || (count as number) > 0x7fff) return null;
+      return { type: 'queue', building, unit, count: count as number };
+    }
+    case 'cancel': {
+      const { target } = o;
+      if (!isId(target)) return null;
+      return { type: 'cancel', target };
     }
     default:
       return null;
@@ -129,5 +188,5 @@ export class CommandQueue {
 }
 
 function copyCommand(c: Command): Command {
-  return c.type === 'move' ? { ...c, units: [...c.units] } : { ...c };
+  return 'units' in c ? { ...c, units: [...c.units] } : { ...c };
 }

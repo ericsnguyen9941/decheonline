@@ -1,8 +1,10 @@
 /**
  * One object's update in its owner's list (economy.md §3, combat.md §5): the `RGE_Static_Object` →
  * `RGE_Animated_Object` → `RGE_Action_Object` → `RGE_Combat_Object` chain. Dying, death animation, resource decay,
- * removal and the spawned dead object live here; actions are gather/hunt (`gather.ts`), a plain walk, or a missile.
+ * removal and the spawned dead object live here; actions are gather/hunt/build (`gather.ts`), a plain walk, or a
+ * missile. Buildings wrap the chain with construction and their production queue (`buildings.ts`).
  */
+import { emptyQueue, giveBuiltStorages, isBuilding, updateConstruction, updateQueue } from './buildings';
 import { updateMissile } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
@@ -10,6 +12,7 @@ import { deleteActions, updateWork } from './gather';
 import { ActionResult, endAction, updateMover } from './movement';
 import { add32, f32, mul32, sub32 } from './num';
 import { advanceSprite, isAnimating, newSprite } from './sprites';
+import { undoTech } from './techs';
 import { spriteInfo, unitType, type UnitType } from './units';
 
 /** Master types (`master_type`): 20 animated, 30 moving, 40 action, 50 combat, 60 missile, 70 unit, 80 building. */
@@ -33,18 +36,43 @@ export function giveStorages(attributes: number[], t: UnitType, sign: 1 | -1, fl
   }
 }
 
-/** `set_object_state` side effects the sim keeps: a unit starting to die returns its flag-2 storages. */
+/** The Tool, Bronze and Iron Age techs, undone with the last building of a kind (`src/t_b_obj.cpp:314-327`). */
+const AGE_TECHS = [101, 102, 103];
+
+/**
+ * `set_object_state` side effects the sim keeps: a unit starting to die returns its flag-2 storages. A built building
+ * going from active to dying also takes back its flag-4 storages; when the owner has no other active building of its
+ * kind, its tech and the age techs are undone (`TRIBE_Building_Object::set_object_state`, `src/t_b_obj.cpp:303-327`).
+ */
 function setObjectState(ctx: GameContext, e: Entity, state: number): void {
   if (e.state === state) return;
-  if (state >= ObjectState.Dying && e.state < ObjectState.Dying) giveStorages(ctx.attributes[e.owner]!, unitType(e.type), -1, [2]);
+  const t = unitType(e.type);
+  const lost = isBuilding(t) && state === ObjectState.Dying && e.state === ObjectState.Active;
+  if (lost) giveBuiltStorages(ctx, e, t, -1);
+  if (state >= ObjectState.Dying && e.state < ObjectState.Dying) giveStorages(ctx.attributes[e.owner]!, t, -1, [2]);
   e.state = state;
+  if (lost && !ctx.objectsOf(e.owner).some((o) => o.type === e.type && o.state === ObjectState.Active)) {
+    if (t.building!.techId > -1) undoTech(ctx, e.owner, t.building!.techId);
+    for (const id of AGE_TECHS) undoTech(ctx, e.owner, id);
+  }
 }
 
 /**
  * Update `e` for one step; true when it is ready to be removed (`update` returned non-zero, src/obj_list.cpp:226).
+ * A building (`TRIBE_Building_Object::update`, `src/t_b_obj.cpp:334-363`) runs its construction first, then the
+ * chain, then its production queue: dropped once it is no longer active, else advanced.
  */
 export function updateObject(ctx: GameContext, e: Entity): boolean {
   const t = unitType(e.type);
+  if (!isBuilding(t)) return updateChain(ctx, e, t);
+  updateConstruction(ctx, e, t);
+  const remove = updateChain(ctx, e, t);
+  if (e.state > ObjectState.Active) emptyQueue(e);
+  else updateQueue(ctx, e);
+  return remove;
+}
+
+function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   // `RGE_Combat_Object::update`: the reload timer runs first.
   if (e.attackTimer !== undefined && e.attackTimer > 0) {
     e.attackTimer = sub32(e.attackTimer, ctx.deltaSeconds);

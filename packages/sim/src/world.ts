@@ -1,6 +1,16 @@
-import { CommandQueue, type Command, type MoveCommand, type QueuedCommand, type WorkCommand } from './commands';
+import { build, cancelBuild, checkDestructables, checkPlacement, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
+import {
+  CommandQueue,
+  type BuildCommand,
+  type CancelCommand,
+  type Command,
+  type MoveCommand,
+  type QueueCommand,
+  type QueuedCommand,
+  type WorkCommand,
+} from './commands';
 import type { GameContext } from './context';
-import { EntityStore, type Entity } from './entities';
+import { EntityStore, ObjectState, type Entity } from './entities';
 import { orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
@@ -10,6 +20,7 @@ import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
+import { checkForNewTech, newTechStates, type MasterChange } from './techs';
 import { ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TOWN_CENTER, TREES, UNIT_TYPES, unitType, VILLAGER } from './units';
 
 /** Base time per step: the network frame granularity (src/com_spd.cpp:11-25). Never wall time. */
@@ -41,6 +52,8 @@ export interface WorldOptions {
   units?: readonly StartUnit[];
   /** "Path Finding" budget per search: 2500 low, 5000 medium, 7500 high (docs/spec/movement.md §3). */
   pathingIterations?: number;
+  /** The game's population limit (`pop_limit`, default 50), each player's attribute 32. */
+  populationLimit?: number;
 }
 
 export interface StartUnit {
@@ -66,6 +79,20 @@ export const ATTR_FOOD = 0;
 export const ATTR_WOOD = 1;
 export const ATTR_STONE = 2;
 export const ATTR_GOLD = 3;
+
+/** `RGE_Game_Info` default population limit. */
+export const DEFAULT_POPULATION_LIMIT = 50;
+/**
+ * Attributes `new_game` sets for every player but Gaia after the objects are placed (`src/tworld.cpp`, economy.md
+ * §6.4): 32 population limit (filled in from the options), 33 0, 30 building allowance 500, 45 1. They overwrite what
+ * the start techs gave (Stone Age adds 8 to attribute 30).
+ */
+const NEW_GAME_ATTRIBUTES: readonly (readonly [number, number])[] = [
+  [32, DEFAULT_POPULATION_LIMIT],
+  [33, 0],
+  [30, 500],
+  [45, 1],
+];
 
 /** Villagers each player starts with (the original's default start: 3 per player). */
 export const STARTING_VILLAGERS = 3;
@@ -115,7 +142,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 4;
+  version: 5;
   players: number;
   turn: number;
   worldTime: number;
@@ -134,9 +161,13 @@ export interface Snapshot {
   attributes: number[][];
   /** Each player's updated object list, by id, in update order. */
   awake: number[][];
+  /** Tech states, `[player][tech]`. */
+  techs: number[][];
+  /** Changed masters, `[player]` by unit id. */
+  masters: Record<number, MasterChange>[];
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in whole turns of fixed-size steps
@@ -169,6 +200,10 @@ export class World {
    * (src/obj_list.cpp:57). Sleeping objects (living trees) are not in it until damage wakes them.
    */
   awake: number[][];
+  /** Tech states per player (`Tech_Player_Tree`), `[player][tech]`. */
+  techs: number[][];
+  /** Each player's changes to the master objects (masters are per player in the original), by unit id. */
+  masters: Record<number, MasterChange>[];
   private queue = new CommandQueue();
   private readonly rng = new CrtRand();
 
@@ -181,16 +216,50 @@ export class World {
     this.awake = Array.from({ length: this.players }, () => []);
     this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) });
     this.pathing.iterations = options.pathingIterations ?? DEFAULT_PATHING_ITERATIONS;
+    // Player creation runs each tech tree's first `check_for_new_tech` (techs.md §3.7): the zero-time start techs
+    // complete, Gaia's too. The fog-of-war draw of player creation is not ported (no fog of war yet).
+    this.techs = Array.from({ length: this.players }, () => newTechStates());
+    this.masters = Array.from({ length: this.players }, () => ({}));
+    for (let p = 0; p < this.players; p++) checkForNewTech(this, p);
     if (options.units?.length) {
       // Game setup draws from the stored seed and stores a fresh one afterwards (docs/spec/core.md §4.2).
       this.rng.srand(this.randomSeed);
       for (const u of options.units) this.createUnit(u);
       this.randomSeed = this.rng.rand();
     }
+    for (let p = 1; p < this.players; p++) {
+      for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
+    }
   }
 
+  /**
+   * A start object (`build_all_the_way`): created, then a building clears what it stands on and is built at once
+   * (`build(10000)`, which completes it).
+   */
   createUnit({ owner, type, x, y }: StartUnit): Entity {
-    return this.createObject(owner, type, x, y, 0);
+    const e = this.createObject(owner, type, x, y, 0);
+    const t = unitType(type);
+    if (isBuilding(t)) {
+      const ctx = this.gameContext();
+      checkDestructables(ctx, t, e.x, e.y, (o) => this.destroyObject(o));
+      build(ctx, e, f32(10000));
+    }
+    return e;
+  }
+
+  /**
+   * `destroy_obj` (src/stat_obj.cpp): wake the object and mark it for removal. It stays on the obstruction map until it
+   * is removed.
+   */
+  private destroyObject(o: Entity): void {
+    if (o.state >= ObjectState.PendingRemoval) return;
+    this.wake(o);
+    o.state = ObjectState.PendingRemoval;
+  }
+
+  private wake(e: Entity): void {
+    const list = this.awake[e.owner]!;
+    if (!list.includes(e.id)) list.unshift(e.id);
   }
 
   /**
@@ -222,6 +291,7 @@ export class World {
     this.rng.srand(this.rng.rand());
     if (e.mover) initialFacing(e, e.mover, this.rng);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
+    if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));
     return e;
   }
 
@@ -235,12 +305,11 @@ export class World {
       deltaSeconds: this.deltaSeconds,
       attempts: 0,
       attributes: this.attributes,
+      techs: this.techs,
+      masters: this.masters,
       worldTime: this.worldTime,
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
-      wake: (e) => {
-        const list = this.awake[e.owner]!;
-        if (!list.includes(e.id)) list.unshift(e.id);
-      },
+      wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
     };
   }
@@ -309,6 +378,12 @@ export class World {
         return this.doCommandMove(player, command);
       case 'work':
         return this.doCommandWork(player, command);
+      case 'build':
+        return this.doCommandBuild(player, command);
+      case 'queue':
+        return this.doCommandQueue(command);
+      case 'cancel':
+        return this.doCommandCancel(command);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
@@ -403,6 +478,57 @@ export class World {
     });
   }
 
+  /**
+   * `TRIBE_Command::do_command_build` (economy.md §4.1): the foundation must fit (construction radius, objects that can
+   * be built on ignored) and be paid for; then it is created and each listed unit of the sender is ordered onto it.
+   */
+  private doCommandBuild(player: number, command: BuildCommand): void {
+    const t = UNIT_TYPES.get(command.unitType);
+    if (!t || !isBuilding(t) || !t.creatable) return;
+    const x = f32(command.x);
+    const y = f32(command.y);
+    const ctx = this.gameContext();
+    if (checkPlacement(ctx, t, x, y, true, true) !== 0) return;
+    if (!payObjCost(ctx, player, t.id, 1, false)) return;
+    const building = this.createObject(player, t.id, x, y, 0);
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e?.mover || e.owner !== player || e.state !== ObjectState.Active) continue;
+      e.mover.group = [];
+      orderWork(ctx, e, building, x, y);
+    }
+  }
+
+  /**
+   * `TRIBE_Command::do_command_queue` (economy.md §5.1): queue or unqueue units at a building. As in the original the
+   * building need not be the sender's; only buildings have a queue.
+   */
+  private doCommandQueue(command: QueueCommand): void {
+    const building = this.entities.get(command.building);
+    if (!building?.queue || building.state >= ObjectState.PendingRemoval || !UNIT_TYPES.has(command.unit)) return;
+    const ctx = this.gameContext();
+    if (command.count > 0) addToQueue(ctx, building, command.unit, command.count);
+    else removeFromQueue(ctx, building, command.unit, -command.count);
+  }
+
+  /**
+   * `TRIBE_Command::do_command_cancel_build` → `cancel_object`: a foundation is cancelled with a refund (economy.md
+   * §4.4), anything else of combat level or above is killed (`die_die_die`). As in the original the target need not be
+   * the sender's.
+   */
+  private doCommandCancel(command: CancelCommand): void {
+    const e = this.entities.get(command.target);
+    if (!e || !UNIT_TYPES.has(e.type) || e.state >= ObjectState.PendingRemoval) return;
+    const t = unitType(e.type);
+    if (t.masterType < 50) return;
+    const ctx = this.gameContext();
+    if (isBuilding(t) && e.state === ObjectState.Unbuilt) cancelBuild(ctx, e);
+    else {
+      this.wake(e);
+      e.hp = 0;
+    }
+  }
+
   /** 32-bit hash of the whole state; equal on every peer while they are in sync. */
   hash(): number {
     const h = new Hasher()
@@ -418,6 +544,8 @@ export class World {
     for (const e of this.entities.all()) hashValue(h, e);
     hashValue(h, this.attributes);
     hashValue(h, this.awake);
+    hashValue(h, this.techs);
+    hashValue(h, this.masters);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -432,13 +560,14 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
+      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel') hashValue(h, q.command);
     }
     return h.digest();
   }
 
   snapshot(): Snapshot {
     return {
-      version: 4,
+      version: 5,
       players: this.players,
       turn: this.turn,
       worldTime: this.worldTime,
@@ -454,11 +583,13 @@ export class World {
       obstruction: Array.from(this.pathing.cells),
       attributes: this.attributes.map((a) => [...a]),
       awake: this.awake.map((a) => [...a]),
+      techs: this.techs.map((a) => [...a]),
+      masters: copyMasters(this.masters),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 4) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 5) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -476,8 +607,14 @@ export class World {
     w.queue = CommandQueue.fromJSON(s.queue);
     w.attributes = s.attributes.map((a) => [...a]);
     w.awake = s.awake.map((a) => [...a]);
+    w.techs = s.techs.map((a) => [...a]);
+    w.masters = copyMasters(s.masters);
     return w;
   }
+}
+
+function copyMasters(masters: readonly Record<number, MasterChange>[]): Record<number, MasterChange>[] {
+  return masters.map((m) => Object.fromEntries(Object.entries(m).map(([id, c]) => [id, { ...c }])));
 }
 
 /**

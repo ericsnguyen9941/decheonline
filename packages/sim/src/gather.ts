@@ -3,6 +3,7 @@
  * `RGE_Action_Gather` (action 5) and `TRIBE_Action_Hunt` (action 110). Every float store is rounded to float32.
  * Only human players exist so far: the computer-player branches are not ported.
  */
+import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } from './build';
 import { distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
@@ -164,16 +165,25 @@ export function orderWork(ctx: GameContext, e: Entity, target: Entity | undefine
     }
   }
   const w = e.work;
-  if (w && task !== -1 && w.task === task && workRetarget(ctx, e, w, target, f32(x), f32(y))) return;
+  if (w && task !== -1 && w.task === task) {
+    if (w.type === ACTION_BUILD) return buildWork(ctx, e, w, target, x, y);
+    if (workRetarget(ctx, e, w, target, f32(x), f32(y))) return;
+  }
   const kind = task === -1 ? -1 : t.action!.tasks[task]!.actionType;
   deleteActions(e);
+  if (kind === ACTION_BUILD) {
+    const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x: f32(x), y: f32(y), z: 0 };
+    e.work = a;
+    buildFirstInStack(ctx, e, a);
+    return;
+  }
   if (kind === ACTION_GATHER || kind === ACTION_HUNT) {
     const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x: f32(x), y: f32(y), z: 0 };
     e.work = a;
     firstInStack(ctx, e, a);
     return;
   }
-  // No task, or one this port does not run yet (attack, build, ...): `move_to` the target or the point.
+  // No task, or one this port does not run yet (attack, repair, ...): `move_to` the target or the point.
   startMoveTo(e, target ?? null, f32(x), f32(y), 0, MOVE_RANGE, null, false, ctx.rng);
 }
 
@@ -184,6 +194,10 @@ export function orderWork(ctx: GameContext, e: Entity, target: Entity | undefine
 export function workMoveTo(ctx: GameContext, e: Entity, x: number, y: number): boolean {
   const a = e.work;
   if (!a) return false;
+  if (a.type === ACTION_BUILD) {
+    buildMoveTo(ctx, e, a, x, y);
+    return true;
+  }
   a.x = f32(x);
   a.y = f32(y);
   a.z = 0;
@@ -392,6 +406,7 @@ function updateSub(ctx: GameContext, e: Entity): ActionResult {
 export function updateWork(ctx: GameContext, e: Entity): ActionResult {
   const a = e.work;
   if (!a) return ActionResult.Remove;
+  if (a.type === ACTION_BUILD) return updateBuild(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   const live = (id: number) => {
     const o = object(ctx, id);

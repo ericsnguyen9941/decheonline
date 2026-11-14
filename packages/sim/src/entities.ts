@@ -1,3 +1,4 @@
+import type { QueueRecord, TrainAction } from './buildings';
 import type { AttackAction, MissileAction } from './combat';
 import type { WorkAction } from './gather';
 import { copyMover, type Mover } from './movement';
@@ -47,6 +48,14 @@ export interface Entity {
   attack?: AttackAction | null;
   /** A missile's flight action. */
   missile?: MissileAction | null;
+  /** Buildings: `build_pts`, float. */
+  buildPoints?: number;
+  /** Buildings: `facet`, the construction frame while unbuilt, then `building_facet`. */
+  facet?: number;
+  /** Buildings: the production queue (`production_queue`), one record per unit type, first trains first. */
+  queue?: QueueRecord[];
+  /** Buildings: the queue's train action (`production_queue_actions`), null when none. */
+  train?: TrainAction | null;
 }
 
 export type EntityInit = Pick<Entity, 'owner' | 'type' | 'x' | 'y' | 'z' | 'hp'> & Partial<Omit<Entity, 'id'>>;
@@ -123,5 +132,7 @@ function copyEntity(e: Entity): Entity {
   if (e.work) copy.work = { ...e.work };
   if (e.attack) copy.attack = { ...e.attack };
   if (e.missile) copy.missile = { ...e.missile };
+  if (e.queue) copy.queue = e.queue.map((r) => ({ ...r }));
+  if (e.train) copy.train = { ...e.train };
   return copy;
 }
