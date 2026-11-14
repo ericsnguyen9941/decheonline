@@ -3,9 +3,10 @@
 // buttons' messages (TRIBE_Screen_Game::set_button, calc_text_msg), the age, the top strip's buttons, refusals and the
 // attack rollover. Without strings the dat's names and English stand in for names and commands; the rest is left empty,
 // as `get_string` leaves it for an id it does not have.
-import { unitType, type CombatInfo, type Storage } from '@aoe/sim';
+import { master, TECHS, unitType, type CombatInfo, type Storage, type UnitType, type World } from '@aoe/sim';
 import type { AssetProvider } from '../assets';
 import type { CommandButton } from './commands';
+import { infoOf } from './records';
 
 /** `STRING_ID_CIVILIZATION_EGYPTIAN` .. : civilization `id` (1 Egyptian .. 12 Choson) is string `10230 + id`. */
 const STRING_CIVILIZATION_BASE = 10230;
@@ -19,6 +20,7 @@ const RESOURCE_FALLBACK = ['Food', 'Wood', 'Stone', 'Gold'] as const;
 /** `get_string2(RGE_STRING_TYPE_COMMAND)` for the commands that are not an item: the button's text and its message. */
 const STRING_COMMAND = {
   build: [4103, 'Build'],
+  stop: [4105, 'Stop'],
   'cancel-construction': [4120, 'Cancel construction'],
   more: [4112, 'More'],
   cancel: [4111, 'Cancel'],
@@ -26,6 +28,9 @@ const STRING_COMMAND = {
   group: [4108, 'Group'],
   ungroup: [4109, 'Ungroup'],
 } as const;
+/** `PLAYER_ATTRIBUTE_GOLD`, `_GOLD_REPLACEMENT`: with the latter at 1 or more gold covers a tech's other costs. */
+const ATTR_GOLD = 3;
+const ATTR_GOLD_REPLACEMENT = 29;
 /** `get_string2(RGE_STRING_TYPE_AGE, age)`: `STRING_ID_AGE_STONE` .. `_IRON` for ages 1-4 (tribegam.cpp:778). */
 const STRING_AGE_BASE = 4200;
 /** `STRING_ID_COMMAND_CHAT`, `_DIPLOMACY`, `_MENU`: the top strip's buttons (scr_game.cpp:252, tribegam.cpp:871). */
@@ -65,10 +70,20 @@ export interface StatRow {
   text: string;
 }
 
-/** `TRIBE_Panel_Object::get_string` with the panel's fallback: the dat's internal name when the id has no text. */
-export function objectName(provider: AssetProvider, unit: number): string {
-  const id = provider.unitInfo(unit)?.nameId ?? 0;
-  return (id >= 1 && provider.string(id)) || unitType(unit).name;
+/**
+ * `TRIBE_Panel_Object::get_string` with the panel's fallback: the dat's internal name when the id has no text. `t`, a
+ * player's master, names what it is a copy of.
+ */
+export function objectName(provider: AssetProvider, unit: number, t: UnitType = unitType(unit)): string {
+  const id = infoOf(provider, t)?.nameId ?? 0;
+  return (id >= 1 && provider.string(id)) || t.name;
+}
+
+/** A tech's name (`get_string_id`), else the dat's internal name. */
+export function techName(provider: AssetProvider, tech: number): string {
+  const info = provider.techInfo(tech);
+  const id = info?.nameId ?? 0;
+  return (id >= 1 && provider.string(id)) || info?.name || `Tech ${tech}`;
 }
 
 /** `get_string2(RGE_STRING_TYPE_CIVILIZATION, civ)`; empty when the pack has no strings. */
@@ -90,14 +105,14 @@ function current(c: CombatInfo): { attack: number; armor: number; pierceArmor: n
 }
 
 /**
- * The object panel's stat rows (tpnl_obj.cpp:256-300 for units, 440-451 for buildings), in order: attack for villagers
- * and soldiers, armour when above 0 (always for soldiers), pierce armour when above 0, range for soldiers past 0.99
- * tiles. A building shows attack and range when they are above 0, unless it is the player's own and busy (`busy`:
- * training, or not built yet), when its progress takes the panel.
+ * The object panel's stat rows (tpnl_obj.cpp:256-300 for units, 440-451 for buildings) of an object of master `t` (its
+ * owner's), in order: attack for villagers and soldiers, armour when above 0 (always for soldiers), pierce armour when
+ * above 0, range for soldiers past 0.99 tiles. A building shows attack and range when they are above 0, unless it is the
+ * player's own and busy (`busy`: training or researching, or not built yet), when its progress takes the panel.
  */
-export function statRows(provider: AssetProvider, unit: number, busy: boolean): StatRow[] {
-  const info = provider.unitInfo(unit);
-  const combat = info && unitType(unit).combat;
+export function statRows(provider: AssetProvider, t: UnitType, busy: boolean): StatRow[] {
+  const info = infoOf(provider, t);
+  const combat = info && t.combat;
   if (!info || !combat) return [];
   const [attack, armor, pierceArmor, range] = info.displayed;
   const cur = current(combat);
@@ -140,29 +155,69 @@ export function attackRollover(provider: AssetProvider, group: number): string {
   return provider.string(STRING_ATTACK[group] ?? STRING_ATTACK_DEFAULT) ?? '';
 }
 
-/** `calc_text_msg`: the item's text and what it costs, "Create Villager (C) (Food: 50)". */
-function itemMessage(provider: AssetProvider, unit: number, verb: string): string {
-  const id = provider.unitInfo(unit)?.creationId ?? 0;
-  const command = (id >= 1 && provider.string(id)) || `${verb} ${objectName(provider, unit)}`;
-  // `obj_cost`: the three build_inventory slots, each when paid (flag set) and food, wood, stone or gold; the second
-  // and third start with two spaces even after an empty first.
-  const costs = (unitType(unit).creatable?.costs ?? []).slice(0, 3);
-  const parts = costs.map((c: Storage, i) => {
-    if (c.flag === 0 || c.type < 0 || c.type > 3) return '';
-    const name = provider.string(STRING_RESOURCE[c.type]!) ?? RESOURCE_FALLBACK[c.type]!;
-    return `${i === 0 ? '' : '  '}${name}: ${Math.trunc(c.amount)}`;
+/**
+ * `calc_text_msg`: the item's text and what it costs, "Create Villager (C) (Food: 50)": each of the three slots that
+ * is food, wood, stone or gold (`[type, amount]`, type -1 none); the second and third start with two spaces even after
+ * an empty first.
+ */
+function costMessage(provider: AssetProvider, command: string, costs: readonly [number, number][]): string {
+  const parts = costs.map(([type, amount], i) => {
+    if (type < 0 || type > 3) return '';
+    const name = provider.string(STRING_RESOURCE[type]!) ?? RESOURCE_FALLBACK[type]!;
+    return `${i === 0 ? '' : '  '}${name}: ${Math.trunc(amount)}`;
   });
   const cost = parts.join('');
   return cost ? `${command} (${cost})` : command;
 }
 
+/** A unit's or building's message: its creation text and `obj_cost` (the player's master's paid slots). */
+function itemMessage(provider: AssetProvider, t: UnitType, verb: string): string {
+  const id = infoOf(provider, t)?.creationId ?? 0;
+  const command = (id >= 1 && provider.string(id)) || `${verb} ${objectName(provider, t.id, t)}`;
+  const costs = (t.creatable?.costs ?? []).slice(0, 3).map((c: Storage): [number, number] => (c.flag === 0 ? [-1, 0] : [c.type, c.amount]));
+  return costMessage(provider, command, costs);
+}
+
+/**
+ * `TRIBE_Player_Tech::tech_cost` (tech.cpp:296-371): each used slot's attribute and amount; with gold replacement, what
+ * the player is short of moves to the first gold or empty slot. A slot of 0 or less is empty.
+ */
+export function techCost(world: World, player: number, tech: number): [number, number][] {
+  const a = world.attributes[player]!;
+  const t = TECHS[tech]!;
+  const carry = a[ATTR_GOLD_REPLACEMENT]! >= 1;
+  let total = 0;
+  const slots = [0, 1, 2].map((i): [number, number] => {
+    const c = t.costs[i];
+    if (!c || c.flag === 0 || c.type < 0) return [-1, 0];
+    let cost = Math.trunc(c.amount);
+    const have = Math.trunc(a[c.type]!);
+    if (carry && a[c.type]! < cost) {
+      total += cost - have;
+      cost = have;
+    }
+    return [c.type, cost];
+  });
+  if (total > 0) {
+    const i = slots.findIndex(([type]) => type === ATTR_GOLD || type === -1);
+    if (i >= 0) slots[i] = [ATTR_GOLD, i === 2 ? total : slots[i]![1] + total];
+  }
+  return slots.map(([type, cost]) => (cost <= 0 ? [-1, 0] : [type, cost]));
+}
+
 /** What the message line shows over a command button (`set_button`'s `text_msg`, or the command's text). */
-export function commandMessage(provider: AssetProvider, b: CommandButton): string {
+export function commandMessage(provider: AssetProvider, b: CommandButton, world: World, player: number): string {
   switch (b.kind) {
     case 'place':
-      return itemMessage(provider, b.unit, 'Build');
+      return itemMessage(provider, master(world, player, b.unit), 'Build');
     case 'train':
-      return itemMessage(provider, b.unit, 'Create');
+      return itemMessage(provider, master(world, player, b.unit), 'Create');
+    case 'research': {
+      // The research text (`get_string_id2`) and `tech_cost`.
+      const id = provider.techInfo(b.tech)?.creationId ?? 0;
+      const command = (id >= 1 && provider.string(id)) || `Research ${techName(provider, b.tech)}`;
+      return costMessage(provider, command, techCost(world, player, b.tech));
+    }
     default: {
       const [id, fallback] = STRING_COMMAND[b.kind];
       return provider.string(id) ?? fallback;

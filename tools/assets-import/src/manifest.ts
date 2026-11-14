@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 6;
+export const PACK_VERSION = 7;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -81,6 +81,18 @@ export interface PackUnit {
   selectLevel: number;
 }
 
+export interface PackTech {
+  name: string;
+  /** `string_id`: the tech's name in the language strings; 0 or less: use `name`. */
+  nameId: number;
+  /** `string_id2`: the research button's text ("Research Tool Age (T)"). */
+  creationId: number;
+  /** `icon`: frame of the tech's button in btntech.shp (interface SLP 50729); -1 none. */
+  icon: number;
+  /** `button_location`: where its research button sits in the command grid (1-20); 0 none. */
+  button: number;
+}
+
 export interface PackManifest {
   version: number;
   /** Palette 50500 of interfac.drs: `{ rgb: number[768] }`. */
@@ -95,6 +107,8 @@ export interface PackManifest {
   terrains: Record<string, PackTerrain>;
   /** Keyed by unit id; the first playable civ's table (the sprites are shared across civs), Gaia's for the ids it lacks. */
   units: Record<string, PackUnit>;
+  /** Keyed by tech id: what the research buttons show (pack version 7). */
+  techs: Record<string, PackTech>;
   /** The game's text by string id: language.dll's string tables with languagex.dll's (Rise of Rome) over them. */
   strings: Record<string, string>;
 }

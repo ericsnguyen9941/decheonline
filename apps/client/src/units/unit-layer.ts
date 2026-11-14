@@ -1,5 +1,5 @@
 import { Graphics, Sprite, type Application, type Texture, type Ticker } from 'pixi.js';
-import { buildingFacet, checkPlacement, ObjectState, spriteInfo, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
 import { canBuild } from '../hud/commands';
@@ -319,7 +319,7 @@ export class UnitLayer {
         const at = this.drawnAt(t, now);
         Object.assign(t, { fromX: at.x, fromY: at.y, toX: e.x, toY: e.y, start: now, duration });
       }
-      const type = unitType(e.type);
+      const type = typeOf(world, e);
       const sliding = now - t.start < t.duration && (t.fromX !== t.toX || t.fromY !== t.toY);
       // The sim names the sprite; a unit still sliding after the sim stopped it keeps walking until it arrives.
       const slide = sliding && type.walking && e.sprite.graphic === type.standing.graphic;
@@ -396,7 +396,8 @@ export class UnitLayer {
       return;
     }
     const { world, view, player } = this.o;
-    const t = unitType(unit);
+    // The player's own master: its sprite follows the age (the Tool Age House).
+    const t = master(world, player, unit);
     const { camera } = view;
     const at = pixelToTileCoords(this.pointer.x + camera.x, this.pointer.y + camera.y, world.map.width);
     // `fixup_pick_info`: a point off the map is pulled onto its last tile.
@@ -454,7 +455,7 @@ export class UnitLayer {
       const t = this.tracks.get(id);
       const e = world.entities.get(id);
       if (!t?.sprite.visible || !e) continue;
-      const type = unitType(e.type);
+      const type = typeOf(world, e);
       const [rx, ry, rz] = provider.unitInfo(e.type)?.outline ?? [type.radiusX, type.radiusY, type.radiusZ];
       const at = this.drawnAt(t, now);
       const o = tileCoordsToPixel(at.x, at.y, world.map.width);

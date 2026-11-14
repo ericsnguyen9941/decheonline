@@ -1,12 +1,15 @@
-import { buildingFacet, checkObjCost, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { buildingFacet, checkObjCost, checkTechCost, master, TECHS, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import { paintFrame } from './frame-image';
 import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, type CommandButton, type CommandMode } from './commands';
 import { SLP } from './layout';
-import { commandMessage, objectName, shortMessage } from './text';
+import { infoOf } from './records';
+import { commandMessage, objectName, shortMessage, techName } from './text';
 
 /** An icon fills the slot inside its 2-pixel border (`TRIBE_Panel_Button::draw`, button type 0). */
 const ICON_SIZE = 50;
+/** button_border_a frames of a research button (`border_frame` 2, pressed 3); the others use 0 and 1. */
+const RESEARCH_BORDER = 2;
 /** How long a refusal stays on screen. */
 const MESSAGE_MS = 4000;
 /** `PLAYER_ATTRIBUTE_POPULATION`, `_POPULATION_HEADROOM` and `_POPULATION_LIMIT`. */
@@ -66,7 +69,9 @@ export class CommandPanel {
         this.cleanup.push(() => slot.removeEventListener(type, fn));
       };
       on('pointerdown', (e) => {
-        if (!this.buttons[i] || (e.button !== 0 && e.button !== 2)) return;
+        const b = this.buttons[i];
+        // A disabled button does not take the mouse (`TButtonPanel::set_disabled`).
+        if (!b || (b.kind === 'research' && b.disabled) || (e.button !== 0 && e.button !== 2)) return;
         this.pressed = i;
         this.render(true);
       });
@@ -134,7 +139,8 @@ export class CommandPanel {
       grouped,
       mode: this.mode,
       page: this.page,
-      buttonOf: (unit) => provider.unitInfo(unit)?.button ?? null,
+      buttonOf: (unit) => infoOf(provider, master(world, player, unit))?.button ?? null,
+      techButtonOf: (tech) => provider.techInfo(tech)?.button ?? null,
       levelOf: (unit) => provider.unitInfo(unit)?.level ?? null,
     });
     this.buttons = bySlot(buttons);
@@ -158,7 +164,7 @@ export class CommandPanel {
     const { message } = this.o;
     if (b) {
       clearTimeout(this.messageTimer);
-      message.textContent = commandMessage(this.o.provider, b);
+      message.textContent = commandMessage(this.o.provider, b, this.o.world, this.o.player);
       message.hidden = false;
       message.dataset.hover = 'true';
     } else if (message.dataset.hover) {
@@ -175,7 +181,11 @@ export class CommandPanel {
     slot.classList.toggle('down', down);
     slot.dataset.command = b?.kind ?? '';
     slot.dataset.unit = b && 'unit' in b ? String(b.unit) : '';
-    paintFrame(slot, b ? provider.interfaceFrame(SLP.buttonBorder + this.o.culture, down ? 1 : 0) : null);
+    slot.dataset.tech = b?.kind === 'research' ? String(b.tech) : '';
+    const disabled = b?.kind === 'research' && b.disabled;
+    slot.classList.toggle('disabled', disabled);
+    const border = (b?.kind === 'research' ? RESEARCH_BORDER : 0) + (down ? 1 : 0);
+    paintFrame(slot, b ? provider.interfaceFrame(SLP.buttonBorder + this.o.culture, border) : null);
     const art = b ? this.icon(b) : null;
     paintFrame(icon, art);
     icon.textContent = b && !art ? this.label(b) : '';
@@ -187,11 +197,14 @@ export class CommandPanel {
     const { provider, player, world, culture } = this.o;
     let frame: ImageFrame | null;
     if (b.kind === 'place') {
-      const info = provider.unitInfo(b.unit);
+      const info = infoOf(provider, master(world, player, b.unit));
       frame = info && info.icon >= 0 ? provider.interfaceFrame(SLP.buildingIcons + culture, buildingFacet(world, player, b.unit) + info.icon, player) : null;
     } else if (b.kind === 'train') {
-      const info = provider.unitInfo(b.unit);
+      const info = infoOf(provider, master(world, player, b.unit));
       frame = info && info.icon >= 0 ? provider.interfaceFrame(SLP.unitIcons, info.icon, player) : null;
+    } else if (b.kind === 'research') {
+      const info = provider.techInfo(b.tech);
+      frame = info && info.icon >= 0 ? provider.interfaceFrame(SLP.techIcons, info.icon, player) : null;
     } else {
       // Command pictures carry no colour table: their player-colour pixels stay the base (player 1) ramp.
       frame = provider.interfaceFrame(SLP.commands, COMMAND_FRAME[b.kind], 1);
@@ -201,7 +214,9 @@ export class CommandPanel {
 
   /** Text in place of a missing picture. */
   private label(b: CommandButton): string {
-    return b.kind === 'place' || b.kind === 'train' ? objectName(this.o.provider, b.unit) : commandMessage(this.o.provider, b);
+    const { provider, world, player } = this.o;
+    if (b.kind === 'place' || b.kind === 'train') return objectName(provider, b.unit, master(world, player, b.unit));
+    return b.kind === 'research' ? techName(provider, b.tech) : commandMessage(provider, b, world, player);
   }
 
   /** `do_button_action`. */
@@ -221,11 +236,21 @@ export class CommandPanel {
       case 'place':
         // `command_building`: placing starts only when the player can pay.
         if (checkObjCost(world.gameContext(), player, b.unit, 1, false)) this.o.startPlacement(b.unit);
-        else this.refuse(b.unit);
+        else this.refuse(master(world, player, b.unit).creatable?.costs ?? []);
         return;
       case 'train':
         // `command_train` with production queues: the sim pays, or refuses what the player cannot afford.
         issue({ type: 'queue', building: object.id, unit: b.unit, count: right ? -1 : 1 });
+        return;
+      case 'research':
+        // `command_research`: the selected building researches when the player can pay; else the shortfall's message.
+        if (b.disabled) return;
+        if (checkTechCost(world, player, b.tech)) issue({ type: 'research', building: object.id, tech: b.tech });
+        else this.refuse((TECHS[b.tech]?.costs ?? []).filter((c) => c.flag !== 0));
+        return;
+      case 'stop':
+        // `command_stop`.
+        issue({ type: 'stop', objects: [object.id] });
         return;
       case 'cancel-construction':
         issue({ type: 'cancel', target: object.id });
@@ -250,12 +275,13 @@ export class CommandPanel {
   }
 
   /**
-   * The message `command_building` shows when a cost cannot be paid: the attribute `check_obj_cost` stops at (the
-   * population limit when headroom is asked for and the population is at it, else the first cost that falls short).
+   * The message `command_building` (and `command_research`) shows when a cost cannot be paid: the attribute
+   * `check_obj_cost` (`check_tech_cost`) stops at (the population limit when headroom is asked for and the population is
+   * at it, else the first used cost that falls short).
    */
-  private refuse(unit: number): void {
+  private refuse(slots: readonly { type: number; amount: number }[]): void {
     const a = this.o.world.attributes[this.o.player]!;
-    const costs = (unitType(unit).creatable?.costs ?? []).filter((c) => c.type >= 0);
+    const costs = slots.filter((c) => c.type >= 0);
     let short = -1;
     for (const c of costs) {
       if (c.type === ATTR_HEADROOM && a[ATTR_POPULATION]! >= a[ATTR_POPULATION_LIMIT]!) short = ATTR_POPULATION_LIMIT;

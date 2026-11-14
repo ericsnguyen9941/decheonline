@@ -1,9 +1,16 @@
 import { expect, test } from 'vitest';
-import { BARRACKS, BUILDER, CLUBMAN, GRANARY, HOUSE, startingObjects, STORAGE_PIT, TOWN_CENTER, unitType, VILLAGER, World } from '@aoe/sim';
-import { buttonSlot, bySlot, canBuild, commandButtons, constructionProgress, itemsMadeAt, trainingStatus, type CommandContext } from './commands';
+import { BARRACKS, BUILDER, checkPlacement, CLUBMAN, GRANARY, HOUSE, master, ObjectState, startingObjects, STORAGE_PIT, TECH_DISABLED, TOOL_AGE, TOWN_CENTER, unitType, VILLAGER, World, type Entity } from '@aoe/sim';
+import { buttonSlot, bySlot, canBuild, commandButtons, constructionProgress, itemsMadeAt, researchStatus, techsAt, trainingStatus, type CommandContext } from './commands';
 
+// Archery Range, Stable, Bowman, Scout.
+const RANGE = 87;
+const STABLE = 101;
+const BOWMAN = 4;
+const SCOUT = 299;
 // `button_location` of these masters in data2/empires.dat (npm run dat:dump -- unit <id>).
-const BUTTONS: Record<number, number> = { [HOUSE]: 1, [BARRACKS]: 2, [GRANARY]: 3, [STORAGE_PIT]: 4, [TOWN_CENTER]: 14, [VILLAGER]: 1, [CLUBMAN]: 1 };
+const BUTTONS: Record<number, number> = { [HOUSE]: 1, [BARRACKS]: 2, [GRANARY]: 3, [STORAGE_PIT]: 4, [TOWN_CENTER]: 14, [VILLAGER]: 1, [CLUBMAN]: 1, [RANGE]: 6, [STABLE]: 7, [BOWMAN]: 1, [SCOUT]: 1 };
+// and of the Tool Age (npm run dat:dump -- tech 101).
+const TECH_BUTTONS: Record<number, number> = { [TOOL_AGE]: 6 };
 
 function game(): { world: World; context: (id: number, mode?: CommandContext['mode']) => CommandContext } {
   const world = new World({ players: 3, units: startingObjects(3) });
@@ -14,6 +21,7 @@ function game(): { world: World; context: (id: number, mode?: CommandContext['mo
     mode,
     page: 0,
     buttonOf: (unit: number) => BUTTONS[unit] ?? null,
+    techButtonOf: (tech: number) => TECH_BUTTONS[tech] ?? null,
   });
   return { world, context };
 }
@@ -57,18 +65,23 @@ test('a villager gets Build and Unselect; its build menu the start buildings at 
   expect(commandButtons(context(villager.id, 'place'))).toEqual([{ kind: 'cancel', slot: 11 }]);
 });
 
-test("a Town Center trains villagers; with a queue only the queued unit shows, with its count", () => {
+test("a Town Center trains villagers and shows the Tool Age disabled; with a queue only the queued unit and Stop", () => {
   const { world, context } = game();
   const tc = own(world, TOWN_CENTER);
   expect(commandButtons(context(tc.id))).toEqual([
     { kind: 'train', slot: 0, unit: VILLAGER, count: 0 },
+    { kind: 'research', slot: 6, tech: TOOL_AGE, disabled: true },
     { kind: 'unselect', slot: 11 },
   ]);
   world.addBatch(world.turn, 1, [{ type: 'queue', building: tc.id, unit: VILLAGER, count: 2 }]);
   while (tc.queue!.length === 0) world.runTurn();
-  expect(commandButtons(context(tc.id))[0]).toEqual({ kind: 'train', slot: 0, unit: VILLAGER, count: 2 });
+  expect(commandButtons(context(tc.id))).toEqual([
+    { kind: 'stop', slot: 6 },
+    { kind: 'train', slot: 0, unit: VILLAGER, count: 2 },
+    { kind: 'unselect', slot: 11 },
+  ]);
   while (!tc.train || tc.train.workDone === 0) world.runTurn();
-  const status = trainingStatus(tc)!;
+  const status = trainingStatus(world, tc)!;
   expect(status.unit).toBe(VILLAGER);
   expect(status.progress).toBe(Math.trunc((tc.train.workDone * 100) / unitType(VILLAGER).creatable!.trainTime));
 });
@@ -84,13 +97,13 @@ test("another player's object only gets Unselect; a foundation gets Cancel Const
     world.runTurn();
     house = own(world, HOUSE);
   }
-  expect(constructionProgress(house)).toBe(0);
+  expect(constructionProgress(world, house)).toBe(0);
   expect(commandButtons(context(house.id))).toEqual([
     { kind: 'cancel-construction', slot: 0 },
     { kind: 'unselect', slot: 11 },
   ]);
   house.buildPoints = 7;
-  expect(constructionProgress(house)).toBe(35);
+  expect(constructionProgress(world, house)).toBe(35);
 });
 
 test('without the dat button locations the list order fills the grid', () => {
@@ -124,4 +137,52 @@ test('several selected units get Group and Ungroup; one in a group Ungroup alone
     { kind: 'ungroup', slot: 7 },
     { kind: 'cancel', slot: 11 },
   ]);
+});
+
+/** Player 1's villagers build `type` on the first free spot around the Town Center; returns it once finished. */
+function finished(world: World, type: number) {
+  const tc = own(world, TOWN_CENTER);
+  const ctx = world.gameContext();
+  const t = master(world, 1, type);
+  let at: [number, number] | undefined;
+  for (let r = 3; !at && r < 12; r++)
+    for (let d = -r; !at && d <= r; d++)
+      for (const [dx, dy] of [[d, -r], [d, r], [-r, d], [r, d]] as const)
+        if (!at && checkPlacement(ctx, t, tc.x + dx, tc.y + dy, true, true) === 0) at = [tc.x + dx, tc.y + dy];
+  const villagers = [...world.entities.ofPlayer(1)].filter((e) => e.type === VILLAGER || e.type === BUILDER).map((e) => e.id);
+  world.addBatch(world.turn, 1, [{ type: 'build', units: villagers, unitType: type, x: at![0], y: at![1] }]);
+  let b: Entity | undefined;
+  for (let i = 0; i < 2000 && b?.state !== ObjectState.Active; i++) {
+    world.runTurn();
+    b = [...world.entities.ofPlayer(1)].find((e) => e.type === type);
+  }
+  expect(b?.state).toBe(ObjectState.Active);
+  return b!;
+}
+
+test('the Tool Age at the Town Center: available after two Stone Age buildings, researching shows Stop alone and the progress', () => {
+  const { world, context } = game();
+  const tc = own(world, TOWN_CENTER);
+  world.attributes[1]![0] = 1000;
+  world.attributes[1]![1] = 1000;
+  finished(world, BARRACKS);
+  finished(world, GRANARY);
+  expect(techsAt(world, 1, TOWN_CENTER)).toEqual([TOOL_AGE]);
+  expect(commandButtons(context(tc.id))).toContainEqual({ kind: 'research', slot: 6, tech: TOOL_AGE, disabled: false });
+  world.addBatch(world.turn, 1, [{ type: 'research', building: tc.id, tech: TOOL_AGE }]);
+  while (!tc.research) world.runTurn();
+  world.runTurn();
+  expect(commandButtons(context(tc.id))).toEqual([
+    { kind: 'stop', slot: 0 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+  const status = researchStatus(world, tc)!;
+  expect(status.tech).toBe(TOOL_AGE);
+  expect(status.progress).toBe(Math.trunc((world.researchDone[1]![TOOL_AGE]! * 100) / 120));
+  expect(status.progress).toBeGreaterThan(0);
+  while (world.attributes[1]![6] !== 2) world.runTurn();
+  // Tool Age: the villager's build menu holds the Archery Range and the Stable; no next age while the Bronze Age is locked.
+  expect(itemsMadeAt(world, 1, BUILDER)).toEqual(expect.arrayContaining([RANGE, STABLE]));
+  world.techs[1]![102] = TECH_DISABLED;
+  expect(commandButtons(context(tc.id)).some((b) => b.kind === 'research')).toBe(false);
 });

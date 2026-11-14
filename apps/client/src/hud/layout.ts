@@ -20,6 +20,8 @@ export const SLP = {
   wideMenuButton: 50747,
   /** `btncmd`: command icons. */
   commands: 50721,
+  /** `btntech`: research icons (`button_tech_pic`). */
+  techIcons: 50729,
   /** `btnunit`: unit icons, 50x50. */
   unitIcons: 50730,
   /** `btnbldg_<culture>`: building icons, 50x50. */

@@ -1,20 +1,19 @@
 import type { Application, Ticker } from 'pixi.js';
-import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, HOUSE, ObjectState, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, HOUSE, ObjectState, typeOf, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import { CommandPanel } from './command-panel';
-import { constructionProgress, trainingStatus } from './commands';
+import { constructionProgress, researchStatus, trainingStatus } from './commands';
 import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
+import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
 import { ageName, civilizationName, objectName, statRows, topButtonLabels } from './text';
 
 /** Frames in health.shp; the bar shows frame `count - count * hp / max`. */
 const HEALTH_FRAMES = 26;
-/** Egyptian: the game does not track a player's culture yet, and the sim's unit records are the first civ's. */
+/** Egyptian: the game does not track a player's culture yet. */
 const CULTURE = 0;
-/** Egyptians: every player's civilization until the lobby lets players pick one. */
-const CIVILIZATION = 1;
 /** Building icons live in a different SLP and are chosen by `master_type` 80 and over (the sim's `UnitType.masterType`). */
 const BUILDING = 80;
 /** A part of the top strip without icons or buttons (1024 art; the others are narrower but share the texture there). */
@@ -218,21 +217,28 @@ export class GameHud {
     const entity = primary === null ? undefined : world.entities.get(primary);
     const selected = [...selection.selected].flatMap((id) => world.entities.get(id) ?? []);
     this.commands.update(entity, selected, entity ? selection.isGrouped(entity.id) : false);
-    const type = entity && unitType(entity.type);
+    // The object's own master: its owner's copy, which ages and techs change (hit points, attack, name and icon).
+    const type = entity && typeOf(world, entity);
     const rows = entity ? this.rows(entity) : [];
-    const key = entity ? `${entity.id}:${entity.type}:${entity.owner}:${Math.floor(entity.hp)}:${JSON.stringify(rows)}` : '';
+    const facet = type?.building?.facet ?? 0;
+    const key = entity
+      ? `${entity.id}:${entity.type}:${entity.owner}:${Math.floor(entity.hp)}:${type!.hitPoints}:${type!.name}:${facet}:${JSON.stringify(rows)}`
+      : '';
     if (key === this.shown) return;
     this.shown = key;
     this.object.hidden = !entity;
     if (!entity || !type) return;
     const { provider } = this.o;
     // Gaia's objects have no owner line; a player's shows the civilization (the scenario's player name in a campaign).
-    this.objectCiv.textContent = entity.owner !== 0 ? civilizationName(provider, CIVILIZATION) : '';
-    this.objectName.textContent = objectName(provider, entity.type);
-    const info = provider.unitInfo(entity.type);
+    this.objectCiv.textContent = entity.owner !== 0 ? civilizationName(provider, world.civs[entity.owner]!) : '';
+    this.objectName.textContent = objectName(provider, entity.type, type);
+    const info = infoOf(provider, type);
     const building = type.masterType >= BUILDING;
+    // A building's picture is its master's `button_pict + building_facet` (tpnl_obj.cpp:180-185): the age's.
     const icon: ImageFrame | null =
-      info && info.icon >= 0 ? provider.interfaceFrame(building ? SLP.buildingIcons + CULTURE : SLP.unitIcons, info.icon, entity.owner) : null;
+      info && info.icon >= 0
+        ? provider.interfaceFrame(building ? SLP.buildingIcons + CULTURE : SLP.unitIcons, info.icon + (building ? facet : 0), entity.owner)
+        : null;
     paintFrame(this.objectIcon, icon);
     const hp = Math.max(0, Math.floor(entity.hp));
     const showHp = entity.hp > 0 && type.hitPoints > 0;
@@ -258,8 +264,9 @@ export class GameHud {
    */
   private rows(e: Entity): PanelRow[] {
     const item = this.itemRow(e);
-    const busy = e.state === ObjectState.Unbuilt || (e.owner === this.o.player && trainingStatus(e) !== null);
-    const rows: PanelRow[] = statRows(this.o.provider, e.type, busy);
+    const { world, player } = this.o;
+    const busy = e.state === ObjectState.Unbuilt || (e.owner === player && (researchStatus(world, e) ?? trainingStatus(world, e)) !== null);
+    const rows: PanelRow[] = statRows(this.o.provider, typeOf(world, e), busy);
     if (item) rows.push({ kind: 'item', ...item });
     const held = this.heldRow(e);
     if (held) rows.push({ kind: 'held', ...held });
@@ -281,14 +288,16 @@ export class GameHud {
   }
 
   /**
-   * The first row of the object panel for an own building (tpnl_obj.cpp:430-480): construction or training progress
-   * in percent, or for a House the population over the room the houses give (capped by the population limit).
+   * The first row of the object panel for an own building (tpnl_obj.cpp:430-480): construction, research or training
+   * progress in percent, or for a House the population over the room the houses give (capped by the population limit).
    */
   private itemRow(e: Entity): { icon: number; text: string } | null {
-    if (e.owner !== this.o.player || unitType(e.type).masterType < BUILDING) return null;
-    if (e.state === ObjectState.Unbuilt) return { icon: ITEM_PROGRESS, text: `${constructionProgress(e)}%` };
-    const training = trainingStatus(e);
-    if (training) return { icon: ITEM_PROGRESS, text: `${training.progress}%` };
+    const { world } = this.o;
+    if (e.owner !== this.o.player || typeOf(world, e).masterType < BUILDING) return null;
+    if (e.state === ObjectState.Unbuilt) return { icon: ITEM_PROGRESS, text: `${constructionProgress(world, e)}%` };
+    // `work_status`: the building's action, a research or the unit in training, else the queue's first unit.
+    const work = researchStatus(world, e) ?? trainingStatus(world, e);
+    if (work) return { icon: ITEM_PROGRESS, text: `${work.progress}%` };
     if (e.type !== HOUSE) return null;
     const a = this.o.world.attributes[this.o.player]!;
     const population = Math.trunc(a[ATTR_POPULATION]!);

@@ -44,6 +44,10 @@ export class DebugProvider implements AssetProvider {
     return null;
   }
 
+  techInfo(): null {
+    return null;
+  }
+
   string(): null {
     return null;
   }

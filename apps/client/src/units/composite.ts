@@ -5,6 +5,13 @@ import { facingFrame } from './facing';
 /** `RGE_Sprite::draw` draws a part whose `draw_level` is at most this at the object's shadow point. */
 export const GROUND_LAYER = 10;
 
+/**
+ * A part whose hotspot is beyond this many pixels draws far off the screen in the original (`shape_draw` puts it at
+ * `x - hotspot`): the Barracks' part 14 (Barrack1c, SLP 229) has a 3x3 frame with hotspots near -2^31. Baking it would
+ * stretch the texture over the whole map, so it is left out.
+ */
+const OFF_SCREEN = 1 << 16;
+
 /** Which parts to bake: all of them, the ones drawn at the object (`air`), or the ones drawn on the ground. */
 export type PartSet = 'all' | 'air' | 'ground';
 
@@ -49,7 +56,7 @@ export async function composeGraphic(
         const partFacet = Math.trunc((part.angleCount * facet) / info.angleCount);
         const pick = facingFrame(partFacet, frame % Math.max(part.frameCount, 1), part.angleCount, part.frameCount, part.mirroringMode);
         const f = frames[pick.index];
-        if (!f) continue;
+        if (!f || Math.abs(f.hotspotX) > OFF_SCREEN || Math.abs(f.hotspotY) > OFF_SCREEN) continue;
         const s = new Sprite(f.texture);
         s.scale.x = pick.flipped ? -1 : 1;
         s.position.set(pick.flipped ? delta.offsetX + f.hotspotX : delta.offsetX - f.hotspotX, delta.offsetY - f.hotspotY);

@@ -1,12 +1,12 @@
 import type { Application } from 'pixi.js';
-import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { Lockstep, showEndDialog } from './lockstep';
 import { FrameClock } from './lockstep/frame-clock';
 import { LobbyView, Session } from './lobby';
 import { exposeMapDebug, MapView } from './map';
 import { tileCoordsToPixel } from './map/iso';
-import { constructionProgress, trainingStatus } from './hud/commands';
+import { constructionProgress, researchStatus, trainingStatus } from './hud/commands';
 import { GameHud } from './hud/game-hud';
 import { resourcesOf, type Resources } from './hud/resource-bar';
 import { connect } from './net/link';
@@ -57,6 +57,10 @@ export interface NetDebug {
   net(): DebugNet;
   /** Hold every pong this long, faking a slow link to the server. */
   delayPongs(ms: number): void;
+  /** Current age of `player` (default: this client's): 1 Stone .. 4 Iron (attribute 6). */
+  age(player?: number): number;
+  /** State of tech `tech` for `player` (default: this client's): -1 disabled, 0 locked, 1 available, 2 researching, 3 done. */
+  techState(tech: number, player?: number): number;
 }
 
 export interface DebugNet {
@@ -95,6 +99,8 @@ export interface DebugBuilding {
   graphic: number;
   facet: number;
   queue: DebugQueue;
+  /** The research under way and its whole percent; null when none. */
+  research: { tech: number; progress: number } | null;
 }
 
 export interface DebugObject {
@@ -136,12 +142,20 @@ export interface MultiplayerOptions {
   debug: boolean;
   /** Lockstep pace multiplier; 1 is the original's speed. */
   speed: number;
+  /**
+   * Debug only (`?debug=net&resources=N`): every player starts with N food, wood, gold and stone. Both clients must ask
+   * for the same N, or their games differ from the first turn.
+   */
+  resources?: number;
   /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
   setGameVisible(visible: boolean): void;
 }
 
+/** `PLAYER_ATTRIBUTE_CURRENT_AGE`. */
+const ATTR_CURRENT_AGE = 6;
+
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -183,6 +197,10 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       frameMs: () => frames.average(),
     });
     lockstep = game;
+    // Before the first turn runs: the relay releases turns asynchronously.
+    if (debug && resources !== undefined) {
+      for (const a of game.world.attributes.slice(1)) for (const r of [ATTR_FOOD, ATTR_WOOD, ATTR_GOLD, ATTR_STONE]) a[r] = resources;
+    }
     setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
     game.onEnded = () => end('peer-left', 'Your opponent left the game.');
@@ -308,15 +326,18 @@ function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: ()
         y: e.y,
         state: e.state,
         hp: e.hp,
-        progress: constructionProgress(e),
+        progress: constructionProgress(game.world, e),
         graphic: e.sprite?.graphic ?? -1,
         facet: e.facet ?? 0,
         queue: queueOf(game.world, e.id)!,
+        research: researchStatus(game.world, e),
       })),
     queue: (id) => queueOf(game.world, id),
     ghost: () => layer()?.ghost ?? null,
     net,
     delayPongs: (ms) => (game.pongDelayMs = ms),
+    age: (p = player) => game.world.attributes[p]![ATTR_CURRENT_AGE]!,
+    techState: (tech, p = player) => game.world.techs[p]![tech]!,
   };
   return panel;
 }
@@ -324,5 +345,5 @@ function debugPanel(host: HTMLElement, game: Lockstep, player: number, layer: ()
 function queueOf(world: World, id: number): DebugQueue | null {
   const e = world.entities.get(id);
   if (!e || !isBuildingObject(e)) return null;
-  return { records: (e.queue ?? []).map((r) => ({ unit: r.unit, count: r.count })), training: trainingStatus(e) };
+  return { records: (e.queue ?? []).map((r) => ({ unit: r.unit, count: r.count })), training: trainingStatus(world, e) };
 }

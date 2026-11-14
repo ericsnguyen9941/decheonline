@@ -148,6 +148,7 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
     graphics: {},
     terrains: {},
     units: {},
+    techs: {},
     strings: Object.fromEntries(strings),
   };
   dat.graphics.forEach((g, id) => {
@@ -189,5 +190,8 @@ function buildManifest(dat: DatFile, slps: Record<string, PackSlp>, strings: Map
       };
     }
   }));
+  dat.techs.forEach((t, id) => {
+    manifest.techs[id] = { name: t.name, nameId: t.languageDllName, creationId: t.languageDllDescription, icon: t.iconId, button: t.buttonId };
+  });
   return manifest;
 }

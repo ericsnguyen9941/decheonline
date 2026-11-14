@@ -366,6 +366,11 @@ dialog h2 {
   left: 3px;
   top: 3px;
 }
+/* A disabled button's picture draws every other pixel in a checkerboard (`fog_next_shape` with the 0xFF00FF shadowing
+   mask, tpnl_btn.cpp:187). */
+.hud-slot.disabled .hud-slot-icon {
+  mask: conic-gradient(#000 25%, transparent 0 50%, #000 0 75%, transparent 0) 0 0 / 2px 2px;
+}
 .hud-slot-count {
   left: 3px;
   top: 2px;

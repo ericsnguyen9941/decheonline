@@ -1,9 +1,9 @@
 import { expect, test } from 'vitest';
-import { CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from '@aoe/sim';
+import { CLUBMAN, HOUSE, startingObjects, TOOL_AGE, TOWN_CENTER, unitType, VILLAGER, World } from '@aoe/sim';
 import type { AssetProvider, UnitInfo } from '../assets';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ageName, attackRollover, civilizationName, commandMessage, objectName, shortMessage, statRows, topButtonLabels } from './text';
+import { ageName, attackRollover, civilizationName, commandMessage, objectName, shortMessage, statRows, techCost, techName, topButtonLabels } from './text';
 
 // Name and creation ids, interface kind and displayed values of these masters in data2/empires.dat (npm run dat:dump).
 const UNITS: Record<number, Pick<UnitInfo, 'nameId' | 'creationId' | 'level' | 'displayed'>> = {
@@ -22,6 +22,7 @@ const STRINGS: Record<number, string> = {
   4301: 'Food',
   4302: 'Wood',
   4103: 'Build (B)',
+  4105: 'Stop (S)',
   4106: 'Unselect (ESC)',
   4108: 'Group (G)',
   4201: 'Stone Age',
@@ -35,6 +36,8 @@ const STRINGS: Record<number, string> = {
   3046: 'You have reached your population limit.',
   3701: 'Click to attack this unit.',
   3702: 'Click to attack this building.',
+  7063: 'Tool Age',
+  8063: 'Advance to Tool Age: Requires 2 Stone Age buildings',
 };
 
 function provider(strings: Record<number, string> = STRINGS): AssetProvider {
@@ -43,6 +46,8 @@ function provider(strings: Record<number, string> = STRINGS): AssetProvider {
       const u = UNITS[id];
       return u ? { icon: 0, hitPoints: 1, button: 0, outline: [0, 0, 0], ...u } : null;
     },
+    // Tool Age in data2/empires.dat.
+    techInfo: (id: number) => (id === TOOL_AGE ? { name: 'Tool Age', nameId: 7063, creationId: 8063, icon: 65, button: 6 } : null),
     string: (id: number) => strings[id] ?? null,
   } as AssetProvider;
 }
@@ -61,29 +66,49 @@ test('civilization names: 10230 + civ, Rise of Rome civs out of order, nothing w
   expect(civilizationName(provider({}), 1)).toBe('');
 });
 
+const world = new World({ players: 3, units: startingObjects(3) });
+
 test('a villager shows its attack; a soldier its attack and armour; a plain building nothing', () => {
-  expect(statRows(provider(), VILLAGER, false)).toEqual([{ kind: 'attack', icon: 7, text: '3' }]);
-  expect(statRows(provider(), CLUBMAN, false)).toEqual([
+  expect(statRows(provider(), unitType(VILLAGER), false)).toEqual([{ kind: 'attack', icon: 7, text: '3' }]);
+  expect(statRows(provider(), unitType(CLUBMAN), false)).toEqual([
     { kind: 'attack', icon: 7, text: '3' },
     { kind: 'armor', icon: 8, text: '0' },
   ]);
-  expect(statRows(provider(), TOWN_CENTER, false)).toEqual([]);
-  expect(statRows(provider({}), 99999, false)).toEqual([]);
+  expect(statRows(provider(), unitType(TOWN_CENTER), false)).toEqual([]);
+  expect(statRows(provider({}), { ...unitType(VILLAGER), id: 99999 }, false)).toEqual([]);
 });
 
 test('a current value above the displayed one shows as base+bonus', () => {
   const p = provider();
   const weak = { ...p, unitInfo: (id: number) => ({ ...p.unitInfo(id)!, displayed: [1, 0, 0, 0] as [number, number, number, number] }) };
-  expect(statRows(weak, VILLAGER, false)[0]?.text).toBe('1+2');
+  expect(statRows(weak, unitType(VILLAGER), false)[0]?.text).toBe('1+2');
 });
 
 test('train and build messages carry the cost; commands their text', () => {
-  expect(commandMessage(provider(), { kind: 'train', slot: 0, unit: VILLAGER, count: 0 })).toBe('Create Villager (C) (Food: 50)');
-  expect(commandMessage(provider(), { kind: 'place', slot: 0, unit: HOUSE })).toBe('Build House (E) (Wood: 30)');
-  expect(commandMessage(provider(), { kind: 'build', slot: 0 })).toBe('Build (B)');
-  expect(commandMessage(provider(), { kind: 'unselect', slot: 11 })).toBe('Unselect (ESC)');
-  expect(commandMessage(provider({}), { kind: 'train', slot: 0, unit: VILLAGER, count: 0 })).toBe('Create Man (Food: 50)');
-  expect(commandMessage(provider({}), { kind: 'cancel', slot: 11 })).toBe('Cancel');
+  expect(commandMessage(provider(), { kind: 'train', slot: 0, unit: VILLAGER, count: 0 }, world, 1)).toBe('Create Villager (C) (Food: 50)');
+  expect(commandMessage(provider(), { kind: 'place', slot: 0, unit: HOUSE }, world, 1)).toBe('Build House (E) (Wood: 30)');
+  expect(commandMessage(provider(), { kind: 'build', slot: 0 }, world, 1)).toBe('Build (B)');
+  expect(commandMessage(provider(), { kind: 'unselect', slot: 11 }, world, 1)).toBe('Unselect (ESC)');
+  expect(commandMessage(provider({}), { kind: 'train', slot: 0, unit: VILLAGER, count: 0 }, world, 1)).toBe('Create Man (Food: 50)');
+  expect(commandMessage(provider({}), { kind: 'cancel', slot: 11 }, world, 1)).toBe('Cancel');
+  expect(commandMessage(provider(), { kind: 'stop', slot: 0 }, world, 1)).toBe('Stop (S)');
+});
+
+test("research messages: the tech's research text and tech_cost; without strings the dat name", () => {
+  const research = { kind: 'research', slot: 6, tech: TOOL_AGE, disabled: false } as const;
+  expect(commandMessage(provider(), research, world, 1)).toBe('Advance to Tool Age: Requires 2 Stone Age buildings (Food: 500)');
+  expect(commandMessage(provider({}), research, world, 1)).toBe('Research Tool Age (Food: 500)');
+  expect(techName(provider(), TOOL_AGE)).toBe('Tool Age');
+  expect(techName(provider({}), 5)).toBe('Tech 5');
+});
+
+test('tech_cost: with gold replacement the shortfall moves to the first gold or empty slot', () => {
+  const w = new World({ players: 2, units: startingObjects(2) });
+  expect(techCost(w, 1, TOOL_AGE)).toEqual([[0, 500], [-1, 0], [-1, 0]]);
+  const a = w.attributes[1]!;
+  a[29] = 1;
+  a[0] = 300;
+  expect(techCost(w, 1, TOOL_AGE)).toEqual([[0, 300], [3, 200], [-1, 0]]);
 });
 
 test('age, top buttons, refusals and the attack rollover come from the strings, and are empty without them', () => {
@@ -102,7 +127,7 @@ test('age, top buttons, refusals and the attack rollover come from the strings, 
   expect(ageName(provider({}), 1)).toBe('');
   expect(topButtonLabels(provider({}))).toEqual(['', '', '']);
   expect(shortMessage(provider({}), 0)).toBe('');
-  expect(commandMessage(provider(), { kind: 'group', slot: 6 })).toBe('Group (G)');
+  expect(commandMessage(provider(), { kind: 'group', slot: 6 }, world, 1)).toBe('Group (G)');
 });
 
 test('the HUD code holds no English text for the age, the top buttons or the refusals', () => {

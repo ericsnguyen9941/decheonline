@@ -29,7 +29,7 @@ export const SYNTHETIC = {
   /** Overridden by data2/Interfac.drs with a single frame. */
   overriddenInterfaceSlp: 50741,
   /** language.dll's strings; languagex.dll replaces `overriddenString`. */
-  strings: { 10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)' },
+  strings: { 10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age' },
   overriddenString: [5131, 'Villager'],
 } as const;
 

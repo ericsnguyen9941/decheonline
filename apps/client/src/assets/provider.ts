@@ -64,6 +64,20 @@ export interface UnitInfo {
   selectLevel: number;
 }
 
+/** What the research buttons read about a tech from the dat. */
+export interface TechInfo {
+  /** The dat's internal name. */
+  name: string;
+  /** `string_id`: the name in the language strings; 0 or less, none. */
+  nameId: number;
+  /** `string_id2`: the research button's text. */
+  creationId: number;
+  /** `icon`: frame of the tech's button in btntech; -1 none. */
+  icon: number;
+  /** `button_location` in the command grid (1-20); 0 none. */
+  button: number;
+}
+
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */
 export interface AssetProvider {
   readonly kind: 'pack' | 'debug';
@@ -79,6 +93,8 @@ export interface AssetProvider {
   interfaceFrame(slp: number, frame: number, owner?: number): ImageFrame | null;
   /** Dat numbers of a unit type (the first playable civ's record); null when unknown. */
   unitInfo(unitId: number): UnitInfo | null;
+  /** Dat numbers of a tech; null when unknown. */
+  techInfo(techId: number): TechInfo | null;
   /** Text of a language string id (language.dll, languagex.dll over it); null when the pack has none. */
   string(id: number): string | null;
   /** Flat-tile variants of a terrain: a `rows` x `cols` grid at the start of its frames (RGE_View::get_tile_picture). */

@@ -40,6 +40,11 @@ test('imports interface slps, a data2 Interfac.drs overriding the base one, and 
   expect(unit.displayed).toHaveLength(4);
 });
 
+test("imports each tech's name and research button ids, icon and button location", () => {
+  expect(manifest.techs[0]).toEqual({ name: 'Tool Age', nameId: 7000, creationId: 8000, icon: 1, button: 1 });
+  expect(Object.keys(manifest.techs)).toHaveLength(2);
+});
+
 test("imports language.dll's strings with languagex.dll's over them", () => {
   const [id, text] = SYNTHETIC.overriddenString;
   expect(manifest.strings).toEqual({ ...SYNTHETIC.strings, [id]: text });

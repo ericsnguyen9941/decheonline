@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
 import { slpImagePath, slpKey, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
-import type { AssetProvider, GraphicInfo, ImageFrame, SpriteFrame, UnitInfo } from './provider';
+import type { AssetProvider, GraphicInfo, ImageFrame, SpriteFrame, TechInfo, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -62,6 +62,11 @@ class PackProvider implements AssetProvider {
     return u
       ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline, nameId: u.nameId, creationId: u.creationId, level: u.level, displayed: u.displayed, selectLevel: u.selectLevel }
       : null;
+  }
+
+  techInfo(techId: number): TechInfo | null {
+    const t = this.manifest.techs[techId];
+    return t ? { name: t.name, nameId: t.nameId, creationId: t.creationId, icon: t.icon, button: t.button } : null;
   }
 
   string(id: number): string | null {

@@ -41,11 +41,14 @@ interface Window {
       graphic: number;
       facet: number;
       queue: { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null };
+      research: { tech: number; progress: number } | null;
     }[];
     queue(id: number): { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null } | null;
     ghost(): { unit: number; x: number; y: number; fits: boolean } | null;
     net(): { granularity: number; frames: number; frameMs: number; rtt: number[] };
     delayPongs(ms: number): void;
+    age(player?: number): number;
+    techState(tech: number, player?: number): number;
   };
 }
 
