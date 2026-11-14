@@ -18,7 +18,7 @@ Packages are consumed as TypeScript source (`exports` -> `src/index.ts`); there 
 - `npm run build`: client and server bundles.
 - `npm run check`: tracked-file guard, ESLint, typecheck, unit tests. Run before every commit.
 - `npm test`: unit tests (Vitest) in every workspace; one workspace: `npm test -w @aoe/sim`.
-- `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`. `npm run test:e2e -- determinism`: one sim replay hashed in Node, Chromium, Firefox and WebKit. `e2e/tests/latency.spec.ts` (wall-clock click-to-action, RTT change) is its own project that runs after the rest; alone: `npm run test:e2e -- latency --no-deps`.
+- `npm run test:e2e`: Playwright; starts its own `npm run dev` on `:5273` / `:8887`. `npm run test:e2e -- determinism`: one sim replay hashed in Node, Chromium, Firefox and WebKit. `e2e/tests/latency.spec.ts` (wall-clock click-to-action, RTT change) is its own project that runs after the rest; alone: `cd e2e && npx playwright test --project latency --no-deps` (npm eats the flags, and a `latency` file filter also matches this repo's worktree paths).
 - `AOE1_DIR=<install> npm run assets:import`: build the pack (~8 s, ~100 MB). Then `AOE1_DIR=<install> npm run test:e2e:real -w @aoe/e2e` (local-only screenshot to `assets-local/screenshots/`).
 - `AOE1_DIR=<install> npm run test:golden`: tests against real game files (skipped without `AOE1_DIR`); `@aoe/data` parses `data2/empires.dat` to its last byte.
 - `AOE1_DIR=<install> npm run dat:dump -- unit 83`: print a record from `data2/empires.dat` (`unit|tech|graphic|terrain|effect|civ <id>`, `summary`; no vitest).
