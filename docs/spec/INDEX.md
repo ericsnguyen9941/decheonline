@@ -36,6 +36,8 @@ Spec: [core.md](core.md).
 
 ## Commands, turns, lockstep, sync
 
+Turn length, latency and speed retuning: [turn-timing.md](turn-timing.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/com_hand.cpp` | 136/3/7/0 | `TCommunications_Handler::DoCycle` :453 [D], `NewCommand` :399 [M], `get_command` :385 [M], `AddCommand` :379 [M], `CommOut` (stamps execute-turn, :2810) [D], `ExecuteIncoming` :2106 [M] | core.md §2 |
