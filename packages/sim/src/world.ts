@@ -381,9 +381,9 @@ export class World {
       case 'build':
         return this.doCommandBuild(player, command);
       case 'queue':
-        return this.doCommandQueue(command);
+        return this.doCommandQueue(player, command);
       case 'cancel':
-        return this.doCommandCancel(command);
+        return this.doCommandCancel(player, command);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
@@ -500,12 +500,13 @@ export class World {
   }
 
   /**
-   * `TRIBE_Command::do_command_queue` (economy.md §5.1): queue or unqueue units at a building. As in the original the
-   * building need not be the sender's; only buildings have a queue.
+   * `TRIBE_Command::do_command_queue` (economy.md §5.1): queue or unqueue units at a building. Only buildings have a
+   * queue. Port-side guard (economy.md §5.5): the original accepts another player's building, this ignores it; the
+   * command's `rand()` was already drawn in `execute`, so determinism is the same as for an accepted command.
    */
-  private doCommandQueue(command: QueueCommand): void {
+  private doCommandQueue(player: number, command: QueueCommand): void {
     const building = this.entities.get(command.building);
-    if (!building?.queue || building.state >= ObjectState.PendingRemoval || !UNIT_TYPES.has(command.unit)) return;
+    if (!building?.queue || building.owner !== player || building.state >= ObjectState.PendingRemoval || !UNIT_TYPES.has(command.unit)) return;
     const ctx = this.gameContext();
     if (command.count > 0) addToQueue(ctx, building, command.unit, command.count);
     else removeFromQueue(ctx, building, command.unit, -command.count);
@@ -513,12 +514,12 @@ export class World {
 
   /**
    * `TRIBE_Command::do_command_cancel_build` → `cancel_object`: a foundation is cancelled with a refund (economy.md
-   * §4.4), anything else of combat level or above is killed (`die_die_die`). As in the original the target need not be
-   * the sender's.
+   * §4.4), anything else of combat level or above is killed (`die_die_die`). Port-side guard (economy.md §5.5): a target
+   * the sender does not own is ignored, the original accepts it.
    */
-  private doCommandCancel(command: CancelCommand): void {
+  private doCommandCancel(player: number, command: CancelCommand): void {
     const e = this.entities.get(command.target);
-    if (!e || !UNIT_TYPES.has(e.type) || e.state >= ObjectState.PendingRemoval) return;
+    if (!e || e.owner !== player || !UNIT_TYPES.has(e.type) || e.state >= ObjectState.PendingRemoval) return;
     const t = unitType(e.type);
     if (t.masterType < 50) return;
     const ctx = this.gameContext();

@@ -231,6 +231,44 @@ describe('construction and training through commands', () => {
     expect(attributes[ATTR_FOOD]).toBe(750);
   });
 
+  test('queue and cancel aimed at another player\'s object are ignored but draw their rand() like a noop (economy.md §5.5)', () => {
+    /** Player 1's base plus a foundation of player 1's; player 2 sends `command` in the first turn, the rest idle. */
+    function run(command: Command): World {
+      const world = base();
+      world.attributes[1]![ATTR_FOOD] = 1000;
+      order(world, 1, { type: 'build', units: [], unitType: HOUSE, x: 21, y: 16 });
+      for (let i = 0; i < 3; i++) world.runTurn();
+      expect(world.entities.get(5)!.state).toBe(ObjectState.Unbuilt);
+      order(world, 2, command);
+      for (let i = 0; i < 5; i++) world.runTurn();
+      return world;
+    }
+    const baseline = run({ type: 'noop' });
+    const queued = run({ type: 'queue', building: 4, unit: VILLAGER, count: 1 });
+    const cancelled = run({ type: 'cancel', target: 5 });
+    for (const world of [queued, cancelled]) {
+      expect(world.entities.get(4)!.queue).toEqual([]);
+      expect(world.entities.get(4)!.train).toBeNull();
+      expect(world.entities.get(5)!.state).toBe(ObjectState.Unbuilt);
+      expect(world.attributes[1]![ATTR_FOOD]).toBe(1000);
+      expect(world.attributes[1]![ATTR_WOOD]).toBe(baseline.attributes[1]![ATTR_WOOD]);
+      // Same state, random stream included, as a world that received a noop.
+      expect(world.hash()).toBe(baseline.hash());
+    }
+  });
+
+  test('the owner\'s own queue and cancel commands still work', () => {
+    const world = base();
+    world.attributes[1]![ATTR_FOOD] = 1000;
+    order(world, 1, { type: 'build', units: [], unitType: HOUSE, x: 21, y: 16 });
+    order(world, 1, { type: 'queue', building: 4, unit: VILLAGER, count: 1 });
+    for (let i = 0; i < 3; i++) world.runTurn();
+    expect(world.entities.get(4)!.queue).toEqual([{ unit: VILLAGER, count: 1 }]);
+    expect(world.attributes[1]![ATTR_FOOD]).toBe(950);
+    order(world, 1, { type: 'cancel', target: 5 });
+    runUntil(world, () => world.entities.get(5)!.state > ObjectState.Active, 5);
+  });
+
   test('the population limit (attribute 32) stops training even with headroom left', () => {
     const world = base({ populationLimit: 3 });
     const attributes = world.attributes[1]!;

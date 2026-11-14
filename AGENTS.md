@@ -3,7 +3,7 @@
 Browser remake of Age of Empires 1 (target: AoE1 + Rise of Rome 1.0a), deterministic lockstep, 2-player rooms by invite code. npm-workspaces TypeScript monorepo, Node >= 24.
 
 ## Layout
-- `packages/sim` pure deterministic rules: no DOM, no Node, no deps. Units: `units.ts` (dat numbers per unit type, checked against the real dat by `packages/data/src/units.golden.test.ts`), `movement.ts` + `pathing.ts` (docs/spec/movement.md; §13 vectors in `movement.test.ts`), `trig.ts` (deterministic atan2/sin/cos); `world.ts` `startingUnits` places 3 Villagers per player.
+- `packages/sim` pure deterministic rules: no DOM, no Node, no deps. Units: `units.ts` (dat numbers per unit type, checked against the real dat by `packages/data/src/units.golden.test.ts`), `movement.ts` + `pathing.ts` (docs/spec/movement.md; §13 vectors in `movement.test.ts`), `trig.ts` (deterministic atan2/sin/cos); `unit-data.ts` is generated (`AOE1_DIR=<install> npm run gen:sim-tables` runs `tools/gen-sim-tables.mjs` over `renderSimTables` in `packages/data/src/sim-tables.ts`; edit ROOTS in the tool to add types; the golden test regenerates and diffs it); `buildings.ts` (placement, destructables, construction, costs, production queue and train action; docs/spec/economy.md §4-6; vectors E2-E4 in `buildings.test.ts`), `techs.ts` (tech states, effect engine), `build.ts` (action 101); `world.ts` `startingUnits` places 3 Villagers per player, `new_game` attributes and the commands `build`/`queue`/`cancel` (queue and cancel ignore another player's objects but still draw their rand()).
 - `packages/data` dat reader and typed rule set.
 - `packages/protocol` client/server messages (`messages.ts` types, `codec.ts` validation).
 - `packages/formats` DRS / SLP / palette decoders.

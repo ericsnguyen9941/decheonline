@@ -260,12 +260,14 @@ Hunter and Lumberjack use action type 110 (`TRIBE_ACTION_TYPE_HUNT`,
 
 ### 4.1 Placing a foundation (`do_command_build`, `src/tcommand.cpp:175`, M)
 
-1. `check_placement` on the master at the order's x, y; non-zero means
-   refused: tell the AI, stop (`:194-206`).
+1. `check_placement` on the master at the order's x, y (construction radius,
+   objects that can be built on ignored; §4.6); non-zero means refused: tell
+   the AI, stop (`:194-206`).
 2. `pay_obj_cost(obj_id, 1.0, 0)` (§6.1); not affordable: stop (`:208-219`).
 3. `make_new_obj` creates the building (`:221`). `TRIBE_Building_Object::setup`
    (`src/t_b_obj.cpp:144-163`) sets state **unbuilt**, `build_pts = 0`,
-   `hp = 1.0`, the construction sprite.
+   `hp = 1.0`, the construction sprite, then `check_destructables` (§4.6)
+   destroys what can be built on under the foundation.
 4. Every listed unit gets `do_command(building)` (`:226-236`).
 
 ### 4.2 Building per step (`TRIBE_Action_Build`, `src/tact_bld.cpp`)
@@ -315,6 +317,14 @@ construction frame `trunc(frames × build_pts / required)` and repeats the
 `build_pts ≥ required` check while unbuilt. Losing the building later takes
 the flag-≥4 storages back (`:303-307`).
 
+**Building death (active → dying, `src/t_b_obj.cpp:303-327`, M).** Besides the
+flag-≥4 storages (and the flag-2 storages every dying object returns, §6.3):
+if the owner has no other *active* building of the same master, the building's
+`techId` tech is undone (`undo_tech`), and so are the age techs **101, 102 and
+103** (the same condition, whatever the building's type). The sim does this in
+`objects.ts` `setObjectState`. Only an object that was active counts: a
+foundation (unbuilt) that is cancelled or destroyed undoes nothing.
+
 The farm's own food comes from `RGE_Action_Make` (`src/act_make.cpp`, M),
 the farm's default task (task 21, `resourceIn` 16, `gatherType` 0):
 - On start, the farm's held load is replaced by 0 of type 16 (it held 15
@@ -346,6 +356,50 @@ capped so `hp ≤ max_hp`; the player pays
 cost scaled by the fraction of hp restored; if unaffordable no hp is added.
 Who calls it with what `h` is the repair action (not in this spec).
 
+### 4.6 Placement and destructables (`check_placement`, `check_destructables`)
+
+Ported from the decomp (`RGE_Master_Static_Object::check_placement`,
+`src/m_s_obj.cpp:843`; `TRIBE_World::check_destructables`, `src/tworld.cpp:272`)
+into `packages/sim/src/buildings.ts`. All geometry is float32.
+
+`check_placement(master, x, y, construction, built_on)` returns 0 when the
+master fits, else a reason code (7 off the map, 2 terrain, 6 an object in the
+way). `do_command_build` calls it with `construction = 1` and `built_on = 1`
+(`:194`); `place_obj` (§5.4) with both 0. Checks in order:
+1. Footprint: `rx, ry` are the construction radii (`clearanceX/Y`) when
+   `construction`, else the object radii. The box
+   `[x − rx, x + rx − ε) × [y − ry, y + ry − ε)` (`ε` =
+   `COORDINATE_EPSILON`) must lie inside the map, else 7.
+2. Every tile under the box must allow the master's terrain restriction table
+   (value > 0), else 2.
+3. If both `rx` and `ry` are 0, or (not `built_on` and the master's `r_z` is
+   0), stop with 0: such objects never collide with objects.
+4. Objects within ±3 tiles (clamped to the map) are tested. Skipped: objects
+   already pending removal or later; with `built_on`, an object whose
+   `canBeBuiltOn` is 1 when the master's is 0 (**trees and corpses do not
+   block a foundation**); objects with a zero radius in x or y; objects whose
+   "has height" (`r_z > 0`) differs from the master's. For the rest, overlap
+   is `|ox − x| < ox_r + rx` **and** `|oy − y| < oy_r + ry`; overlap returns 6.
+
+`canBeBuiltOn = 1` in the civ 1 / Gaia tables used by the sim: Tree01, Tree08,
+Tree10 (134, 141, 143), Tree_Stump1/2 (115, 130), every `Dead_*` corpse
+(master type 30) and the Smoke_Battlex2/x3 effects (327, 328).
+
+`check_destructables(player, master, x, y, 0)` runs in `TRIBE_Building_Object::setup`
+(so for every foundation and every start building). If the master's radius is 0
+in both x and y it does nothing. Otherwise, for each object in the ±3 box
+whose master has `canBeBuiltOn ≠ 0`, is not of the same master id, and
+overlaps (`|ox − x| < ox_r + r_x` and `|oy − y| < oy_r + r_y`, object radii, not
+the construction radii), `destroy_obj` is called: the object is woken and set
+**pending removal**; it is removed on its next update. Trees under a
+foundation are therefore felled, not blocked, and a destroyed tree stays on
+the obstruction map until it is actually removed (the sim's fuzz test
+checks overlap among live objects only).
+
+Not ported: placement visibility (reason 5, the sim has no fog), slope (3,
+the map has no tile shapes yet) and per-master tile requirements (1; no type in
+the table has any).
+
 ## 5. Training
 
 ### 5.1 Production queue (the human UI path)
@@ -354,7 +408,8 @@ The UI train button sends `command_queue` because `production_queues_is_use`
 is 1 (`src/scr_game.cpp:4253-4260`, M; `src/game_globals.cpp:107`).
 `do_command_queue` (`src/tcommand.cpp:530-539`, M): positive count → add,
 negative → remove. Neither checks that the unit is trained at this
-building (`trainLocationId`) — decomp-marked bug.
+building (`trainLocationId`) — decomp-marked bug. Nor do they check who owns
+the building: see §5.5.
 
 `add_to_production_queue(id, n)` (`src/t_b_obj.cpp:800-860`, D):
 - If the queue is empty or its **last** record is a different unit, every
@@ -434,6 +489,21 @@ So in the first 40 tries only the `+y` edge (side 0) and the `−x` edge (side 1
 are used, except for `A = 32767`; tries 40–59 use the `+x` and `−y` edges.
 Whether `check_placement` itself draws random numbers is **unverified**.
 
+### 5.5 Port-side guard: other players' objects
+
+`do_command_queue` and `do_command_cancel_build` look the object up by id and
+**never compare its owner with the sender**, so in the original a player can
+queue units at, or cancel (or kill, §4.4) the opponent's buildings. The UI
+never sends such commands; online, only a tampered client could, and that
+would be a cheat. Deviation from the original (**port decision**, Mate
+decision 2026-11-15, PROJECT.md "Captain's decisions"): `World` ignores a
+`queue` or `cancel` command whose target object is not owned by the sender.
+The command still counts as executed: the per-command `rand()` of §7 is drawn
+before the check, exactly as for an accepted command, so every peer's stream
+stays the same whether or not a command was accepted. The same guard class as
+the other port-side checks (queue needs an object with a queue, cancel needs
+master type ≥ 50).
+
 ## 6. Costs and owner attributes
 
 ### 6.1 `check_obj_cost` / `pay_obj_cost` / `reimburse_obj_cost` (`src/tplayer.cpp:1031-1115`, M)
@@ -477,6 +547,24 @@ to integers. The UI rounding is presentation only.
 - Flag ≥ 4 is given when a building completes and taken when it dies
   (§4.3).
 
+### 6.4 Attributes 30, 32, 33 and 45 are set by `new_game`
+
+Attribute 30 is the **building allowance** (every building master has a
+`[30, −1, 2]` storage, so creating one takes 1 and its death returns 1; a
+cancelled Barracks goes 500 → 499 → 500) and 32 the **population limit**.
+Neither comes from a start tech or the civ table as one might expect:
+- The civ table's attribute 32 is 0, and the Stone Age start tech only *adds* 8
+  to attribute 30.
+- After the start objects are placed, `TRIBE_World::new_game` sets for every
+  player except Gaia (players 1 and up) `attributes[32] = population limit`
+  (`RGE_Game_Info` default **50**; the port exposes the `populationLimit`
+  option), `attributes[33] = 0`, `attributes[30] = 500` and
+  `attributes[45] = 1`. These overwrite the start techs' values.
+
+Training is capped twice (§6.1): by headroom (attribute 4, `+4` per House or
+Town Center) and by `population` (attribute 11) against the limit in attribute
+32, which stops training even when headroom is left.
+
 ## 7. RNG calls in this subsystem, in order
 
 | when | draws | ref |
@@ -484,7 +572,7 @@ to integers. The UI rounding is presentation only.
 | each command executed (build, queue, make, work, …) | 1 `rand()`, value unused, before dispatch | `src/tcommand.cpp:37` |
 | building completes | 1 `rand()` = r, then `srand(r)` | `src/t_b_obj.cpp:235-245` |
 | trained unit placement, per try | 1 (side) + 1 (offset) for sides 0–3; 1 for side 4 | `src/tact_mob.cpp:179-202` |
-| any object created (trained unit, foundation, …) | 1 `rand()` = r, then `srand(r)` at the end of `RGE_Static_Object::setup` | `src/stat_obj.cpp:279-286` |
+| any object created (trained unit, foundation, …) | 1 `rand()` per random start frame of its sprite (a Villager's standing sprite: 1), **before** the fence; then 1 `rand()` = r and `srand(r)` at the end of `RGE_Static_Object::setup`; an object that can move then draws once for its facing (`movement.md` §11) | `src/stat_obj.cpp:279-286` |
 
 Gathering, drop-off, construction progress, the queue and costs draw
 nothing. The `srand(r)` fences make the stream after them depend only on the
@@ -561,8 +649,19 @@ queued with 200 food, headroom ≥ 1, population below the limit.
   - Draw B = **27125** → offset `= 27125 × 3.42 × 3.051851e-05 − 1.71`
     = 1.1211258172988892 (round at store) or 1.1211256980895996 (round
     each op); `x = 20.5 + offset =` **21.621126174926758** in both.
-  - If the spot is free: unit created; `setup` draws C = **9192** and
-    reseeds `srand(9192)`; the next draw in the step is **30055**.
+  - If the spot is free the unit is created, and `RGE_Static_Object::setup`
+    draws in this order (**corrected**: an earlier version of this text took
+    9192 for the fence):
+    1. **9192**, the third value of the stream: the standing sprite's random
+       start frame, drawn by `new_sprite` *before* the setup fence;
+    2. **11643**, the fourth value: the setup fence, `srand(11643)`;
+    3. **5291**, the first value after that reseed: the unit's facing
+       (`movement.md` §11, objects that can move);
+    4. the next draw in the step is **10423**.
+    (Stream `srand(14)`: 84, 27125, 9192, 11643, 22187, 1235, …; after
+    `srand(11643)`: 5291, 10423, 2522, …. Vector test: `packages/sim/src/buildings.test.ts`,
+    `economy.md §8.3 vector E3`, which checks the first three stream values,
+    the Villager's position and the draw after the facing.)
   - Owner effects: headroom −1, population +1, total units +1 (§6.3).
 - Side mapping edge cases for draw A: 16383 → 0, 16384 → 1, 32766 → 1,
   32767 → 2.
@@ -577,6 +676,8 @@ Refs: `src/t_b_obj.cpp:800-860`, `:959-1019`; `src/tact_mob.cpp:102-152`,
 refunded). Ref: `src/t_b_obj.cpp:678-697`.
 
 ## 9. Known decomp-marked bugs that matter here
+
+Kept as behaviour unless §5.5 says otherwise (queue and cancel owner check).
 
 Kept as behaviour (the target is the original game):
 - Training at the wrong building: neither queue nor make checks
@@ -595,3 +696,15 @@ Kept as behaviour (the target is the original game):
   `beta-only?`
 - Train actions destroyed with their building never tell the AI
   (`src/tact_mob.cpp:36-45`); AI-only.
+
+## 10. Undocumented or not ported
+
+- **Animal wander (action 6).** Gaia animals (gazelles, elephants, …) wander
+  when idle, but neither `unit-ai.md` §5 nor any other spec describes the
+  action's states or RNG draws, so the sim does not port it. Whether idle
+  animals move, and what they draw from the RNG, is **unknown**; in the sim they
+  stand still until hunted or until they flee.
+- Not ported: the `fog_update` `rand()` at player creation; the civ effect;
+  per-civ masters (Gaia's records use other graphics and enabled flags, and
+  the Greek Granary other graphics); placement visibility, slope and tile
+  requirements (§4.6); master-attribute effect codes other than 17; research.
