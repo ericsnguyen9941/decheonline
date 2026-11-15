@@ -48,6 +48,8 @@ export interface TechContext extends TechPlayers, VisibilityContext {
   rng: CrtRand;
   /** The player's object list in update order (`RGE_Player::objects`). */
   objectsOf(owner: number): Entity[];
+  /** `TRIBE_Building_Object::connect` (economy.md §4.8.2): an upgraded wall joins its neighbours again. */
+  connectWall?(e: Entity): void;
   /** Told before an effect changes the player's masters (the world caches their hash). */
   mastersChanged?(player: number): void;
   /**
@@ -463,4 +465,6 @@ function copyObject(ctx: TechContext, e: Entity, old: UnitType, src: UnitType): 
   const next = shows(old.standing) ? src.standing : shows(old.dying) ? src.dying : null;
   e.hp = mul32(src.hitPoints, ratio);
   if (next) newSprite(ctx, e, next);
+  // `TRIBE_Building_Object::copy_obj` ends with `connect` when the (old) master joins (src/t_b_obj.cpp:763-765).
+  if (old.building?.connect) ctx.connectWall?.(e);
 }

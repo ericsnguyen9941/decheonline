@@ -92,6 +92,7 @@ Spec: [economy.md](economy.md) (gather, hunt/wood, drop-off, construction, produ
 | `src/act_make.cpp` | 5/0/0/0 | `RGE_Action_Make` | R2 |
 | `src/tplayer.cpp` | 92/7/3/1 | `TRIBE_Player::trainUnit` :1547 [M], `research` :1569 [M], `buildObject`, `make_new_object` | R2 |
 | `src/tcommand.cpp` | 39/3/0/0 | `command_make` :545 | R2 |
+| `src/tcommand.cpp`, `src/t_b_obj.cpp`, `src/taiuaimd.cpp` | — | walls: `do_command_build_wall` :239 [M], `place_line_of_walls` :298 [M]; `TRIBE_Building_Object::connect` :535 [M], `connect2` :565 [M], `check` :465 [M]; builder's REQUEST_TASK `processNotify` :811 [L] | economy.md §4.8 (wall line, joining, next foundation) |
 
 ## Combat, projectiles, line of sight
 

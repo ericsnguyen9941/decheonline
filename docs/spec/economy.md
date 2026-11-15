@@ -45,6 +45,9 @@ fixed economy tick: each world step applies one increment of `rate × dts`.
 | `RGE_Object_List::find_by_master_ids` | `src/obj_list.cpp:418` | M | nearest drop site |
 | `RGE_Action_Object::work2` | `src/act_obj.cpp:147` | M | task choice, villager type swap |
 | `TRIBE_Command::do_command`, `do_command_make`, `do_command_build`, `do_command_queue`, `do_command_cancel_build` | `src/tcommand.cpp:36`, `:104`, `:175`, `:530`, `:435` | M | |
+| `TRIBE_Command::do_command_build_wall`, `place_line_of_walls` | `src/tcommand.cpp:239`, `:298` | M | wall line, §4.8.1 |
+| `TRIBE_Building_Object::connect`, `connect2`, `check` | `src/t_b_obj.cpp:535`, `:565`, `:465` | M | wall joining, §4.8.2 |
+| `TribeCivilianUnitAIModule::processNotify` (build request) | `src/taiuaimd.cpp:811` | **L** | builder's next foundation, §4.8.3 |
 
 The three `L`/`D` bodies that carry the gather and build rates
 (`act_gath.cpp` update, `tact_hnt.cpp` update, `tact_bld.cpp` update) were
@@ -518,6 +521,145 @@ hp below the maximum; an intact Farm falls back to the left-click table:
 the arrow and "Click to select" (decomp-marked bug), though a right click
 works it. A foundation or a damaged Farm shows the hand (facet 3).
 
+### 4.8 Walls: the line command, joining and the next foundation
+
+Masters 72 (Small Wall), 117 (Medium Wall) and 155 (Large Wall) are buildings
+of object group 27 with `adjacentMode` (`building_connect_flag`) 1; no other
+master in the dat has it. RoR 1.0a `data2/empires.dat`, civ 1: cost 5 stone
+(flag 1), `build_pts_required` (`trainTime`) 7, radius and construction
+radius 0.5 × 0.5, construction sprite 77 (4 facets), standing sprites 825
+(Small: 6 frames, 3 facets, flags 7), 259 (Medium) and 254 (Large) (1 frame,
+3 facets, flags 2), `building_facet` 0. AoE1 has no gate. Tech 13 (Medium
+Wall, effect 13) upgrades 72 to 117 (type 3, `copy_obj`): master 72 becomes a
+copy of 117 that keeps id 72.
+
+#### 4.8.1 The line command (`TRIBE_Command::do_command_build_wall`, `src/tcommand.cpp:239-296`, M)
+
+Sent by `TRIBE_Player::command_make_wall` (`src/tplayer.cpp:884-896`, M) when
+the master is `available` and the selection has objects of group 4 (the
+Villagers): `command_build_wall` (`src/tcommand.cpp:668-718`, M) carries the
+unit ids, the master id and two **tiles** `(x1, y1)` (where the drag started)
+and `(x2, y2)` (where it ended), each clamped to 0..255 and stored as a byte;
+the command's owner is the first unit's. The UI end is
+`TRIBE_Main_View::command_place_multi_object` (`src/tvw_main.cpp:276-330`, M),
+outside the sim.
+
+On execution, with `dx = |x2 − x1|`, `dy = |y2 − y1|`:
+- `dy == dx` (a diagonal, or one tile): one leg `(x1, y1) → (x2, y2)`.
+- `dy > dx`: leg `(x1, y1) → (x1, y2)` down the start column, then, when
+  `x1 ≠ x2`, leg `(x1 ± 1, y2) → (x2, y2)` along the end row from the tile
+  after the corner.
+- `dx > dy`: leg `(x1, y1) → (x2, y1)` along the start row, then, when
+  `y1 ≠ y2`, leg `(x2, y1 ± 1) → (x2, y2)` down the end column.
+
+So a drag that is not a straight or 45° line becomes an L whose corner is on
+the longer axis' far end.
+
+Each leg is `place_line_of_walls` (`src/tcommand.cpp:298-341`, M; the decomp
+names the steps `y_skip`/`x_skip` and swaps `x1`/`y1`, but the walk is): start
+at tile `(x, y) = (ax, ay)`, steps `sx = sign(bx − ax)`, `sy = sign(by − ay)`;
+loop:
+1. At `(x + 0.5f, y + 0.5f)` call `check_placement(player, wx, wy, 0,
+   check_vis 1, check_flat elevation_flag, check_overlay 0, construction 1,
+   built_on 1, check_objects 1)` (§4.6). A tile that fails is **skipped**:
+   no segment, no cost.
+2. A tile that fits: `pay_obj_cost(id, 1.0, 0)` (§6.1). When the player
+   cannot pay, the leg **ends** there (the second leg is still tried, and
+   stops at its first fitting tile for the same reason).
+3. `make_new_obj(player, wx, wy, 0, unique_id)`: a foundation (§4.1, setup
+   draws as any object). The first segment made by the command is kept.
+4. Stop after the tile `(bx, by)`; else `x += sx`, `y += sy`.
+
+A segment placed earlier does not block the next: walls are 0.5 radius and
+one tile apart. Then, when a segment was made and units were listed, each
+unit is `removeAllFromPathingGroup` and `do_command(first, first.x,
+first.y)`: every builder goes to the **first** segment only; the rest of the
+line is taken up through the task request (§4.8.3). The command is not
+checked against the units' owner in the original; the port's guard (§5.5)
+ignores units not the sender's and charges the sender.
+
+#### 4.8.2 Joining (`TRIBE_Building_Object::connect`, `src/t_b_obj.cpp:535-583`, M)
+
+**When.** `set_object_state(active)` (§4.3), right after the final sprite and
+`facet = building_facet`, calls `connect()` when the master's
+`building_connect_flag` is set (`src/t_b_obj.cpp:253-259`), and so does
+`TRIBE_Building_Object::copy_obj` (an upgrade, `src/t_b_obj.cpp:757-766`, M)
+at its end, with the object's old master. Nothing else does: a wall that is
+destroyed or cancelled does **not** re-join the walls next to it; they keep
+their facets until a wall next to them is built or they are upgraded.
+Placing a foundation does not join either.
+
+**Neighbours** (`check`, `src/t_b_obj.cpp:465-533`, M): with
+`(x, y) = ((short)world_x, (short)world_y)`, the tiles north `(x, y − 1)`
+(when `y > 0`), west `(x − 1, y)` (`x > 0`), east `(x + 1, y)`
+(`x < width − 1`), south `(x, y + 1)` (`y < height − 1`). On each, the
+first object in the tile's list whose master id is the wall's own
+(`find_by_master_id(id, −1, −1, 0, 0, 0)`, `src/obj_list.cpp:370`, M: any
+state, any owner) is the neighbour, dropped when its owner differs. So a
+foundation counts, a dying wall still on the tile counts, only walls of the
+same master id join (after the upgrade every wall is still master 72), and
+another player's wall never joins.
+
+**Facet.** `connect`, on a wall whose current sprite has exactly 3 facets
+(else `facet = 0` and nothing more):
+1. `set_angle()`: `facet` from the object's angle (the random angle drawn at
+   setup, movement.md §9).
+2. Choose `k`: north and south neighbours and neither west nor east → `k = 1`;
+   west and east and neither north nor south → `k = 0`; anything else (an end
+   with one neighbour, a corner, a T, a crossing, a wall alone) → `k = 2`.
+3. `RGE_Moving_Object::rotate(k − facet)` (`src/move_obj.cpp:2141-2160`, M;
+   the building's own `rotate` override is empty and is bypassed):
+   `angle2 = (float)((double)amount × 6.2831853 / facet_num) + angle`, wrapped
+   into `[0, 6.2831853)`, then `new_angle` → `set_angle`. The facet becomes
+   `k`.
+4. Each neighbour found runs `connect2`: the same facet choice from its own
+   neighbours, from its current `facet` and without `set_angle`, and without
+   recursing further. A neighbour that is a foundation shows the construction
+   sprite (4 facets), so `connect2` sets its facet to 0; its construction
+   update then sets the build frame again (§4.3).
+
+Example, a line built west to east: the two ends show facet 2, every segment
+between them facet 0; a line north to south: ends 2, middle 1; an L: the
+corner 2. `facet` is the object's sprite facet, drawn as is
+(`RGE_Static_Object::draw`); `TRIBE_Master_Building_Object::draw` (the
+placement ghost, `src/tm_b_obj.cpp:203-216`, M) draws a connecting master's
+facet `f` as sprite facet `f − 1`, and 0 as 2.
+
+#### 4.8.3 The builder's next foundation (`TribeCivilianUnitAIModule::processNotify`, `src/taiuaimd.cpp:811-825`, L)
+
+`TRIBE_Action_Build::set_state(3)` (`src/tact_bld.cpp:56-76`, M) on a human
+player's unit notifies its unit AI `UNIT_AI_NOTIFY_REQUEST_TASK` with
+`p1 = UNIT_AI_ACTION_BUILD`; state 3 follows a finished building, a target
+that is no longer unbuilt, or a walk to it that failed. With the AI's
+current action `BUILD`:
+1. `closestObject(currentTargetType, 3, UNBUILT, −1)` (`src/aiuaimod.cpp:1506`,
+   M; relation 3 = the searcher's own objects only): the nearest own
+   foundation of the group the unit was building (27 for a wall, 3 for a
+   building) among its search results (unit-ai.md §3.2; the Builder's search
+   radius is twice its line of sight, at most 15).
+2. None: the same for the other of the two groups (a wall's builder looks for
+   buildings, a building's for walls).
+3. Found and `canPath(id, 1.0)`: `buildObject(id, 1)` — the build task on it,
+   current action BUILD, target that object with its group and position
+   (`src/aiuaimod.cpp:1901-1918`, M).
+4. Otherwise: when the last target is gone or farther than 1.0
+   (`distance_to_object`), `moveTo(target point, 1.0)`. The unit stays a
+   Builder waiting.
+
+So builders walk the line segment by segment, nearest first (ties: the first
+search record), and after the line any other own foundation nearby. This
+applies to every building, not just walls.
+
+#### 4.8.4 Port status
+
+Ported: §4.8.1 (`World.doCommandBuildWall` / `placeLineOfWalls`, command
+`build-wall` with byte tiles), §4.8.2 (`buildings.ts` `connectWall`,
+`wallNeighbours`; on completion and in `techs.ts` `copyObject` through
+`TechContext.connectWall`), §4.8.3 (`build.ts` state 3 notify,
+`unit-ai.ts` `builderRequest`). `check_flat` is not checked (slope, §4.6),
+as for any building. The client's drag line and `draw_wall_outline`
+(`src/tvw_main.cpp:204`) are not ported. Tests: `packages/sim/src/walls.test.ts`.
+
 ## 5. Training
 
 ### 5.1 Production queue (the human UI path)
@@ -837,8 +979,8 @@ Kept as behaviour (the target is the original game):
   stand still until hunted or until they flee. Of the default tasks only the
   make action (21, the Farm's) is started (§4.7).
 - **Task requests of gatherers.** A waiting gather or hunt action notifies its
-  unit AI `REQUEST_TASK` (§4.7); only the Farm branch of the civilian AI's
-  answer is ported. Other gatherers stay waiting where the original looks for
+  unit AI `REQUEST_TASK` (§4.7); of the civilian AI's answer only the Farm
+  branch and the builder's (§4.8.3) are ported. Other gatherers stay waiting where the original looks for
   the closest resource of the group (`closestResourceObject`) or object of the
   type.
 - **Farm depleted location.** `add_notification_loc` (the last-event spot)

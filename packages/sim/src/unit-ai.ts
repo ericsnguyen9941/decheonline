@@ -9,7 +9,7 @@
  */
 import { combatAttack, distanceToObject } from './combat';
 import type { GameContext } from './context';
-import { isAlly, unitDiplomacy } from './diplomacy';
+import { isAlly, unitDiplomacy, UNIT_DIPLOMACY_ALLY, UNIT_DIPLOMACY_ENEMY, UNIT_DIPLOMACY_NEUTRAL, UNIT_DIPLOMACY_SELF } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { aiWork, deleteActions, workMoveTo, ACTION_ATTACK, ACTION_GATHER, ACTION_HUNT, ACTION_MOVE } from './gather';
 import { ACTION_BUILD } from './build';
@@ -794,23 +794,32 @@ function processIdle(ctx: GameContext, e: Entity, doSearch: boolean): number {
  * Gaia to enemy, the first record with the smallest visible-unit distance whose object is not itself, not yet pending
  * removal, and of that group, state and master (-1 any).
  */
-function closestObject(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1): number {
-  return closestObjectAndPlayers(ctx, e, group, state, type)[0];
+function closestObject(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1, relation = -1): number {
+  return closestObjectAndPlayers(ctx, e, group, state, type, relation)[0];
+}
+
+/** `desiredRelation` of `closestObject` (src/aiuaimod.cpp:1527-1530): 0 self or ally, 1 neutral, 2 enemy, 3 self, else any bucket. */
+function relationBucket(relation: number, bucket: number): boolean {
+  if (relation === 0) return bucket === UNIT_DIPLOMACY_ALLY || bucket === UNIT_DIPLOMACY_SELF;
+  if (relation === 1) return bucket === UNIT_DIPLOMACY_NEUTRAL;
+  if (relation === 2) return bucket === UNIT_DIPLOMACY_ENEMY;
+  if (relation === 3) return bucket === UNIT_DIPLOMACY_SELF;
+  return true;
 }
 
 /**
  * `closestObject` with `numberDifferentPlayerObjectsVisible` (src/aiuaimod.cpp:1524-1549): how many players 1-8 own a
  * record in any bucket, whatever the filters (the object's own record included).
  */
-function closestObjectAndPlayers(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1): [number, number] {
+function closestObjectAndPlayers(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1, relation = -1): [number, number] {
   const buckets = search(ctx, e);
   let closestId = -1;
   let closest = -1;
   const players = new Set<number>();
-  for (const bucket of buckets) {
+  for (const [b, bucket] of buckets.entries()) {
     for (const r of bucket) {
       if (r.owner >= 1 && r.owner < 9) players.add(r.owner);
-      if (r.id === e.id) continue;
+      if (r.id === e.id || !relationBucket(relation, b)) continue;
       const o = ctx.entities.get(r.id);
       if (!o || o.state >= ObjectState.PendingRemoval) continue;
       if ((group !== -1 && typeOf(ctx, o).group !== group) || (type !== -1 && o.type !== type) || (state !== -1 && o.state !== state)) continue;
@@ -1086,12 +1095,30 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
       playerNotify(ctx, e.owner, note.type, note.p1);
       return NOTE_DONE;
     case NOTIFY_REQUEST_TASK:
-      // Of the re-task (src/taiuaimd.cpp:707-867) only a gatherer's whose action was made for a Farm is ported.
+      // Of the re-task (src/taiuaimd.cpp:707-867) a builder's and a gatherer's whose action was made for a Farm are ported.
+      if (ai.action === AI_ACTION_BUILD) return builderRequest(ctx, e);
       if (ai.action !== AI_ACTION_GATHER || note.p2 !== FARM) return NOTE_DONE;
       return farmerRequest(ctx, e);
     default:
       return NOTE_DONE;
   }
+}
+
+/**
+ * A waiting builder's task request (src/taiuaimd.cpp:811-825, economy.md §4.8.3): the closest of its own unbuilt objects
+ * in its search results of the group it was building (a wall's or a building's), else of the other of the two; when it
+ * can path there it builds it. Otherwise, away from its last target (or with none), it walks back to that target's
+ * point. A build it cannot start leaves it waiting.
+ */
+function builderRequest(ctx: GameContext, e: Entity): number {
+  const ai = e.ai!;
+  let id = closestObject(ctx, e, ai.targetType, ObjectState.Unbuilt, -1, 3);
+  if (id === -1) id = closestObject(ctx, e, ai.targetType === GROUP_WALL ? GROUP_BUILDING : GROUP_WALL, ObjectState.Unbuilt, -1, 3);
+  const next = id === -1 ? undefined : ctx.entities.get(id);
+  if (next && canPath(ctx, e, next, 1)) return aiTask(ctx, e, id, ACTION_BUILD, AI_ACTION_BUILD) ? NOTE_STOP : NOTE_DONE;
+  const target = ai.target === -1 ? undefined : ctx.entities.get(ai.target);
+  if (!target || distanceToObject(ctx, e, target) > 1) aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, 1, true);
+  return NOTE_DONE;
 }
 
 /**

@@ -200,6 +200,8 @@ export interface BuildingInfo {
   construction: SpriteInfo | null;
   /** `building_facet`. */
   facet: number;
+  /** `building_connect_flag` (the dat's `adjacentMode`): a wall that joins its neighbours when built (economy.md §4.8). */
+  connect: boolean;
   /** `build_and_go_away`. */
   disappearsWhenBuilt: boolean;
   /** `on_build_make_obj`, -1 none. */
@@ -332,6 +334,7 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     building: b && {
       construction: sprite(b.construction),
       facet: b.facet,
+      connect: b.connect,
       disappearsWhenBuilt: b.disappearsWhenBuilt,
       makeObject: b.makeObject,
       makeTile: b.makeTile,

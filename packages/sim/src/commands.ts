@@ -54,6 +54,21 @@ export interface BuildCommand {
 }
 
 /**
+ * Wall line order (`TRIBE_Command::do_command_build_wall`, docs/spec/economy.md §4.8): segments of wall master
+ * `unitType` from tile (x1, y1) to tile (x2, y2), each paid by the sender as it is placed, and the listed units of the
+ * sender sent to build the first. Tiles are bytes on the wire (`command_build_wall` clamps them to 0..255).
+ */
+export interface BuildWallCommand {
+  type: 'build-wall';
+  units: number[];
+  unitType: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/**
  * Production queue order (`TRIBE_Command::do_command_queue`, economy.md §5.1): `count` > 0 queues that many units of
  * master `unit` at `building`, `count` < 0 removes that many.
  */
@@ -159,6 +174,7 @@ export type Command =
   | MoveCommand
   | WorkCommand
   | BuildCommand
+  | BuildWallCommand
   | QueueCommand
   | CancelCommand
   | AttackCommand
@@ -183,6 +199,11 @@ function isMasterId(v: unknown): v is number {
 /** A player number (`unsigned char` on the wire; the original has at most 8 players and Gaia). */
 function isPlayer(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 8;
+}
+
+/** A tile coordinate of a wall line (`unsigned char` on the wire). */
+function isTileByte(v: unknown): v is number {
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 0xff;
 }
 
 function isPoint(x: unknown, y: unknown): boolean {
@@ -216,6 +237,12 @@ export function parseCommand(v: unknown): Command | null {
       if (!isPoint(x, y) || !isMasterId(unitType)) return null;
       if (!Array.isArray(units) || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'build', units: [...(units as number[])], unitType, x: x as number, y: y as number };
+    }
+    case 'build-wall': {
+      const { units, unitType, x1, y1, x2, y2 } = o;
+      if (!isTileByte(x1) || !isTileByte(y1) || !isTileByte(x2) || !isTileByte(y2) || !isMasterId(unitType)) return null;
+      if (!Array.isArray(units) || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'build-wall', units: [...(units as number[])], unitType, x1, y1, x2, y2 };
     }
     case 'queue': {
       const { building, unit, count } = o;

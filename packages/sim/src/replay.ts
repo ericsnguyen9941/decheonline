@@ -3,7 +3,7 @@ import { CIV_RANDOM, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, type GameSettings
 import { MAP_HILLY, MAP_MEDIUM } from './rmm-controller';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
-import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, MARKET, TOWN_CENTER, VILLAGER } from './units';
+import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, MARKET, SMALL_WALL, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
 import { AGE_BRONZE, startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit, type WorldOptions } from './world';
 
@@ -203,6 +203,10 @@ function sampleBatches({ count, villagers, centers, resources, at: startAt }: Re
   fight.srand(seed + 7919);
   const study = new CrtRand();
   study.srand(seed + 104729);
+  // Wall lines (with the skirmish only) draw from their own generator, so the other orders stay as they were. Without the
+  // skirmish the fuzz checks drop-offs, and builders take every foundation near them (economy.md §4.8.3).
+  const mason = new CrtRand();
+  mason.srand(seed + 15485863);
   const pick = (player: number) => villagers.flatMap((v) => ((v.owner === player || gen.rand() % 8 === 0) && gen.rand() % 3 !== 0 ? [v.id] : []));
   const fraction = () => gen.rand() / 32768;
   const batches: ReplayLog['batches'] = [];
@@ -230,6 +234,15 @@ function sampleBatches({ count, villagers, centers, resources, at: startAt }: Re
         const x = own.x + (gen.rand() % 11) - 5 + fraction();
         const y = own.y + (gen.rand() % 11) - 5 + fraction();
         commands.push({ type: 'build', units: ids, unitType, x, y });
+      }
+      if (war && mason.rand() % 40 === 0) {
+        const ids = villagers.filter((v) => v.owner === player && mason.rand() % 2 === 0).map((v) => v.id);
+        const tile = (v: number) => Math.min(255, Math.max(0, Math.trunc(v)));
+        const x1 = tile(own.x + (mason.rand() % 13) - 6);
+        const y1 = tile(own.y + (mason.rand() % 13) - 6);
+        const x2 = tile(x1 + (mason.rand() % 11) - 5);
+        const y2 = tile(y1 + (mason.rand() % 11) - 5);
+        commands.push({ type: 'build-wall', units: ids, unitType: SMALL_WALL, x1, y1, x2, y2 });
       }
       if (gen.rand() % 16 === 0) {
         const building = gen.rand() % 8 === 0 ? centers.find((c) => c.owner !== player)!.id : own.id;

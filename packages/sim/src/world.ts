@@ -1,8 +1,9 @@
-import { build, cancelBuild, checkDestructables, checkPlacement, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
+import { build, cancelBuild, checkDestructables, checkPlacement, connectWall, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
 import {
   CommandQueue,
   type AttackCommand,
   type BuildCommand,
+  type BuildWallCommand,
   type CancelCommand,
   type Command,
   type MoveCommand,
@@ -293,7 +294,7 @@ export interface Snapshot {
   diplomacy: DiplomacyState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
@@ -617,6 +618,7 @@ export class World {
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
       changeOwnership: (e, owner) => this.changeOwnership(e, owner),
+      connectWall: (e) => connectWall(this.gameContext(), e),
       mastersChanged: (player) => {
         this.mastersDigest[player] = undefined;
       },
@@ -784,6 +786,8 @@ export class World {
         return this.doCommandAttack(player, command);
       case 'build':
         return this.doCommandBuild(player, command);
+      case 'build-wall':
+        return this.doCommandBuildWall(player, command);
       case 'queue':
         return this.doCommandQueue(player, command);
       case 'cancel':
@@ -932,6 +936,68 @@ export class World {
       if (!e?.mover || e.owner !== player || e.state !== ObjectState.Active) continue;
       e.mover.group = [];
       orderWork(ctx, e, building, x, y);
+    }
+  }
+
+  /**
+   * `TRIBE_Command::do_command_build_wall` (`src/tcommand.cpp:239-296`, economy.md §4.8.1): a line from (x1, y1) when
+   * the two axes differ by as much, else two legs, along the longer axis to the end's row or column, then across from
+   * the tile after the corner; then each listed unit of the sender is ordered onto the first segment placed.
+   */
+  private doCommandBuildWall(player: number, command: BuildWallCommand): void {
+    if (!hasMaster(this, player, command.unitType)) return;
+    const t = master(this, player, command.unitType);
+    if (!isBuilding(t) || !t.creatable) return;
+    const { x1, y1, x2, y2 } = command;
+    const dy = Math.abs(y2 - y1);
+    const dx = Math.abs(x2 - x1);
+    let first: Entity | null = null;
+    const leg = (ax: number, ay: number, bx: number, by: number) => {
+      first = this.placeLineOfWalls(player, t, ax, ay, bx, by, first);
+    };
+    if (dy === dx) leg(x1, y1, x2, y2);
+    else if (dy >= dx) {
+      leg(x1, y1, x1, y2);
+      if (x1 < x2) leg(x1 + 1, y2, x2, y2);
+      else if (x1 > x2) leg(x1 - 1, y2, x2, y2);
+    } else {
+      leg(x1, y1, x2, y1);
+      if (y1 < y2) leg(x2, y1 + 1, x2, y2);
+      else if (y1 > y2) leg(x2, y1 - 1, x2, y2);
+    }
+    const wall = first as Entity | null;
+    if (!wall) return;
+    const ctx = this.gameContext();
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e?.mover || e.owner !== player || e.state !== ObjectState.Active) continue;
+      e.mover.group = [];
+      orderWork(ctx, e, wall, wall.x, wall.y);
+    }
+  }
+
+  /**
+   * `TRIBE_Command::place_line_of_walls` (`src/tcommand.cpp:298-341`): from tile (x1, y1) one step at a time towards
+   * (x2, y2), both axes moving by their sign, a segment at each tile centre that passes `check_placement` (as a
+   * foundation; seen, objects that can be built on ignored) and that the player can pay for; the leg stops at the
+   * first segment it cannot pay. A tile that does not fit is skipped. Returns the first segment of the command.
+   */
+  private placeLineOfWalls(player: number, t: UnitType, x1: number, y1: number, x2: number, y2: number, first: Entity | null): Entity | null {
+    const stepX = Math.sign(x2 - x1);
+    const stepY = Math.sign(y2 - y1);
+    let x = x1;
+    let y = y1;
+    for (;;) {
+      const wx = f32(x + 0.5);
+      const wy = f32(y + 0.5);
+      if (checkPlacement(this.gameContext(), t, wx, wy, true, true, player) === 0) {
+        if (!payObjCost(this.gameContext(), player, t.id, 1, false)) return first;
+        const wall = this.createObject(player, t.id, wx, wy, 0);
+        first ??= wall;
+      }
+      if (x === x2 && y === y2) return first;
+      x += stepX;
+      y += stepY;
     }
   }
 
@@ -1115,7 +1181,7 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
-      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute') {
+      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute') {
         hashValue(h, q.command);
       }
     }

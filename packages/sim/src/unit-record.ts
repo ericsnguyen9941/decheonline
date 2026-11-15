@@ -62,6 +62,7 @@ export interface SimUnitRecord {
   building: {
     construction: SimSprite | null;
     facet: number;
+    connect: boolean;
     disappearsWhenBuilt: boolean;
     makeObject: number;
     makeTile: number;

@@ -12,7 +12,7 @@ import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, endAction, startMoveTo, updateMover } from './movement';
 import { f32, mul32 } from './num';
 import { newSprite } from './sprites';
-import { orderRepair } from './unit-ai';
+import { AI_ACTION_BUILD, NOTIFY_REQUEST_TASK, notifyObject, orderRepair } from './unit-ai';
 import { FARM, type Task } from './units';
 
 export const ACTION_BUILD = 101;
@@ -48,9 +48,12 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
   const t = typeOf(ctx, e);
   switch (state) {
     case BUILD_WAITING:
+      // A human player's builder asks its unit AI for a task (src/tact_bld.cpp:62-76): the next foundation (§4.8.3).
+      notifyObject(ctx, e, e.id, NOTIFY_REQUEST_TASK, AI_ACTION_BUILD);
+      newSprite(ctx, e, t.standing);
+      return;
     case BUILD_DONE:
     case BUILD_FAILED:
-      // Waiting asks the unit AI for a task; human players' units get none yet.
       newSprite(ctx, e, t.standing);
       return;
     case BUILD_IDLE:

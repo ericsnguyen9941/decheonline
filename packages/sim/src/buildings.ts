@@ -5,12 +5,12 @@
  */
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
-import { ActionResult } from './movement';
+import { ActionResult, facetOf } from './movement';
 import { add32, div32, f32, mul32, sub32 } from './num';
 import { newSprite } from './sprites';
 import { buildingFacet, doTech } from './techs';
 import { hasMaster, master, typeOf } from './masters';
-import { spriteInfo, type UnitType } from './units';
+import { spriteInfo, type SpriteInfo, type UnitType } from './units';
 import { exploreObject, TILE_BLACK, unexploreObject } from './visibility';
 
 /** One production queue record: a unit type and how many are paid for. */
@@ -209,11 +209,81 @@ function complete(ctx: GameContext, e: Entity, t: UnitType): void {
     exploreObject(ctx, e, t, false);
     newSprite(ctx, e, t.standing);
     e.facet = buildingFacet(ctx, e.owner, t.id);
+    if (b.connect) connectWall(ctx, e);
   }
   if (b.makeObject > -1) ctx.create(e.owner, b.makeObject, e.x, e.y, e.z);
   // No building in the sim's table turns terrain (`on_build_make_tile`, farms do not either).
   if (b.techId > -1) doTech(ctx, e.owner, b.techId);
   e.state = ObjectState.Active;
+}
+
+/** The literal `RGE_Moving_Object::rotate` turns by (src/move_obj.cpp:2146-2156). */
+const ROTATE_CIRCLE = 6.2831853;
+
+/**
+ * `TRIBE_Building_Object::check` (`src/t_b_obj.cpp:465-533`, economy.md §4.8.2): on the tiles north (row - 1), west
+ * (col - 1), east (col + 1) and south (row + 1), the first object of the same master in the tile's list, kept only
+ * when it has the same owner. Any state counts: a foundation is a neighbour.
+ */
+export function wallNeighbours(ctx: GameContext, e: Entity): (Entity | null)[] {
+  const x = Math.trunc(e.x);
+  const y = Math.trunc(e.y);
+  const id = typeOf(ctx, e).id;
+  const at = (tx: number, ty: number): Entity | null => {
+    const o = objectsInTiles(ctx, tx, ty, tx, ty).find((n) => typeOf(ctx, n).id === id);
+    return o && o.owner === e.owner ? o : null;
+  };
+  return [y > 0 ? at(x, y - 1) : null, x > 0 ? at(x - 1, y) : null, x < ctx.map.width - 1 ? at(x + 1, y) : null, y < ctx.map.height - 1 ? at(x, y + 1) : null];
+}
+
+/** `RGE_Moving_Object::rotate(amount)` then `new_angle` (`src/move_obj.cpp:2141-2160`, :492): turn `amount` facets. */
+function rotate(e: Entity, amount: number, s: SpriteInfo): void {
+  const m = e.mover!;
+  let a = add32(f32((amount * ROTATE_CIRCLE) / s.facets), m.angle);
+  while (a < 0) a = add32(a, f32(ROTATE_CIRCLE));
+  while (a >= ROTATE_CIRCLE) a = sub32(a, f32(ROTATE_CIRCLE));
+  m.angle = a;
+  e.facet = facetOf(a, s);
+}
+
+/**
+ * The facet choice of `connect` / `connect2` (`src/t_b_obj.cpp:544-550`, :571-577): neighbours north and south only
+ * turn the wall to facet 1, west and east only to facet 0, anything else (an end, a corner, a crossing, alone) to 2.
+ */
+function turnToNeighbours(e: Entity, n: (Entity | null)[], s: SpriteInfo): void {
+  const [north, west, east, south] = n;
+  if (north && south && !west && !east) rotate(e, 1 - e.facet!, s);
+  else if (west && east && !north && !south) rotate(e, -e.facet!, s);
+  else rotate(e, 2 - e.facet!, s);
+}
+
+/**
+ * `TRIBE_Building_Object::connect` (`src/t_b_obj.cpp:535-563`, economy.md §4.8.2): a wall showing a 3-facet sprite
+ * takes the facet of its angle (`set_angle`), turns to the facet its neighbours call for, then each neighbour does the
+ * same (`connect2`); any other sprite gets facet 0. Called when a wall is built and when it is upgraded.
+ */
+export function connectWall(ctx: GameContext, e: Entity): void {
+  if (!e.sprite || !e.mover) return;
+  const s = spriteInfo(e.sprite.graphic);
+  if (s.facets !== 3) {
+    e.facet = 0;
+    return;
+  }
+  e.facet = facetOf(e.mover.angle, s);
+  const n = wallNeighbours(ctx, e);
+  turnToNeighbours(e, n, s);
+  for (const o of n) if (o) connectNeighbour(ctx, o);
+}
+
+/** `TRIBE_Building_Object::connect2` (`src/t_b_obj.cpp:565-582`): `connect` from the facet it has, without recursing. */
+function connectNeighbour(ctx: GameContext, e: Entity): void {
+  if (!e.sprite || !e.mover) return;
+  const s = spriteInfo(e.sprite.graphic);
+  if (s.facets !== 3) {
+    e.facet = 0;
+    return;
+  }
+  turnToNeighbours(e, wallNeighbours(ctx, e), s);
 }
 
 /**

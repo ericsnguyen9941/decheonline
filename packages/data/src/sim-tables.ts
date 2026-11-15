@@ -101,6 +101,7 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
       ? {
           construction: sprite(rules, u.building.constructionGraphicId),
           facet: u.building.graphicsAngle,
+          connect: u.building.adjacentMode !== 0,
           disappearsWhenBuilt: u.building.disappearsWhenBuilt !== 0,
           makeObject: u.building.stackUnitId,
           makeTile: u.building.foundationTerrainId,
