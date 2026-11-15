@@ -72,7 +72,9 @@ test('ground height on every slope is the tile height plus teleport\'s rz', () =
       const type = ground.type(col, row);
       seen.add(type);
       for (const [rx, ry] of [[0.1, 0.2], [0.7, 0.3], [0.25, 0.9], [0.5, 0.5], [0.95, 0.6]] as const) {
-        expect(ground.z(col + rx, row + ry)).toBeCloseTo(map.elevationAt(col, row) + decompRz(type, rx, ry), 9);
+        // The sim's float32 `TileMap.groundZ`, the very value it gives a ground object's z there.
+        expect(ground.z(col + rx, row + ry)).toBe(map.groundZ(col + rx, row + ry));
+        expect(ground.z(col + rx, row + ry)).toBeCloseTo(map.elevationAt(col, row) + decompRz(type, rx, ry), 5);
       }
     }
   }

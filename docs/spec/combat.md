@@ -186,6 +186,10 @@ Computed on the **launcher** at the moment the hit lands.
 
 Melee attackers get no bonus from being higher; ranged attackers get no
 penalty for being lower. The base class returns 1.0 (`src/com_obj.cpp:113`).
+`world_z` is the ground's height under a ground object (`teleport`,
+movement.md §4), so on random-map hills both modifiers apply; the port's
+vectors are `combat.test.ts` "the hill modifier from world_z" (higher,
+lower, same height, for both kinds, and a cliff on the line).
 
 `higher_than_target` (`src/t_c_obj.cpp:803`, **L**): true at once if the
 attacker's `world_z` > the target's. Otherwise walk from attacker to target
@@ -196,9 +200,28 @@ line (from `TRIBE_Cliff_Higher_Check_Table`, indexed by the cliff's facet)
 crosses the attacker→target segment, count +1 if the direction to the
 target lies inside the facet's angle window(s), else −1
 (`src/t_c_obj.cpp:762-801`). Result: true if the count is ≥ 1
-(`:885-891`). This needs `atan2` once (`:776`) — the port must supply a
-deterministic version. *The cliff table contents were not transcribed;
-unverified.*
+(`:885-891`). This needs `atan2` once (`:776`) — the port uses `trig.ts`.
+
+Details the port follows (`packages/sim/src/combat.ts` `higherThanTarget`):
+- The steps are `dx / n`, `dy / n` in float; a tile is checked only when the
+  stepped point's `(int)` tile changes. With `|x step| > |y step|` the side
+  tiles are (col, row − 1) then (col, row + 1), else (col − 1, row) then
+  (col + 1, row); the first of the three that holds a cliff ends that tile.
+- A cliff is an object of `object_group` 0x22 (`OBJECT_GROUP_CLIFF`, Cliffs
+  264-273) in the tile's object list; `LastCliffObject` is passed as 0, so
+  the first cliff in the list counts (lists add at the front: the newest).
+- `lines_intersect` is a stub that returns 1 (`src/t_c_obj.cpp:758`), so
+  every cliff found counts and the table's line offsets are never used.
+- The angle is `atan2(target y − y, target x − x)` stored as float, plus 2π
+  (`− g_angle_negative_two_pi`, −6.2831855f) when negative. −1 when
+  `facet ≥ 0x19` or the angle is outside both `[from1, to1]` and
+  `[from2, to2]`, else +1.
+- `TRIBE_Cliff_Higher_Check_Table` (`src/game_globals.cpp:432`, 25 rows of
+  `from1, to1, from2, to2, line_x1, line_y1, line_x2, line_y2`), the angle
+  windows by facet: 0 and 14 [3.14, 4.71]; 1, 2, 18, 19 [1.58, 4.7]; 3, 15,
+  24 [1.57, 3.14]; 4, 5, 16, 17 [0.01, 3.13]; 6 and 12 [0, 1.57]; 7, 8, 22,
+  23 [4.72, 6.28] or [0, 1.56]; 9 and 13 [4.71, 6.28]; 10, 11, 20, 21
+  [3.15, 6.27]; every other second window is (−1, −1).
 
 ### 2.4 Death
 

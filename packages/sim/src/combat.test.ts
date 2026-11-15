@@ -5,6 +5,7 @@ import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { facetOf, currentSprite } from './movement';
 import { f32, mul32, MS_TO_SECONDS, sub32 } from './num';
+import { TileMap } from './map';
 import { updateObject } from './objects';
 import { CrtRand } from './rng';
 import { VICTORY_SPECIAL } from './victory';
@@ -108,6 +109,59 @@ describe('combat.md §8 Example 1: damage from the dat weapons and armours', () 
     // 3 x 0.6666 = 1.9998 takes it below 1 (clamped to 0): no minimum; the kill counts.
     expect([t.hp, w.attributes[1]![ATTR_KILLS]]).toEqual([0, 1]);
   });
+});
+
+describe('combat.md §2.3: the hill modifier from world_z (calc_attack_modifier, src/t_c_obj.cpp:288)', () => {
+  /** A 48 x 48 grass map with a one-level plateau over tiles 8-12 (both ways): (10.5, 10.5) is on it. */
+  function hill(...units: StartUnit[]): World {
+    const map = new TileMap(48, 48);
+    for (let row = 8; row <= 12; row++) for (let col = 8; col <= 12; col++) map.setTile(col, row, 0, 1);
+    return new World({ players: 3, map, units, victory: { type: VICTORY_SPECIAL } });
+  }
+
+  const ON = 10.5;
+  const BELOW = 15.5;
+  const cases: [string, number, number, number, number, number, number, number][] = [
+    // name, attacker type, its x/y, target type, its x/y, the attacker's and target's z, hp after one hit
+    ['ranged attacker higher: Bowman on the hill -> Clubman below, 3 x 1.5', BOWMAN, ON, CLUBMAN, BELOW, 1, 0, 35.5],
+    ['ranged attacker lower: Bowman below -> Clubman on the hill, no penalty', BOWMAN, BELOW, CLUBMAN, ON, 0, 1, 37],
+    ['ranged, same height: both on the hill', BOWMAN, ON, CLUBMAN, 12.5, 1, 1, 37],
+    ['melee attacker lower: Clubman below -> Villager on the hill, 3 x 0.6666', CLUBMAN, 13.5, VILLAGER, 12.5, 0, 1, sub32(25, mul32(3, f32(0.6666)))],
+    ['melee attacker higher: Clubman on the hill -> Villager below, no bonus', CLUBMAN, 12.5, VILLAGER, 13.5, 1, 0, 22],
+    ['melee, same height: both on the hill', CLUBMAN, ON, VILLAGER, 11.5, 1, 1, 22],
+  ];
+  for (const [name, attacker, ax, target, tx, az, tz, after] of cases) {
+    test(`${name}: ${after}`, () => {
+      const w = hill({ owner: 1, type: attacker, x: ax, y: ax }, { owner: 2, type: target, x: tx, y: tx });
+      const a = w.entities.get(1)!;
+      const t = w.entities.get(2)!;
+      // Placement (teleport) set each z from the ground.
+      expect([a.z, t.z]).toEqual([az, tz]);
+      const ctx = stepContext(w);
+      ctx.rng.srand(14);
+      doAttack(ctx, a, t);
+      expect(t.hp).toBe(after);
+    });
+  }
+
+  // higher_than_target's cliff count (src/t_c_obj.cpp:803, :762): level ground, a cliff on the line to the target.
+  for (const [facet, after] of [
+    [6, 35.5],
+    [0, 37],
+  ] as const) {
+    test(`ranged, level, a cliff of facet ${facet} on the line: ${after === 35.5 ? 'higher (angle 0 inside its window), 3 x 1.5' : 'not higher (angle 0 outside its window)'}`, () => {
+      const w = world({ owner: 1, type: BOWMAN, x: 10.5, y: 10.5 }, { owner: 2, type: CLUBMAN, x: 15.5, y: 10.5 });
+      const cliff = w.createObject(0, 264, 12.5, 10.5, 0);
+      cliff.facet = facet;
+      const a = w.entities.get(1)!;
+      const t = w.entities.get(2)!;
+      expect([a.z, t.z]).toEqual([0, 0]);
+      const ctx = stepContext(w);
+      ctx.rng.srand(14);
+      doAttack(ctx, a, t);
+      expect(t.hp).toBe(after);
+    });
+  }
 });
 
 describe('combat.md §8 Example 2: reload cadence', () => {

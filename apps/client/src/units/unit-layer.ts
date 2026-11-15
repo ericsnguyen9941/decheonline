@@ -513,10 +513,11 @@ export class UnitLayer {
       const at = this.drawnAt(t, now);
       // Everything stands on the ground as drawn (`world_z` is the hill's height there, `teleport`).
       const pos = view.ground.pixel(at.x, at.y);
-      // Missiles fly above the ground: the sim's `world_z` raises the sprite over it (others stay at 0). The parts of
-      // the graphic at `draw_level` 10 or less stay at the shadow point on the ground (`RGE_Sprite::draw`).
+      // Missiles fly above the ground: the sim's `world_z` over the ground's raises the sprite (a ground object's
+      // `world_z` is the ground's, `TileMap.groundZ`, so it stays on it). The parts of the graphic at `draw_level` 10
+      // or less stay at the shadow point on the ground (`RGE_Sprite::draw`).
       const graphicInfo = this.o.provider.graphicInfo(graphic);
-      let lift = Math.round(e.z * Z_PIXELS);
+      let lift = Math.round((e.z - view.ground.z(e.x, e.y)) * Z_PIXELS);
       if (graphicInfo && graphicInfo.deltas.length === 0 && graphicInfo.layer <= GROUND_LAYER) lift = 0;
       const split = lift !== 0 && graphicInfo !== null && splitsShadow(this.o.provider, graphicInfo);
       // A tree's shadow part goes through the terrain's clip masks, the tree itself over them (src/view.cpp:2335-2377).

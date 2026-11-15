@@ -72,6 +72,44 @@ const HALF = f32(0.5);
 const MELEE_LOW = f32(0.6666);
 const MISSILE_SPAN = f32(3);
 const MISSILE_DZ = f32(-0.1);
+/** `OBJECT_GROUP_CLIFF`. */
+const GROUP_CLIFF = 0x22;
+/** `g_angle_negative_two_pi`. */
+const NEG_TWO_PI = f32(-6.2831855);
+/**
+ * `TRIBE_Cliff_Higher_Check_Table` (src/game_globals.cpp:432), per cliff facet: the angle windows `[from1, to1]` and
+ * `[from2, to2]` (-1 none) in which the target lies below the cliff. The table's line offsets only feed
+ * `lines_intersect`, which always returns 1 (src/t_c_obj.cpp:758), so they are left out.
+ */
+const CLIFF_HIGHER: readonly (readonly [number, number, number, number])[] = (
+  [
+    [3.14, 4.71, -1, -1],
+    [1.58, 4.7, -1, -1],
+    [1.58, 4.7, -1, -1],
+    [1.57, 3.14, -1, -1],
+    [0.01, 3.13, -1, -1],
+    [0.01, 3.13, -1, -1],
+    [0, 1.57, -1, -1],
+    [4.72, 6.28, 0, 1.56],
+    [4.72, 6.28, 0, 1.56],
+    [4.71, 6.28, -1, -1],
+    [3.15, 6.27, -1, -1],
+    [3.15, 6.27, -1, -1],
+    [0, 1.57, -1, -1],
+    [4.71, 6.28, -1, -1],
+    [3.14, 4.71, -1, -1],
+    [1.57, 3.14, -1, -1],
+    [0.01, 3.13, -1, -1],
+    [0.01, 3.13, -1, -1],
+    [1.58, 4.7, -1, -1],
+    [1.58, 4.7, -1, -1],
+    [3.15, 6.27, -1, -1],
+    [3.15, 6.27, -1, -1],
+    [4.72, 6.28, 0, 1.56],
+    [4.72, 6.28, 0, 1.56],
+    [1.57, 3.14, -1, -1],
+  ] as const
+).map(([from1, to1, from2, to2]) => [f32(from1), f32(to1), f32(from2), f32(to2)] as const);
 /** `OBJECT_GROUP_CIVILIAN`: the only killers whose kills keep their food (`produceWhenKilledBy`). */
 const GROUP_CIVILIAN = 4;
 /** Player attribute 0x14: kills; 0x2B: razings. */
@@ -414,11 +452,79 @@ export function doAttack(ctx: GameContext, attacker: Entity, target: Entity): vo
   damage(ctx, target, attacker, attackModifier(ctx, attacker, target));
 }
 
-/** `calc_attack_modifier` (combat.md §2.3) on flat ground: only the attacker's and target's z decide. */
-function attackModifier(ctx: PlayerMasters, attacker: Entity, target: Entity): number {
+/** `calc_attack_modifier` (combat.md §2.3): ×1.5 for a ranged attacker higher than its target, ×0.6666 for a lower melee one. */
+function attackModifier(ctx: GameContext, attacker: Entity, target: Entity): number {
   const c = typeOf(ctx, attacker).combat!;
-  if (c.projectileUnitId >= 0) return attacker.z > target.z ? f32(1.5) : 1;
+  if (c.projectileUnitId >= 0) return higherThanTarget(ctx, attacker, target) ? f32(1.5) : 1;
   return attacker.z < target.z ? MELEE_LOW : 1;
+}
+
+/**
+ * `higher_than_target` (src/t_c_obj.cpp:803; combat.md §2.3): a higher `world_z`, or else a cliff count along the line
+ * to the target: in `2 × |(int)major delta|` steps, at each new tile the first cliff on it or on one of its two
+ * neighbours across the minor axis counts +1 when the direction to the target lies in that cliff facet's angle window,
+ * else -1 (`higher_check_for_cliff`, :762). Higher when the count ends above 0.
+ */
+function higherThanTarget(ctx: GameContext, e: Entity, target: Entity): boolean {
+  if (e.z > target.z) return true;
+  const dx = sub32(target.x, e.x);
+  const dy = sub32(target.y, e.y);
+  if (dx === 0 && dy === 0) return false;
+  let steps = Math.abs(dy) > Math.abs(dx) ? Math.abs(toInt(dy)) * 2 : Math.abs(toInt(dx)) * 2;
+  if (steps === 0) return false;
+  const xStep = div32(dx, steps);
+  const yStep = div32(dy, steps);
+  // Stepping mostly along x the side tiles are across y, and the other way round.
+  const [sideX, sideY] = Math.abs(xStep) > Math.abs(yStep) ? [0, 1] : [1, 0];
+  const { width, height } = ctx.map;
+  let cliffs: Map<number, Entity> | null = null;
+  let angle = -1;
+  let count = 0;
+  const check = (col: number, row: number): boolean => {
+    if (col < 0 || row < 0 || col >= width || row >= height) return false;
+    cliffs ??= cliffsByTile(ctx);
+    const cliff = cliffs.get(row * width + col);
+    if (!cliff) return false;
+    if (angle === -1) {
+      angle = f32(atan2(sub32(target.y, e.y), sub32(target.x, e.x)));
+      if (angle < 0) angle = sub32(angle, NEG_TWO_PI);
+    }
+    const w = CLIFF_HIGHER[cliff.facet ?? 0];
+    if (!w || ((angle < w[0] || angle > w[1]) && (angle < w[2] || angle > w[3]))) count--;
+    else count++;
+    return true;
+  };
+  let x = e.x;
+  let y = e.y;
+  let priorX = -999;
+  let priorY = -999;
+  for (; steps > 0; steps--) {
+    x = add32(x, xStep);
+    y = add32(y, yStep);
+    const col = toInt(x);
+    const row = toInt(y);
+    if (col === priorX && row === priorY) continue;
+    priorX = col;
+    priorY = row;
+    if (!check(col, row) && !check(col - sideX, row - sideY)) check(col + sideX, row + sideY);
+  }
+  return count > 0;
+}
+
+/**
+ * The cliff (`OBJECT_GROUP_CLIFF`) each tile's object list finds first: lists add at the front and cliffs never move,
+ * so the newest cliff on the tile.
+ */
+function cliffsByTile(ctx: GameContext): Map<number, Entity> {
+  const cliffs = new Map<number, Entity>();
+  const { width, height } = ctx.map;
+  for (const o of ctx.entities.all()) {
+    if (ctx.masters[o.owner]?.[o.type]?.group !== GROUP_CLIFF) continue;
+    const tile = Math.min(Math.max(toInt(o.y), 0), height - 1) * width + Math.min(Math.max(toInt(o.x), 0), width - 1);
+    const seen = cliffs.get(tile);
+    if (!seen || seen.id < o.id) cliffs.set(tile, o);
+  }
+  return cliffs;
 }
 
 /** `calculateDamage` (combat.md §2.2) with the defence terrain multiplier 1. */
@@ -614,7 +720,7 @@ export function updateMissile(ctx: GameContext, e: Entity): ActionResult {
   return ActionResult.Continue;
 }
 
-/** `missile_move` (src/misl_obj.cpp:77-92) on flat ground: true when it ends on the ground. */
+/** `missile_move` (src/misl_obj.cpp:77-92): true when it ends on the ground (`teleport`'s `rz` is its `world_z`). */
 function missileMove(ctx: GameContext, e: Entity, a: MissileAction, vx: number, vy: number, vz: number): boolean {
   const nx = add32(e.x, vx);
   const ny = add32(e.y, vy);
@@ -622,8 +728,9 @@ function missileMove(ctx: GameContext, e: Entity, a: MissileAction, vx: number, 
   if (nx < 0 || nx >= ctx.map.width || ny < 0 || ny >= ctx.map.height) die(ctx, e, a);
   e.x = f32(Math.min(Math.max(nx, 0), sub32(ctx.map.width, f32(0.001))));
   e.y = f32(Math.min(Math.max(ny, 0), sub32(ctx.map.height, f32(0.001))));
-  e.z = nz < 0 ? 0 : nz;
-  return e.z === 0;
+  const rz = ctx.map.groundZ(e.x, e.y);
+  e.z = !typeOf(ctx, e).flying || rz > nz ? rz : nz;
+  return rz === e.z;
 }
 
 /** `make_object_collision_list` (src/misl_obj.cpp:94) for one candidate: within 3 tiles and inside the swept box. */

@@ -117,7 +117,15 @@ overwrites it with the global 2 (`src/player.cpp:50-55`, M).
 - `teleport` clamps x to `[0, map_width − 0.001]` (same for y), moves the
   object between tile lists, and for `movement_type 0` sets `world_z` to the
   tile height plus a slope term from `tile_type` (17 cases), for type 1 only
-  when that is higher (`src/stat_obj.cpp:1473-1632`, L).
+  when that is higher (`src/stat_obj.cpp:1473-1632`, L). It returns that
+  ground height `rz` (the missile's hit-ground test, combat.md §5). In
+  float: `rx = x − (float)(int)x`, likewise `ry`, then the type's term (the
+  table is in hud.md "Elevation") plus the tile's height. The dat has only
+  `movement_type` 0 and 1 (`fly_mode`; 1 for the missiles, Smoke, Pigeons,
+  lasers and the like). Port: `TileMap.groundZ` (f32 at every operation)
+  and `tileType` in `packages/sim/src/map.ts`; `teleport` (movement.ts)
+  sets `z` from it, so every placement and step on a hill carries the
+  height. The client draws with the same function (hud.md "Elevation").
 
 ### 4.1 `passable(obj, x, y, checkTerrain)` (`src/pathsys.cpp:1029`, L)
 
@@ -435,7 +443,11 @@ multiplier 1. Then multiplier ×= `terrains[restriction][tile terrain & 0x1f]`
 and, if > 0, `speed ×= multiplier`. On slopes `speed` is **not** reset
 first, so it compounds step by step (0.9ⁿ while climbing). The speed set
 here is used for the *next* step's distance; the very first step of a move
-uses `maximumSpeed()` without terrain.
+uses `maximumSpeed()` without terrain. `z_before`/`z_after` are the unit's
+`world_z` around this step's `teleport`, i.e. the ground's height (§4): on
+the test map (flat) every step is level. The port's vectors are
+`movement.test.ts` "climbing and descending speed" (up, down, level over a
+one-level slope of type 8).
 
 ## 9. Angles and facets
 

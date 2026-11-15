@@ -84,39 +84,9 @@ export function tileCorners(type: number): Point[] {
   ];
 }
 
-/**
- * `RGE_Map::get_tile_type` (src/map.cpp:2268): the slope shape of tile (col, row) from which of its neighbours are one
- * level higher; off-map neighbours count as level with it. The decomp's names, in map terms: n (row - 1), e (col + 1),
- * w (col - 1), s (row + 1), nw (row - 1, col + 1), sw (row + 1, col - 1), ne (row - 1, col - 1), se (row + 1, col + 1).
- */
+/** `RGE_Map::get_tile_type`: the sim's (`TileMap.tileType`), which `teleport`'s heights read too. */
 export function tileType(map: TileMap, col: number, row: number): number {
-  const { width, height } = map;
-  if (col < 0 || row < 0 || col >= width || row >= height) return 0;
-  const c = map.elevationAt(col, row);
-  const at = (dc: number, dr: number) => {
-    const x = col + dc;
-    const y = row + dr;
-    return x >= 0 && y >= 0 && x < width && y < height ? map.elevationAt(x, y) : c;
-  };
-  const up = c + 1;
-  const down = c - 1;
-  const n = at(0, -1);
-  const e = at(1, 0);
-  const w = at(-1, 0);
-  const s = at(0, 1);
-  if (n === up && e === up) return 14;
-  if (w === up && s === up) return 13;
-  if (n === up && w === up) return 16;
-  if (e === up && s === up) return 15;
-  if (n === up) return 6;
-  if (e === up) return 8;
-  if (w === up) return 5;
-  if (s === up) return 7;
-  if (at(1, -1) === up) return w === down && s === down ? 2 : 10;
-  if (at(-1, 1) === up) return n === down && e === down ? 1 : 9;
-  if (at(-1, -1) === up) return e === down && s === down ? 3 : 11;
-  if (at(1, 1) === up) return n === down && w === down ? 4 : 12;
-  return 0;
+  return map.tileType(col, row);
 }
 
 /**
@@ -129,18 +99,6 @@ export function tilePicture(art: TerrainLayout, type: number, col: number, row: 
   if (count > 1 && (art.rows > 1 || art.cols > 1)) variant = (row % art.rows) * art.cols + (col % art.cols);
   if (variant > count - 1) variant = 0;
   return animations * variant + shapeIndex;
-}
-
-/** The surface of a tile at (rx, ry) within it, in levels above the tile's own height (0-1). */
-function surfaceZ(type: number, rx: number, ry: number): number {
-  const [raised, alongLR] = SHAPES[type] ?? SHAPES[0]!;
-  if (raised === 0) return 0;
-  const zl = raised & L ? 1 : 0;
-  const zt = raised & T ? 1 : 0;
-  const zb = raised & B ? 1 : 0;
-  const zr = raised & R ? 1 : 0;
-  if (alongLR) return rx <= ry ? zl + (zr - zb) * rx + (zb - zl) * ry : zl + (zt - zl) * rx + (zr - zt) * ry;
-  return rx + ry <= 1 ? zl + (zt - zl) * rx + (zb - zl) * ry : zt + zb - zr + (zr - zb) * rx + (zr - zt) * ry;
 }
 
 /**
@@ -187,13 +145,13 @@ export class Ground {
     return { x: o.x, y: o.y - this.map.elevationAt(col, row) * ELEV_H - (raisedTop(type) ? ELEV_H : 0), h: tileBoxHeight(type) };
   }
 
-  /** `world_z` of the ground at map point (x, y): the tile's height plus its slope there (`teleport`'s `rz`). */
+  /**
+   * `world_z` of the ground at map point (x, y): the tile's height plus its slope there (`teleport`'s `rz`), from the
+   * sim's own `TileMap.groundZ`, so a ground object's sim `z` is exactly the height it is drawn at.
+   */
   z(x: number, y: number): number {
     if (this.flat) return 0;
-    const { width, height } = this.map;
-    const col = Math.min(Math.max(Math.floor(x), 0), width - 1);
-    const row = Math.min(Math.max(Math.floor(y), 0), height - 1);
-    return this.map.elevationAt(col, row) + surfaceZ(this.type(col, row), x - col, y - row);
+    return this.map.groundZ(x, y);
   }
 
   /** Map pixel of map point (x, y) at `lift` levels above the ground there (`get_point` with `world_z`). */

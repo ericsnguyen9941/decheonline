@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { EntityStore, type Entity } from './entities';
 import { TileMap } from './map';
 import { doTrivialMove, newMover, teleport, type MoveContext } from './movement';
-import { f32 } from './num';
+import { f32, mul32 } from './num';
 import { estimate, iterationCap, OpenList, PathingSystem } from './pathing';
 import { CrtRand } from './rng';
 import type { UnitType } from './units';
@@ -46,8 +46,7 @@ const UNIT: UnitType = {
   building: null,
 };
 
-function setup(waypoint: [number, number], seed = 14) {
-  const map = new TileMap(32, 32);
+function setup(waypoint: [number, number], seed = 14, map = new TileMap(32, 32), start = f32(10.5)) {
   const entities = new EntityStore();
   const pathing = new PathingSystem(map, entities, () => UNIT);
   const rng = new CrtRand();
@@ -58,10 +57,10 @@ function setup(waypoint: [number, number], seed = 14) {
     teleport(ctx, e, UNIT, e.x, e.y, 0);
     return e;
   };
-  const unit = add(10.5, 10.5);
+  const unit = add(start, 10.5);
   const m = unit.mover!;
   m.path = [
-    { x: f32(10.5), y: f32(10.5), z: 0, facet: 0xff },
+    { x: start, y: f32(10.5), z: 0, facet: 0xff },
     { x: f32(waypoint[0]), y: f32(waypoint[1]), z: 0, facet: 0xff },
   ];
   m.pathIndex = 1;
@@ -154,5 +153,74 @@ describe('movement.md §13 worked examples', () => {
     expect(open.size).toBe(3);
     expect([...open.total.slice(1, 4)]).toEqual([8, 9, 7]);
     expect(open.x[1]).toBe(8);
+  });
+});
+
+/** A 32 x 32 grass map whose tiles from column 12 east are one level up: column 11 is the slope (type 8, rz = rx). */
+function eastHill(): TileMap {
+  const map = new TileMap(32, 32);
+  for (let row = 0; row < 32; row++) for (let col = 12; col < 32; col++) map.setTile(col, row, 0, 1);
+  return map;
+}
+
+describe('world_z from the ground (teleport, src/stat_obj.cpp:1586-1596)', () => {
+  test('a ground object takes the ground height wherever it is teleported, whatever z it is given', () => {
+    const { ctx, add } = setup([14.5, 10.5], 14, eastHill());
+    const e = add(10.5, 10.5);
+    expect(e.z).toBe(0);
+    teleport(ctx, e, UNIT, f32(11.25), f32(10.5), 5);
+    expect(e.z).toBe(0.25);
+    teleport(ctx, e, UNIT, f32(14.5), f32(10.5), 0);
+    expect(e.z).toBe(1);
+  });
+
+  test('a flying object (movement_type 1) keeps its z above the ground and is lifted to the ground below it', () => {
+    const { ctx, add } = setup([14.5, 10.5], 14, eastHill());
+    const flying: UnitType = { ...UNIT, flying: true, radiusZ: 0 };
+    const e = add(10.5, 10.5);
+    expect(teleport(ctx, e, flying, f32(14.5), f32(10.5), 3)).toBe(1);
+    expect(e.z).toBe(3);
+    expect(teleport(ctx, e, flying, f32(14.5), f32(10.5), f32(0.5))).toBe(1);
+    expect(e.z).toBe(1);
+  });
+});
+
+describe('movement.md §8.5: climbing and descending speed (src/move_obj.cpp:1382-1396)', () => {
+  /** Steps toward the waypoint until it is reached; each step's z change and the speed it leaves for the next. */
+  function walk(start: number, goal: number): { dz: number; before: number; speed: number }[] {
+    const { unit, m, step } = setup([goal, 10.5], 14, eastHill(), f32(start));
+    const out: { dz: number; before: number; speed: number }[] = [];
+    for (let i = 0; i < 40 && Math.abs(unit.x - goal) > 0.3; i++) {
+      const z = unit.z;
+      const before = m.speed;
+      if (step() !== 0) break;
+      out.push({ dz: unit.z - z, before, speed: m.speed });
+    }
+    return out;
+  }
+
+  test('walking up the slope: each step that rises more than 0.02 multiplies the speed by 0.9', () => {
+    const steps = walk(10.5, 14.5);
+    const up = steps.filter((s) => s.dz > 0.02);
+    expect(up.length).toBeGreaterThan(2);
+    for (const s of up) expect(s.speed).toBe(mul32(s.before, f32(0.9)));
+    // Up on the plateau the speed is reset to the unit's speed.
+    expect(steps.at(-1)!.dz).toBe(0);
+    expect(steps.at(-1)!.speed).toBe(f32(1.2));
+  });
+
+  test('walking down the slope: each step that falls more than 0.02 multiplies the speed by 1.03', () => {
+    const steps = walk(13.5, 9.5);
+    const down = steps.filter((s) => s.dz < -0.02);
+    expect(down.length).toBeGreaterThan(2);
+    for (const s of down) expect(s.speed).toBe(mul32(s.before, f32(1.03)));
+    expect(steps.at(-1)!.dz).toBe(0);
+    expect(steps.at(-1)!.speed).toBe(f32(1.2));
+  });
+
+  test('walking on level ground: the speed stays the unit speed', () => {
+    const steps = walk(10.5, 3.5);
+    expect(steps.length).toBeGreaterThan(5);
+    for (const s of steps) expect([s.dz, s.speed]).toEqual([0, f32(1.2)]);
   });
 });

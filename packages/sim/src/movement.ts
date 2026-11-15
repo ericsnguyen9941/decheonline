@@ -222,12 +222,13 @@ function length32(dx: number, dy: number): number {
 }
 
 /**
- * `teleport`: unstamp, clamp to the map, move, restamp (movement.md §4). The map is flat (no elevation drawing or
- * slope heights yet), so z is kept as given. `new_location` moves the line of sight (visibility.md §3.2): on a new
- * tile it is removed at the old position, then added at the new one if the object is active. `placed` is the first
- * placement of a new object, which has no old position.
+ * `teleport`: unstamp, clamp to the map, move, restamp (movement.md §4). z is the ground's height there (`rz`,
+ * `TileMap.groundZ`) for a ground object; a flying one (`movement_type` 1) keeps the given z unless the ground is
+ * higher. Returns `rz`. `new_location` moves the line of sight (visibility.md §3.2): on a new tile it is removed at
+ * the old position, then added at the new one if the object is active. `placed` is the first placement of a new
+ * object, which has no old position.
  */
-export function teleport(ctx: MoveContext, e: Entity, t: UnitType, x: number, y: number, z: number, placed = false): void {
+export function teleport(ctx: MoveContext, e: Entity, t: UnitType, x: number, y: number, z: number, placed = false): number {
   ctx.pathing.unstamp(e, t);
   const maxX = sub32(ctx.map.width, MAP_EDGE);
   const maxY = sub32(ctx.map.height, MAP_EDGE);
@@ -237,9 +238,11 @@ export function teleport(ctx: MoveContext, e: Entity, t: UnitType, x: number, y:
   if (moved && !placed) unexploreObject(ctx, e, t, false);
   e.x = nx;
   e.y = ny;
-  e.z = f32(z);
+  const rz = ctx.map.groundZ(nx, ny);
+  e.z = !t.flying || rz > f32(z) ? rz : f32(z);
   if (moved && e.state === ObjectState.Active) exploreObject(ctx, e, t, false);
   ctx.pathing.stamp(e, t);
+  return rz;
 }
 
 /** The tile index of a coordinate, clamped to the map (src/stat_obj.cpp:1503-1511). */

@@ -203,7 +203,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 11;
+  version: 12;
   players: number;
   turn: number;
   granularity: number;
@@ -953,7 +953,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 11,
+      version: 12,
       players: this.players,
       turn: this.turn,
       granularity: this.granularity,
@@ -986,7 +986,7 @@ export class World {
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 11) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 12) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
