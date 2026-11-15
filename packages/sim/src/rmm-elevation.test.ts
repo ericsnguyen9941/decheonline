@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { MapStack, NONE } from './rmm-base';
-import { generateElevation, hotSpotModifiers, linkStackRandomly, type ElevationInfo } from './rmm-elevation';
+import { generateElevation, linkStackRandomly, type ElevationInfo } from './rmm-elevation';
 import { RmmMap } from './rmm-map';
+import { hotSpotModifiers } from './rmm-terrain';
 import { rmmFixture, scriptedRand } from './rmm-testing';
 
 const TERRAIN_WATER = 1;
@@ -22,7 +23,7 @@ function list(stack: MapStack, head: number): number[] {
   return out;
 }
 
-describe('Elevation::generate_modifiers (src/rmm_elev.cpp:197)', () => {
+describe('Elevation::generate_modifiers (src/rmm_elev.cpp:197, shared with the terrain module)', () => {
   test('§9.4: hot spot (62,10) radius 16 fade 15 gives 101 to distance 9, then 90..15, then 0', () => {
     const search = new Uint8Array(96 * 96);
     hotSpotModifiers(search, 96, 96, [{ x: 62, y: 10, radius: 16, fade: 15 }]);

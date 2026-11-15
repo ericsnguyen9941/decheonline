@@ -371,10 +371,15 @@ first**; `pop` takes the head (lowest cost).
 the `area` square is another land's zone (< `land_num`, ≠ own zone);
 otherwise the number of own-zone tiles in the 5×5 window, plus 5 per
 off-map row and 1 per off-map column inside that window (the edge tests
-are strict, `:52-81`). `chance` (N) reads as: distance outside the walls
-`max(wall1 − x, x − wall3)` plus the same for y, clamped at 0, × fade;
-≥ 100 → 101. The decomp body mixes the terms oddly (`:96-128`); the exact
-literal formula is **unverified** and needs a retail check.
+are strict, `:52-81`). `chance` (N) is the decomp body taken literally,
+checked against the retail `Empiresx.exe` 1.0a (`0x4710a0`, same
+instructions): `xc = max(wall1 − x, x − wall3)`;
+`a = max(2·wall1 − x, x + W − 2·wall3)`; if `a > 0` the y term is
+`max(wall2 + a − y, a − wall4 + y)`, else `max(wall2 − y, y − wall4)`;
+result `(max(xc, 0) + max(y term, 0)) × fade`, ≥ 100 → 101, fade 0 → 0.
+Near an x wall the y term picks up the x distance: with walls (5, 5, 91, 91),
+fade 33, W 96, tile (3, 7) gives 101 where the "distance outside the walls"
+reading gives 66 (test `rmm-land.test.ts`).
 
 ### 5.3 Shallows (`src/rmm_shal.cpp:17-212`)
 
@@ -416,7 +421,7 @@ blocks cells within `cliff_terrain_spacing`. Cells near hot spots
 (`radius/3 + 2`) and isolated sites are dropped; sites shuffled by
 `randomize_stack` (2 passes, one draw per node, `src/rmm_base.cpp:382`,
 `j = r·100/32767`; **bug:** `r = 32767` gives bucket 100, one past the
-array). Then one draw (`src/rmm_clif.cpp:19`) and per cliff:
+array: the node leaves the list and is never gathered back, see §12.3). Then one draw (`src/rmm_clif.cpp:19`) and per cliff:
 size `r·2v/32767 + average − v` (`:149`; stop if < 3 or no sites); pop a
 live site; direction `r·4/32767` (`:180`); per step draw (`:185`):
 value < 18 → direction − 1 (0 wraps to 3), < 36 → + 1 (3 wraps to 0); try direction, +1, −1, then (first step
@@ -626,7 +631,7 @@ Exclusion zones: land rows 59/65/66/102 → 12; avoid rows 65 → 12,
 
 ## 10. Unverified or inferred
 
-- `Land::chance` (N): exact formula (§5.2).
+- `Land::chance` (N): settled by the retail check (§5.2).
 - Float details: `terrain_size` for 100 % × 7372 is 7371.9998 before the
   cast if x87 keeps the product unrounded (→ 7371), 7372 if stored as float
   first. Example D assumes 7371. The elevation scale for `r = 13328`
@@ -644,10 +649,10 @@ Exclusion zones: land rows 59/65/66/102 → 12; avoid rows 65 → 12,
   `set_terrain`, which also places terrain objects for Gaia; this matters
   only if the base terrain (water) gets objects there (**unverified**).
 - Which terrain-object ids Gaia's master list lacks (those are skipped
-  without drawing) is unverified; so is the per-tile guard in the area
+  without drawing) is unverified. The per-tile guard in the area
   `set_terrain` (`src/map.cpp:2230`: the target terrain must have a graphic
-  for the tile's slope shape), which decides whether a tile gets terrain
-  objects at all.
+  for the tile's slope shape) is narrowed down in §12.3: it can only matter
+  for a sloped shallows tile in the object module's terrain-object pass.
 - Retail menu names for map types (§2.1).
 
 ## 11. Implications for the port
@@ -666,8 +671,7 @@ Exclusion zones: land rows 59/65/66/102 → 12; avoid rows 65 → 12,
 - **Implication:** keep the quirks: moved previous land, zone-indexed land
   counter, elevation spacing bug, horizontal-only terrain fill, cliff
   direction wrap, `randomize_stack` bucket 100 (needs a defined behaviour:
-  an extra 101st bucket, never drained, would drop the node; decide by
-  retail check), `make_placement_stack` never drawing the last row/column.
+  the node is dropped, settled by retail check, §12.3), `make_placement_stack` never drawing the last row/column.
 - **Implication:** index random-map entries by array position, not stored
   id; read field meanings from §2.2, since several `@aoe/data` names
   (`waterShape`, `borderUsage`, `setPlaceForAllPlayers`) do not describe
@@ -772,3 +776,96 @@ Unverified or inferred:
 - The area `set_terrain` per-tile shape check (`src/map.cpp:2230`) is still
   taken as always passing (`RmmMap`); the object module's terrain-object pass
   goes through it.
+
+### 12.3 Shared resources and map operations (`rmm-base.ts`, `rmm-map.ts`)
+
+Ported by the first crew; now tested in `rmm-base.test.ts` (list order, equal
+costs, single membership, `deinit`, `randomize_stack` with scripted draws,
+`find_path` marks, walls, diagonals) and `rmm-map.test.ts` (`clean_terrain`
+both passes, `get_tile_type`, `clean_elevation` with pre/postclean, the two
+`set_terrain` forms and terrain objects, `check_placement` 7/2/0, the TRIBE
+terrain and cliff brushes, the dat's land terrains). Re-read against
+`src/map.cpp`, `src/tmap.cpp` and `src/rmm_base.cpp`: all match except the one
+fix below. `RmmMap` and `MapStack` are shared with the terrain and object
+modules.
+
+Checked:
+
+- `randomize_stack` bucket 100 (`r = 32767`): in the retail exe
+  (`0x46d5d0`, frame `0x968`) `sub_stacks[100]` lies over the return address
+  and the caller's saved `ebp`, which is 0 there (the base generate loop at
+  `0x46d060` leaves it 0). The node is linked onto that slot and so leaves the
+  list; the stray writes land in dead register slots. `MapStack.randomize`
+  keeps a 101st bucket that is never gathered: the node is dropped but stays
+  linked to nothing live.
+- Terrain-object "old terrain" lookups read `obj_types[num]`, one past the
+  list, which is 0 for every terrain in the dat: object type 0 counts as
+  listed. Fixed in `RmmMap.inTerrainList` (it treated the slot as not found).
+- The area `set_terrain` shape guard: in the dat, terrains 0, 1, 2, 6 and
+  10–22 have a frame for all 17 shapes; 3, 4, 5, 7, 8 and 9 have shape 0
+  only. Every land and base terrain of `RANDOM_MAPS` is in the first set
+  (test), and the land module runs before elevation (all tiles flat), so the
+  guard passes for every land call. It can only fail for a flat-only terrain
+  with objects on a sloped tile: shallows (4, object 80). Elevation keeps the
+  spacing square of each level-1 tile all grass, so a shallows tile is sloped
+  only if `clean_elevation` moves a hill two tiles; **unverified** that this
+  never happens. `RmmMap` still takes the guard as passing.
+- `RGE_Tile` keeps terrain in 5 bits and height in 3 (bit-fields,
+  `include/map.h:32`). Every write in these modules (`tile->terrain_type =`
+  in land and shallows, the xor-mask in `set_terrain`) touches only the
+  terrain bits, so keeping `terrain` and `height` apart, as `RmmMap` does, is
+  byte-exact.
+
+### 12.4 Land module (`packages/sim/src/rmm-land.ts`)
+
+Ported: `generate`, `base_land_generate` (zone-indexed counter quirk, direct
+terrain writes, costs `r·100/32767 − count·clumpiness + 250`, neighbours left,
+right, up, down, leftover fill), `check_terrain_and_zone`, `chance` (literal,
+§5.2), and the controller's `calc_land_start` (`calcLandStart`) for the
+§9.2/§9.3 vectors. Input: `LandInfo` (lands with walls and fade, base
+terrain); the rest of the controller is not ported. Tests:
+`rmm-land.test.ts`: §9.2 (map seed 41 → (62, 10), (34, 84), 9 draws), §9.3
+(seed 101 → (85, 30), (10, 12), 15 draws), `chance` values, check counts,
+the zone quirk, area spacing, walls, and a deterministic map from the §9.2
+tables.
+
+Checked: `chance` against the retail exe (above). Unverified: float rounding in
+`calc_land_start` follows §4.1 (each step stored as float).
+
+### 12.5 Shallows module (`packages/sim/src/rmm-shallows.ts`)
+
+Ported: `generate` (pairs of land centres, then two random pairs of land
+tiles, x then y draws over `W − 1`, retried on 1, 4, 22) and
+`make_tribe_connections` (path costs as floats, own path list, walk back over
+marks 4–11, a 4-draw box round water path tiles, water 4-neighbours of land
+path tiles, every queued tile written as shallows). Tests:
+`rmm-shallows.test.ts` (a strait is forded, draw counts on land, an
+impassable target, retries on water).
+
+### 12.6 Elevation module (`packages/sim/src/rmm-elevation.ts`)
+
+Ported: `generate`, `generate_modifiers` (the terrain module's
+`hotSpotModifiers`, same code), `link_stack_randomly` (the head is left empty
+and only the drawn tiles reach it, unless tile (0, 0) is drawn, which relinks
+the head to the rest of the chain), `check_start_elevation`,
+`check_elevation`, `remove_area_from_lists` (row bound bug kept) and
+`base_elevation_generate`. Input: `ElevationInfo` (levels, hot spots). Tests:
+`rmm-elevation.test.ts` (§9.4 modifiers, `link_stack_randomly` with scripted
+draws, a 48×48 run: heights ≤ 4, steps ≤ 1, shapes refreshed,
+deterministic, a flat hot spot, water left alone).
+
+Checked: `link_stack_randomly` (`0x470810`) and `check_start_elevation`
+(`0x470480`) match the retail exe; `check_elevation` (`0x470560`) has the same
+structure. Unverified: `check_elevation`'s details beyond that structure (N in
+the decomp).
+
+### 12.7 Cliffs module (`packages/sim/src/rmm-cliffs.ts`)
+
+Ported: `generate`, `setup_cliff_maps`, `generate_cliff`,
+`check_for_valid_cliff_site` (wrap by 3, `wrapCliffDirection`) and
+`invalidate_cliff_area` (the bottom row is clamped only when the clamped
+right column is past the last cell row; kept). Pieces come from `RmmMap`'s
+TRIBE brushes. Input: `CliffsInfo` (the §4.5 numbers, hot spots). Tests:
+`rmm-cliffs.test.ts` (direction wrap, pieces from the cliff table at cell
+centres on cliff terrain, determinism, spacing from water and hot spots).
+All cliff functions are M; nothing unverified beyond the shared operations.

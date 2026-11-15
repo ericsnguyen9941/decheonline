@@ -6,6 +6,10 @@
 import { f32 } from './num';
 import { MapStack, NONE } from './rmm-base';
 import type { RmmMap } from './rmm-map';
+import { hotSpotModifiers, type HotSpot } from './rmm-terrain';
+
+/** The elevation generator's `generate_modifiers` (src/rmm_elev.cpp:197) is the terrain generator's computation. */
+export type { HotSpot };
 
 /** `RGE_Elevation_Info_Line` (include/rmm_elev.h). */
 export interface ElevationLine {
@@ -21,37 +25,9 @@ export interface ElevationLine {
   baseTerrain: number;
 }
 
-/** `RGE_Elevation_Hot_Spots` (also the terrain generator's). */
-export interface HotSpot {
-  x: number;
-  y: number;
-  radius: number;
-  fade: number;
-}
-
 export interface ElevationInfo {
   levels: ElevationLine[];
   hotSpots: HotSpot[];
-}
-
-/**
- * `generate_modifiers` (src/rmm_elev.cpp:197): per tile, the sum of `fade x (radius - distance)` over the hot spots it
- * is inside, capped at 101, in the search map.
- */
-export function hotSpotModifiers(search: Uint8Array, width: number, height: number, hotSpots: readonly HotSpot[]): void {
-  search.fill(0);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      let modifier = 0;
-      for (const spot of hotSpots) {
-        const dx = Math.abs(x - spot.x);
-        const dy = Math.abs(y - spot.y);
-        const contribution = spot.radius - Math.trunc(Math.sqrt(dx * dx + dy * dy));
-        if (contribution > 0) modifier += spot.fade * contribution;
-      }
-      search[y * width + x] = modifier > 100 ? 101 : modifier & 0xff;
-    }
-  }
 }
 
 /**
