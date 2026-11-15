@@ -190,16 +190,17 @@ export class Ground {
    * Map pixel where the building being placed is drawn when aligned at map point (x, y) (`draw_place_object`, src/
    * view.cpp:1160): the tile's box (`get_tile_screen_coords` with `drop`, view.cpp:1430: plus its type's `y_delta`, 8
    * lower on any slope and `ELEV_H` higher on types 3, 5, 6 and 11) and the middle of `alignment_box`'s corners (src/
-   * m_s_obj.cpp:1132), which is the point's flat place in the tile. On flat ground that is `pixel(x, y)`.
+   * m_s_obj.cpp:1132), which is the point's flat place in the tile. On flat ground that is `pixel(x, y)`. A wall
+   * outline's segment (`draw_wall_outline`, src/tvw_main.cpp:204) passes `drop` 0: no slope or dropped-type shift.
    */
-  placePixel(x: number, y: number, radiusX: number, radiusY: number): { x: number; y: number } {
+  placePixel(x: number, y: number, radiusX: number, radiusY: number, drop = true): { x: number; y: number } {
     const col = Math.trunc(x);
     const row = Math.trunc(y);
     const box = this.tileBox(col, row);
     const type = this.type(col, row);
     let top = box.y + Y_DELTA[type]!;
-    if (type !== 0) top += ELEV_H / 2;
-    if (DROPPED.includes(type)) top -= ELEV_H;
+    if (drop && type !== 0) top += ELEV_H / 2;
+    if (drop && DROPPED.includes(type)) top -= ELEV_H;
     let tx = x - col + radiusX;
     let ty = y - row + radiusY;
     const x1 = Math.trunc((tx + ty) * (TILE_W / 2));

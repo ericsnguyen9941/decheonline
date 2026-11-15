@@ -49,7 +49,7 @@ interface Window {
       research: { tech: number; progress: number } | null;
     }[];
     queue(id: number): { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null } | null;
-    ghost(): { unit: number; x: number; y: number; fits: boolean } | null;
+    ghost(): { unit: number; x: number; y: number; fits: boolean; segments?: { x: number; y: number; facet: number; fits: boolean }[] } | null;
     net(): { granularity: number; frames: number; frameMs: number; rtt: number[] };
     delayPongs(ms: number): void;
     age(player?: number): number;

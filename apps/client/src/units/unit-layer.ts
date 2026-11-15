@@ -18,7 +18,7 @@ import { groupKey } from './group-keys';
 import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
 import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
 import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
-import { alignBuilding } from './placement';
+import { alignBuilding, wallOutline } from './placement';
 
 /** Pointer travel (CSS px) after which a left press becomes a selection box instead of a click. */
 const BOX_THRESHOLD = 4;
@@ -154,6 +154,15 @@ export interface Ghost {
   x: number;
   y: number;
   fits: boolean;
+  /** A wall's outline: each segment's tile centre, facet and whether it fits; (x, y) is then the tile under the pointer. */
+  segments?: WallGhostTile[];
+}
+
+export interface WallGhostTile {
+  x: number;
+  y: number;
+  facet: number;
+  fits: boolean;
 }
 
 /** Alpha of a pixel of `sprite`'s texture under canvas point (x, y) is above this to count as a hit. */
@@ -174,7 +183,8 @@ function stepOf(world: World): number {
  * drag a box to select own units, or click any object to see it, right click to order the selected units to attack the
  * enemy object under the pointer (an `attack` command), to work on any other object there (a `work` command) or, over
  * bare ground, to move there. While a building is being placed its
- * ghost follows the pointer; a left click issues `build`, a right click stops placing.
+ * ghost follows the pointer; a left click issues `build`, a right click stops placing. A wall is placed by dragging a
+ * line (`TRIBE_GAME_MODE_PLACE_CONNECTED`): its outline follows the drag, and the release issues `build-wall`.
  */
 export class UnitLayer {
   readonly selected = new Set<number>();
@@ -223,6 +233,11 @@ export class UnitLayer {
   private placing: number | null = null;
   private readonly ghostSprite = new Sprite();
   private ghostAt: Ghost | null = null;
+  /** The wall outline's segments (`draw_wall_outline`), drawn by screen row like any object, and their sprites. */
+  private readonly wallGhost = new Container();
+  private readonly wallSprites: Sprite[] = [];
+  /** `sel_col1`..`sel_row2` while a wall line is dragged: the tile pressed and the tile under the pointer. */
+  private wallDrag: { col1: number; row1: number; col2: number; row2: number } | null = null;
   /** Canvas pixel of the pointer while it is over the canvas. */
   private pointer: { x: number; y: number } | null = null;
   /** CSS cursor over an attack target: the original's sword, or the browser's crosshair without art. */
@@ -249,6 +264,9 @@ export class UnitLayer {
     this.ghostSprite.zIndex = Number.MAX_SAFE_INTEGER - 1;
     this.ghostSprite.visible = false;
     o.view.layer.addChild(this.ghostSprite);
+    this.wallGhost.zIndex = Number.MAX_SAFE_INTEGER - 1;
+    this.wallGhost.sortableChildren = true;
+    o.view.layer.addChild(this.wallGhost);
     o.app.stage.addChild(this.box);
     this.tick = () => this.draw();
     o.app.ticker.add(this.tick);
@@ -427,7 +445,9 @@ export class UnitLayer {
     if (this.placing === null) return;
     this.placing = null;
     this.ghostAt = null;
+    this.wallDrag = null;
     this.ghostSprite.visible = false;
+    this.wallGhost.visible = false;
     this.o.onPlacement?.(null);
   }
 
@@ -445,6 +465,7 @@ export class UnitLayer {
     this.outlines.destroy();
     this.highlight.destroy();
     this.ghostSprite.destroy();
+    this.wallGhost.destroy({ children: true });
     this.box.destroy();
   }
 
@@ -737,11 +758,13 @@ export class UnitLayer {
     const sprite = this.ghostSprite;
     const unit = this.placing;
     sprite.visible = false;
+    this.wallGhost.visible = false;
     if (unit === null || !this.pointer) {
       this.ghostAt = null;
       return;
     }
     const { world, view, player } = this.o;
+    if (this.isWall(unit)) return this.drawWallGhost(unit, this.pointer);
     // The player's own master: its sprite follows the age (the Tool Age House).
     const t = master(world, player, unit);
     const { camera } = view;
@@ -772,13 +795,99 @@ export class UnitLayer {
   private placeAt(keepPlacing: boolean): void {
     const ghost = this.ghostAt;
     if (!ghost?.fits) return;
-    const units = this.selectedOwn().filter((id) => {
-      const e = this.o.world.entities.get(id);
-      return e !== undefined && isUnit(e) && canBuild(unitType(e.type));
-    });
+    const units = this.builders();
     if (units.length === 0) return;
     if (!keepPlacing) this.cancelPlacement();
     this.o.issue({ type: 'build', units, unitType: ghost.unit, x: ghost.x, y: ghost.y });
+  }
+
+  /** The selected own objects that can build (the Villagers, `command_make_building`'s and `command_make_wall`'s). */
+  private builders(): number[] {
+    return this.selectedOwn().filter((id) => {
+      const e = this.o.world.entities.get(id);
+      return e !== undefined && isUnit(e) && canBuild(unitType(e.type));
+    });
+  }
+
+  /** `building_connect_flag`: master `unit` is placed as a line (`command_building` enters `PLACE_CONNECTED`). */
+  private isWall(unit: number): boolean {
+    return master(this.o.world, this.o.player, unit).building?.connect ?? false;
+  }
+
+  /**
+   * The map tile under canvas point `p`: off the map, null (`pick` misses), or with `clamp` the nearest edge tile
+   * (`fixup_pick_info`).
+   */
+  private tileAt(p: { x: number; y: number }, clamp: boolean): { col: number; row: number } | null {
+    const { world, view } = this.o;
+    const at = view.ground.pointAt(p.x + view.camera.x, p.y + view.camera.y);
+    const col = Math.floor(at.col);
+    const row = Math.floor(at.row);
+    const { width, height } = world.map;
+    if (col >= 0 && row >= 0 && col < width && row < height) return { col, row };
+    return clamp ? { col: Math.min(Math.max(col, 0), width - 1), row: Math.min(Math.max(row, 0), height - 1) } : null;
+  }
+
+  /**
+   * `TRIBE_Main_View::draw_multi_object_outline` and `draw_wall_outline` (src/tvw_main.cpp:21, :204): with no drag, one
+   * segment (facet 2) on the tile under the pointer; while dragging, every segment of the line (`wallOutline`). Each is
+   * the master's standing sprite at the tile's centre in the facet it would join with (the master's `draw` takes facet
+   * f + 1 and shows sprite facet f, economy.md §4.8.2), see-through, and shaded red where `check_placement` fails there
+   * (with `check_vis`, as the line command checks: an unexplored tile fails).
+   */
+  private drawWallGhost(unit: number, pointer: { x: number; y: number }): void {
+    const { world, view, player } = this.o;
+    const t = master(world, player, unit);
+    const hover = this.tileAt(pointer, true)!;
+    const d = this.wallDrag;
+    const tiles = d ? wallOutline(d.col1, d.row1, d.col2, d.row2) : [{ ...hover, facet: 2 }];
+    const segments = tiles.map(({ col, row, facet }) => {
+      const x = col + 0.5;
+      const y = row + 0.5;
+      return { x, y, facet, fits: checkPlacement(world.gameContext(), t, x, y, true, true, player) === 0 };
+    });
+    const at = d ? { x: d.col2 + 0.5, y: d.row2 + 0.5 } : { x: hover.col + 0.5, y: hover.row + 0.5 };
+    this.ghostAt = { unit, ...at, fits: segments.every((s) => s.fits), segments };
+    const art = this.loadArt(t.standing.graphic, player);
+    if (!art) return;
+    const info = art.info;
+    const pulse = (world.worldTime >> 7) & 7;
+    const blocked = GHOST_BLOCKED[pulse < 4 ? pulse : 8 - pulse]!;
+    segments.forEach((s, i) => {
+      let sprite = this.wallSprites[i];
+      if (!sprite) {
+        sprite = new Sprite();
+        this.wallSprites.push(sprite);
+        this.wallGhost.addChild(sprite);
+      }
+      const pick = info ? facingFrame(s.facet, 0, info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
+      const frame = art.frames[pick.index] ?? art.frames[0]!;
+      const pos = view.ground.placePixel(s.x, s.y, t.radiusX, t.radiusY, false);
+      sprite.texture = frame.texture;
+      sprite.scale.x = pick.flipped ? -1 : 1;
+      sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - frame.hotspotY);
+      sprite.zIndex = pos.y;
+      sprite.alpha = GHOST_ALPHA;
+      sprite.tint = s.fits ? 0xffffff : blocked;
+      sprite.visible = true;
+    });
+    for (let i = segments.length; i < this.wallSprites.length; i++) this.wallSprites[i]!.visible = false;
+    this.wallGhost.visible = true;
+  }
+
+  /**
+   * The release of a wall drag (`mouse_left_up_action`, src/vw_main.cpp:441; `command_place_multi_object`,
+   * src/tvw_main.cpp:276): `build-wall` from the pressed tile to the released one for the selected builders, the sim
+   * skipping tiles where a segment does not fit; placing ends unless Shift or Ctrl is held.
+   */
+  private placeWall(keepPlacing: boolean): void {
+    const d = this.wallDrag;
+    const unit = this.placing;
+    this.wallDrag = null;
+    if (!d || unit === null) return;
+    const units = this.builders();
+    if (!keepPlacing) this.cancelPlacement();
+    if (units.length > 0) this.o.issue({ type: 'build-wall', units, unitType: unit, x1: d.col1, y1: d.row1, x2: d.col2, y2: d.row2 });
   }
 
   /**
@@ -863,6 +972,16 @@ export class UnitLayer {
       const p = local(e);
       this.pointer = p;
       if (this.placing !== null) {
+        if (this.isWall(this.placing)) {
+          // `start_scroll_view(3)`: the press starts the line on the tile under the pointer, when that is on the map.
+          if (e.button === 0) {
+            const tile = this.tileAt(p, false);
+            this.wallDrag = tile && { col1: tile.col, row1: tile.row, col2: tile.col, row2: tile.row };
+            // `capture_mouse`: the release ends the line wherever it happens.
+            if (tile) canvas.setPointerCapture(e.pointerId);
+          } else if (e.button === 2) this.cancelPlacement();
+          return;
+        }
         // Shift (or ctrl) keeps placing more of the same, as `reset_mode` 0 in the original.
         if (e.button === 0) {
           this.drawGhost();
@@ -878,7 +997,14 @@ export class UnitLayer {
     on('pointermove', (e) => {
       const p = local(e);
       this.pointer = p;
-      if (this.placing !== null) return;
+      if (this.placing !== null) {
+        // A right press during the drag (a chorded button, which comes as a move) stops placing, as a right click does.
+        if (this.wallDrag && e.buttons & 2) return this.cancelPlacement();
+        // `handle_scroll_view` of the line: its end follows the pointer while it is over the map.
+        const tile = this.wallDrag && this.tileAt(p, false);
+        if (this.wallDrag && tile) Object.assign(this.wallDrag, { col2: tile.col, row2: tile.row });
+        return;
+      }
       if (!this.press) {
         const enemy = this.attackTarget(p.x, p.y);
         canvas.style.cursor = enemy ? this.attackCursor : this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
@@ -912,6 +1038,7 @@ export class UnitLayer {
     window.addEventListener('keydown', onKey);
     this.cleanup.push(() => window.removeEventListener('keydown', onKey));
     on('pointerup', (e) => {
+      if (e.button === 0 && this.wallDrag) return this.placeWall(e.shiftKey || e.ctrlKey);
       if (e.button !== 0 || !this.press) return;
       const p = local(e);
       if (this.press.boxing) {

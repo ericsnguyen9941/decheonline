@@ -55,3 +55,47 @@ export function alignBuilding(rx: number, ry: number, col: number, row: number, 
   const y = f(dy1 + dy2) >= 1 ? (dy1 > dy2 ? f(row + f(1 - dy1)) : f(row - f(1 - dy2))) : row;
   return { x, y };
 }
+
+/** One wall segment of the placement outline: its tile and the facet it is drawn with. */
+export interface WallTile {
+  col: number;
+  row: number;
+  /** 0 west-east, 1 north-south, 2 an end, a corner or a diagonal (the facets `connect` gives built walls). */
+  facet: number;
+}
+
+/**
+ * The wall segments `TRIBE_Main_View::draw_multi_object_outline` (src/tvw_main.cpp:21) outlines for a drag from tile
+ * (col1, row1) to (col2, row2), the tiles `do_command_build_wall` walks (economy.md §4.8.1): a 45° line or one tile, else
+ * an L down the start column (or along the start row) to the far end of the longer axis, then along the end row (or
+ * down the end column). The two ends and the corner show facet 2, a leg's middle its direction's facet; a 45° line all 2.
+ */
+export function wallOutline(col1: number, row1: number, col2: number, row2: number): WallTile[] {
+  const out: WallTile[] = [];
+  const dx = Math.abs(col2 - col1);
+  const dy = Math.abs(row2 - row1);
+  const sx = Math.sign(col2 - col1);
+  const sy = Math.sign(row2 - row1);
+  if (dx === dy) {
+    for (let i = 0; i <= dx; i++) out.push({ col: col1 + i * sx, row: row1 + i * sy, facet: 2 });
+  } else if (dy > dx) {
+    for (let i = 0; i <= dy; i++) {
+      const row = row1 + i * sy;
+      out.push({ col: col1, row, facet: row === row1 || row === row2 ? 2 : 1 });
+    }
+    for (let i = 1; i <= dx; i++) {
+      const col = col1 + i * sx;
+      out.push({ col, row: row2, facet: col === col2 ? 2 : 0 });
+    }
+  } else {
+    for (let i = 0; i <= dx; i++) {
+      const col = col1 + i * sx;
+      out.push({ col, row: row1, facet: col === col1 || col === col2 ? 2 : 0 });
+    }
+    for (let i = 1; i <= dy; i++) {
+      const row = row1 + i * sy;
+      out.push({ col: col2, row, facet: row === row2 ? 2 : 1 });
+    }
+  }
+  return out;
+}

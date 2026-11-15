@@ -658,7 +658,11 @@ Ported: §4.8.1 (`World.doCommandBuildWall` / `placeLineOfWalls`, command
 `TechContext.connectWall`), §4.8.3 (`build.ts` state 3 notify,
 `unit-ai.ts` `builderRequest`). `check_flat` is not checked (slope, §4.6),
 as for any building. The client's drag line and `draw_wall_outline`
-(`src/tvw_main.cpp:204`) are not ported. Tests: `packages/sim/src/walls.test.ts`.
+(`src/tvw_main.cpp:21`, `:204`, `:276`) are ported (docs/spec/hud.md, the
+wall bullets under the placement ghost; `apps/client/src/units/placement.ts`
+`wallOutline`, `unit-layer.ts`). Tests: `packages/sim/src/walls.test.ts`,
+`apps/client/src/units/placement.test.ts`, e2e `e2e/tests/walls.spec.ts`,
+`e2e/real/real-walls.spec.ts`.
 
 ## 5. Training
 
