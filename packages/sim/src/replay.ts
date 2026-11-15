@@ -377,6 +377,101 @@ export function sampleNavalReplay(turns = 160, seed = 20261119): ReplayLog {
   };
 }
 
+/** `navalTerrain` with shallows (4) in column 16 on rows 0-9, beside the west beach: an unload there drops onto them. */
+export function transportTerrain(): { width: number; height: number; tiles: number[] } {
+  const t = navalTerrain();
+  for (let y = 0; y < 10; y++) t.tiles[y * t.width + 16] = 4;
+  return t;
+}
+
+/** Each side's Town Center, Dock, four Villagers on its beach, two Transport Boats off it and a Scout Ship, for `sampleTransportReplay`. */
+const TRANSPORT: readonly StartUnit[] = [
+  { owner: 1, type: TOWN_CENTER, x: 6.5, y: 20.5 },
+  { owner: 1, type: 45, x: 16.5, y: 30.5 },
+  { owner: 1, type: VILLAGER, x: 13.5, y: 14.5 },
+  { owner: 1, type: VILLAGER, x: 13.5, y: 16.5 },
+  { owner: 1, type: VILLAGER, x: 13.5, y: 18.5 },
+  { owner: 1, type: VILLAGER, x: 13.5, y: 20.5 },
+  { owner: 1, type: 17, x: 18.5, y: 12.5 },
+  { owner: 1, type: 17, x: 18.5, y: 20.5 },
+  { owner: 1, type: 19, x: 20.5, y: 26.5 },
+  { owner: 2, type: TOWN_CENTER, x: 34.5, y: 20.5 },
+  { owner: 2, type: 45, x: 27.5, y: 10.5 },
+  { owner: 2, type: VILLAGER, x: 30.5, y: 20.5 },
+  { owner: 2, type: VILLAGER, x: 30.5, y: 22.5 },
+  { owner: 2, type: VILLAGER, x: 30.5, y: 24.5 },
+  { owner: 2, type: VILLAGER, x: 30.5, y: 26.5 },
+  { owner: 2, type: 17, x: 25.5, y: 22.5 },
+  { owner: 2, type: 17, x: 25.5, y: 30.5 },
+  { owner: 2, type: 19, x: 23.5, y: 14.5 },
+];
+
+/**
+ * A transport game on `transportTerrain` in the Iron Age with Death Match stockpiles, Egyptian against Greek (`TRANSPORT`).
+ * Now and then, from one generator, a side orders: its Villagers onto one of its transports (they board, five at most);
+ * a transport across the sea, or a right click on a beach point of either shore (a drop when within 2 tiles, else a
+ * move); an unload at a point of the far shore or at the boat itself (beside the west shallows or not); its Scout Ship at
+ * the other side's transports (cargo dies with its ship); a Transport Boat queued or Heavy Transport (8) researched at its
+ * Dock; and sometimes the other side's objects, which is ignored. Boarding, drops, unloads and sinking in every engine.
+ */
+export function sampleTransportReplay(turns = 200, seed = 20261116): ReplayLog {
+  const ids = (owner: number, types: number[]) => TRANSPORT.flatMap((u, i) => (u.owner === owner && types.includes(u.type) ? [i + 1] : []));
+  const gen = new CrtRand();
+  gen.srand(seed);
+  const shore = (side: number) => (side === 1 ? 15.5 : 28.5);
+  const batches: ReplayLog['batches'] = [];
+  for (let turn = 0; turn < turns; turn++) {
+    for (const player of [1, 2]) {
+      if (gen.rand() % 4 !== 0) continue;
+      const side = gen.rand() % 8 === 0 ? 3 - player : player;
+      const enemy = 3 - side;
+      const boats = ids(side, [17]);
+      const boat = boats[gen.rand() % boats.length]!;
+      const commands: Command[] = [];
+      switch (gen.rand() % 8) {
+        case 0:
+        case 1: {
+          const at = TRANSPORT[boat - 1]!;
+          commands.push({ type: 'work', units: ids(side, [VILLAGER]), target: boat, x: at.x, y: at.y });
+          break;
+        }
+        case 2:
+          commands.push({ type: 'move', units: [boat], x: 17 + (gen.rand() % 1000) / 100, y: 2 + (gen.rand() % 3600) / 100 });
+          break;
+        case 3:
+          commands.push({ type: 'work', units: [boat], target: 0, x: shore(gen.rand() % 2 === 0 ? enemy : side), y: 2.5 + (gen.rand() % 35) });
+          break;
+        case 4:
+          if (gen.rand() % 2 === 0) commands.push({ type: 'unload', units: boats, x: shore(enemy) + (enemy === 1 ? -2 : 2), y: 2.5 + (gen.rand() % 35) });
+          else commands.push({ type: 'unload', units: [boat], x: 17.5, y: 2.5 + (gen.rand() % 8) });
+          break;
+        case 5: {
+          const targets = ids(enemy, [17]);
+          commands.push({ type: 'attack', units: ids(side, [19]), target: targets[gen.rand() % targets.length]! });
+          break;
+        }
+        default: {
+          const dock = ids(side, [45])[0]!;
+          if (gen.rand() % 3 === 0) commands.push({ type: 'research', building: dock, tech: 8 });
+          else commands.push({ type: 'queue', building: dock, unit: 17, count: 1 });
+        }
+      }
+      batches.push({ turn, player, commands });
+    }
+  }
+  return {
+    players: 3,
+    randomSeed: 5151,
+    terrain: transportTerrain(),
+    units: [...TRANSPORT],
+    civs: [0, 1, 2],
+    turns,
+    batches,
+    speeds: sampleSpeeds(turns),
+    start: { startingAge: AGE_IRON, deathMatch: true },
+  };
+}
+
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */
 interface ReplayStart {
   count: number;

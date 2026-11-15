@@ -6,13 +6,13 @@ import type { Entity } from './entities';
 import { DEFAULT_GAME_SETTINGS, LOBBY_MAP_TYPES, lobbyWorldOptions } from './game-settings';
 import { TERRAIN_WATER, TileMap } from './map';
 import { master, typeOf } from './masters';
-import { navalTerrain } from './replay';
+import { navalTerrain, runReplay, sampleTransportReplay } from './replay';
 import { MAP_ALL_WATER, MAP_ISTHMAS, MAP_LAKE, MAP_MOSTLY_WATER, MAP_WATER_AND_LAND } from './rmm-controller';
 import { TECH_AVAILABLE, TECH_DONE } from './techs';
 import { ACTION_ENTER, ACTION_TRANSPORT } from './transport';
 import { CLUBMAN, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SPECIAL } from './victory';
-import { AGE_IRON, World, type StartUnit } from './world';
+import { AGE_IRON, World, type Snapshot, type StartUnit } from './world';
 
 const DOCK = 45;
 const TRANSPORT_BOAT = 17;
@@ -234,5 +234,44 @@ describe('lobby.md §6: the water maps', () => {
       }
       expect([centers[0]!.x, centers[0]!.y]).not.toEqual([centers[1]!.x, centers[1]!.y]);
     }
+  });
+});
+
+describe('determinism with transports', () => {
+  test('sampleTransportReplay boards, crosses, drops, unloads and sinks, and replays to the same hashes and after a snapshot', () => {
+    const log = sampleTransportReplay();
+    const { width, height, tiles } = log.terrain!;
+    const w = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units, civs: log.civs, map: new TileMap(width, height, tiles), ...log.start });
+    let boarded = 0;
+    let crossed = 0;
+    let sunk = 0;
+    let aboard = new Set<number>();
+    const step = (world: World) => {
+      for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
+      for (const c of log.speeds ?? []) if (c.turn === world.turn) world.setSpeedChange(c);
+      world.runTurn();
+      return world.hash();
+    };
+    const hashes: number[] = [];
+    let restored: World | null = null;
+    while (w.turn < log.turns) {
+      hashes.push(step(w));
+      if (w.turn === 100) restored = World.restore(JSON.parse(JSON.stringify(w.snapshot())) as Snapshot);
+      for (const id of aboard) if (!w.entities.get(id)) sunk++;
+      aboard = new Set([...w.entities.all()].filter((e) => e.inside != null).map((e) => e.id));
+      for (const e of w.entities.all()) {
+        if (e.type !== VILLAGER) continue;
+        if (e.inside != null) boarded++;
+        // A Villager on the other side's land got there by boat.
+        if ((e.owner === 1 && e.x > 28) || (e.owner === 2 && e.x < 16)) crossed++;
+      }
+    }
+    expect(runReplay(log)).toEqual(hashes);
+    expect(boarded).toBeGreaterThan(0);
+    expect(crossed).toBeGreaterThan(0);
+    expect(sunk).toBeGreaterThan(0);
+    const again: number[] = [];
+    while (restored!.turn < log.turns) again.push(step(restored!));
+    expect(again).toEqual(hashes.slice(100));
   });
 });
