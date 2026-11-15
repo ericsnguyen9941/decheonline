@@ -82,6 +82,8 @@ test("imports map.bmp's lines, the tile edges, the minimap colours and each unit
   expect(edges.black[1]).toEqual([SYNTHETIC.blackSpan]);
   expect(edges.black[0]).toEqual([]);
   expect(manifest.playerColours).toEqual([0, 16]);
+  // Gaia and the two synthetic civs all have `icon_set` 1.
+  expect(manifest.cultures).toEqual([1, 1, 1]);
   expect(manifest.terrains[0]?.minimap).toHaveLength(3);
   expect(manifest.units[SYNTHETIC.unitId]).toMatchObject({ minimap: [1, 0], doppelganger: expect.any(Number) });
 });

@@ -73,6 +73,8 @@ export interface NetDebug {
   age(player?: number): number;
   /** State of tech `tech` for `player` (default: this client's): -1 disabled, 0 locked, 1 available, 2 researching, 3 done. */
   techState(tech: number, player?: number): number;
+  /** The name the object panel shows for object `id` (an upgrade's for an upgraded master); null without one or a HUD. */
+  objectName(id: number): string | null;
   /** What `player` (default: this client's) knows of tile (col, row): 0x0F visible, 0x80 fogged, 0 unexplored. */
   tileVisibility(col: number, row: number, player?: number): number;
   /** `player`'s stance towards `other` (0 ally, 1 neutral, 3 enemy; docs/spec/diplomacy.md §1) and its allied victory flag. */
@@ -210,6 +212,19 @@ export interface MultiplayerOptions {
    * ask for it.
    */
   wonder?: boolean;
+  /**
+   * Debug only (`?debug=net&buildings=12,87,101,0`): every player starts with one built building of each listed id, in
+   * two columns of four, 10 and 14 tiles right of its Town Center, every 4 tiles from 11 tiles above it (on the test map
+   * out of the sight of the other player's `&units=`), so their units and techs need no Villager to build them first.
+   * Placed without a placement check: for the test map. Both clients must ask for the same list.
+   */
+  buildings?: number[];
+  /**
+   * Debug only (`?debug=net&units=75,76,77`): every player starts with one unit of each listed id, in rows of seven 2
+   * tiles apart from 2 tiles above and 4 left of its first Villager, so each master can be seen (and clicked) without
+   * its building or techs. Placed without a placement check: for the test map. Both clients must ask for the same list.
+   */
+  units?: number[];
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
   /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
@@ -234,7 +249,7 @@ const RUIN = 158;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, wonder, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, wonder, buildings, units: startUnits, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -337,6 +352,18 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       for (let i = 0; i < (ruins ?? 0); i++) game.world.createUnit({ owner: 0, type: RUIN, x: villager.x - 3, y: villager.y - 1 - 3 * i });
       game.world.victory.artifactCount += relics ?? 0;
       game.world.victory.ruinCount += ruins ?? 0;
+    }
+    if (debug && buildings) {
+      for (let p = 1; p < game.world.players; p++) {
+        const tc = [...game.world.entities.ofPlayer(p)].find((e) => e.type === TOWN_CENTER);
+        buildings.forEach((type, i) => tc && game.world.createUnit({ owner: p, type, x: Math.floor(tc.x) + 10.5 + 4 * (i >> 2), y: Math.floor(tc.y) - 10.5 + 4 * (i % 4) }));
+      }
+    }
+    if (debug && startUnits) {
+      for (let p = 1; p < game.world.players; p++) {
+        const villager = [...game.world.entities.ofPlayer(p)].find((e) => e.type === VILLAGER)!;
+        startUnits.forEach((type, i) => game.world.createUnit({ owner: p, type, x: villager.x - 4 + 2 * (i % 7), y: villager.y - 2 - 2 * Math.floor(i / 7) }));
+      }
     }
     if (debug && wonder) {
       const tc = [...game.world.entities.ofPlayer(1)].find((e) => e.type === TOWN_CENTER);
@@ -552,6 +579,7 @@ function debugPanel(
     delayPongs: (ms) => (game.pongDelayMs = ms),
     age: (p = player) => game.world.attributes[p]![ATTR_CURRENT_AGE]!,
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
+    objectName: (id) => hud()?.nameOf(id) ?? null,
     tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
     relation: (p, q) => game.world.relation(p, q),
     alliedVictory: (p) => game.world.diplomacy.alliedVictory[p] ?? false,

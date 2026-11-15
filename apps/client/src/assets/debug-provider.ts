@@ -89,6 +89,10 @@ export class DebugProvider implements AssetProvider {
     return null;
   }
 
+  culture(): number {
+    return 0;
+  }
+
   terrainLayout(): TerrainLayout {
     return { rows: 1, cols: 1, tiles: Array.from({ length: TILE_TYPES }, (_, type) => [1, 1, type] as const) };
   }

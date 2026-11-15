@@ -88,6 +88,10 @@ class PackProvider implements AssetProvider {
     return this.manifest.screens[id] ?? null;
   }
 
+  culture(civ: number): number {
+    return this.manifest.cultures[civ] ?? 0;
+  }
+
   mapArt(): MapArt {
     const { manifest, palette } = this;
     return (this.art ??= {

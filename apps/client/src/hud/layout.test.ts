@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { BOTTOM_HEIGHT, hudLayout } from './layout';
+import { BOTTOM_HEIGHT, cultureSlp, hudLayout, SLP } from './layout';
 
 test('the art follows the largest original screen size that fits the window', () => {
   expect(hudLayout(1920, 1080).width).toBe(1024);
@@ -20,4 +20,15 @@ test('panels sit where TRIBE_Screen_Game::handle_size puts them', () => {
   expect(l.minimap).toEqual({ x: 795, y: 6, w: 220, h: 114 });
   expect(l.topButtons.map((r) => r.x)).toEqual([772, 844, 952]);
   expect(l.bottomHeight).toBe(BOTTOM_HEIGHT);
+});
+
+test("a culture's panels and building icons: base + culture, data2's ids for Roman, Egyptian past it (scr_game.cpp:166-171, :2147-2277)", () => {
+  // Egyptian, Greek, Babylonian, East Asian building icons: btnbldg0-3.
+  expect([0, 1, 2, 3].map((c) => cultureSlp(SLP.buildingIcons, c))).toEqual([50704, 50705, 50706, 50707]);
+  expect(cultureSlp(SLP.buttonBorder, 2)).toBe(50715);
+  expect(cultureSlp(SLP.screen[800], 3)).toBe(50740);
+  // Roman: btnbldg4 53005, button_border_a/b/c 53006-53008, game_a/b/c 53010-53012.
+  expect([SLP.buildingIcons, SLP.buttonBorder, SLP.menuButton, SLP.wideMenuButton].map((s) => cultureSlp(s, 4))).toEqual([53005, 53006, 53007, 53008]);
+  expect([640, 800, 1024].map((w) => cultureSlp(SLP.screen[w as 640 | 800 | 1024], 4))).toEqual([53010, 53011, 53012]);
+  expect(cultureSlp(SLP.buildingIcons, 7)).toBe(50704);
 });

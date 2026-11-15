@@ -184,4 +184,6 @@ export interface AssetProvider {
   soundTable(): SoundTable | null;
   /** The look of a screen or dialog by its info file's interfac.drs id (pack version 11); null when unknown. */
   screen(id: number): PackScreen | null;
+  /** A civ's culture (its `icon_set`, pack version 14): which interface art its player sees; 0 (Egyptian) when unknown. */
+  culture(civ: number): number;
 }

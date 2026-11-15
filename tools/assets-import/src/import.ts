@@ -216,6 +216,7 @@ function buildManifest(
     borders: {},
     units: {},
     techs: {},
+    cultures: dat.civs.map((c) => c.iconSet),
     playerColours: dat.playerColours.map((c) => c.minimapColour),
     minimap,
     tileEdges,

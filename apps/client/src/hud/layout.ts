@@ -8,7 +8,10 @@ export interface Rect {
   h: number;
 }
 
-/** Interface SLPs (interfac.drs ids) of one culture's panels; `+ culture` for Egyptian 0, Greek 1, Babylonian 2, East Asian 3. */
+/**
+ * Interface SLPs (interfac.drs ids) of the Egyptian panels; another culture's are `cultureSlp(id, culture)`: `+ culture` for
+ * Greek 1, Babylonian 2, East Asian 3, data2's own ids for Roman 4.
+ */
 export const SLP = {
   /** `game_a/b/c`: frame 0 is the top strip, frame 1 the bottom panel. */
   screen: { 640: 50733, 800: 50737, 1024: 50741 },
@@ -35,6 +38,20 @@ export const SLP = {
   /** `mcursors`: the mouse cursors. */
   cursors: 51000,
 } as const;
+
+/** `RGE_CULTURE_ROMAN`: its art is in data2 under ids of its own. */
+const ROMAN = 4;
+/** The Roman ids of the per-culture SLPs (src/scr_game.cpp:166-171, :2158-2277). */
+const ROMAN_SLP: Readonly<Record<number, number>> = { 50704: 53005, 50713: 53006, 50717: 53007, 50747: 53008, 50733: 53010, 50737: 53011, 50741: 53012 };
+
+/**
+ * Interface SLP `base` (one of `SLP`'s per-culture ids) in the art of `culture`, a civ's `icon_set`; a culture past Roman
+ * is drawn Egyptian (src/scr_game.cpp:2152-2154).
+ */
+export function cultureSlp(base: number, culture: number): number {
+  if (culture === ROMAN) return ROMAN_SLP[base] ?? base;
+  return culture > 0 && culture < ROMAN ? base + culture : base;
+}
 
 /** Panels in pixels, relative to the HUD's left edge; `bottom` ones relative to the top of the bottom panel. */
 export interface HudLayout {

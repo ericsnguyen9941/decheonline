@@ -6,7 +6,7 @@ import { CommandPanel } from './command-panel';
 import { constructionProgress, researchStatus, trainingStatus } from './commands';
 import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
-import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
+import { BOTTOM_HEIGHT, cultureSlp, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
 import { Minimap, type MinimapUnits } from './minimap';
 import { AchievementsScreen } from './achievements';
 import { ChatEntry, STRING_CHAT } from './chat';
@@ -28,8 +28,6 @@ const DROPPED_NOTICE = 0x25c9;
 
 /** Frames in health.shp; the bar shows frame `count - count * hp / max`. */
 const HEALTH_FRAMES = 26;
-/** Egyptian: the game does not track a player's culture yet. */
-const CULTURE = 0;
 /** Building icons live in a different SLP and are chosen by `master_type` 80 and over (the sim's `UnitType.masterType`). */
 const BUILDING = 80;
 /** A part of the top strip without icons or buttons (1024 art; the others are narrower but share the texture there). */
@@ -137,6 +135,8 @@ function place(el: HTMLElement, r: Rect): void {
  */
 export class GameHud {
   readonly root = box(null, 'hud', 'hud');
+  /** The player's culture, its civ's `icon_set`: the game screen's art is that culture's (src/scr_game.cpp:2147). */
+  private readonly culture: number;
   private readonly top = box(this.root, 'hud-top', 'hud-top');
   private readonly topFrame = box(this.top, 'hud-frame');
   private readonly age = box(this.topFrame, 'hud-age', 'age');
@@ -195,6 +195,7 @@ export class GameHud {
   private shown: string | null = null;
 
   constructor(private readonly o: GameHudOptions) {
+    this.culture = o.provider.culture(o.world.civs[o.player] ?? 0);
     o.parent.append(this.root);
     this.bar = new ResourceBar(this.topFrame, o.app, o.world, o.player);
     this.message.hidden = true;
@@ -204,7 +205,7 @@ export class GameHud {
       world: o.world,
       provider: o.provider,
       player: o.player,
-      culture: CULTURE,
+      culture: this.culture,
       issue: o.issue,
       startPlacement: o.startPlacement,
       cancelPlacement: o.cancelPlacement,
@@ -305,13 +306,19 @@ export class GameHud {
     this.scoreButton.dataset.testid = 'score-button';
     this.minimapView = o.map ? new Minimap({ parent: this.minimap, world: o.world, provider: o.provider, player: o.player, ...o.map }) : null;
     topButtonLabels(o.provider).forEach((label, i) => (this.menus[i]!.textContent = label));
-    this.root.classList.toggle('art', o.provider.interfaceFrame(SLP.screen[1024], 0) !== null);
+    this.root.classList.toggle('art', o.provider.interfaceFrame(cultureSlp(SLP.screen[1024], this.culture), 0) !== null);
     this.applyLayout();
     window.addEventListener('resize', this.onResize);
     this.tick = () => this.update();
     o.app.ticker.add(this.tick);
     this.update();
     void applyCursors(o.parent, o.provider).catch(() => undefined);
+  }
+
+  /** The name the object panel shows for object `id`: its owner's master's, so an upgrade's; null when there is none. */
+  nameOf(id: number): string | null {
+    const e = this.o.world.entities.get(id);
+    return e ? objectName(this.o.provider, e.type, typeOf(this.o.world, e)) : null;
   }
 
   destroy(): void {
@@ -336,7 +343,7 @@ export class GameHud {
     if (l === this.layout) return;
     this.layout = l;
     const { provider } = this.o;
-    const screen = SLP.screen[l.width];
+    const screen = cultureSlp(SLP.screen[l.width], this.culture);
     const topArt = provider.interfaceFrame(screen, 0);
     const bottomArt = provider.interfaceFrame(screen, 1);
 
@@ -355,7 +362,7 @@ export class GameHud {
     l.topButtons.forEach((r, i) => {
       const el = this.menus[i]!;
       place(el, r);
-      paintFrame(el, provider.interfaceFrame(i === 1 ? SLP.wideMenuButton : SLP.menuButton, 0));
+      paintFrame(el, provider.interfaceFrame(cultureSlp(i === 1 ? SLP.wideMenuButton : SLP.menuButton, this.culture), 0));
     });
 
     this.bottom.style.width = `${l.width}px`;
@@ -516,10 +523,15 @@ export class GameHud {
     this.objectName.textContent = objectName(provider, entity.type, type);
     const info = infoOf(provider, type);
     const building = type.masterType >= BUILDING;
-    // A building's picture is its master's `button_pict + building_facet` (tpnl_obj.cpp:180-185): the age's.
+    // A building's picture is its master's `button_pict + building_facet` (tpnl_obj.cpp:180-185): the age's, in the art
+    // of the building's culture, its owner's.
     const icon: ImageFrame | null =
       info && info.icon >= 0
-        ? provider.interfaceFrame(building ? SLP.buildingIcons + CULTURE : SLP.unitIcons, info.icon + (building ? facet : 0), entity.owner)
+        ? provider.interfaceFrame(
+            building ? cultureSlp(SLP.buildingIcons, provider.culture(world.civs[entity.owner] ?? 0)) : SLP.unitIcons,
+            info.icon + (building ? facet : 0),
+            entity.owner,
+          )
         : null;
     paintFrame(this.objectIcon, icon);
     const hp = Math.max(0, Math.floor(entity.hp));

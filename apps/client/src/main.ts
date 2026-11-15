@@ -63,6 +63,11 @@ async function main(): Promise<void> {
   const houses = Number(params.get('houses') ?? 0);
   const relics = Number(params.get('relics') ?? 0);
   const ruins = Number(params.get('ruins') ?? 0);
+  /** A comma-separated list of master ids (`&buildings=`, `&units=`); undefined when absent or not all integers. */
+  const ids = (name: string): number[] | undefined => {
+    const list = (params.get(name) ?? '').split(',').filter((s) => s !== '').map(Number);
+    return list.length > 0 && list.every((n) => Number.isInteger(n) && n >= 0) ? list : undefined;
+  };
   await startMultiplayer(lobbyHost, app, {
     debug: params.get('debug') === 'net',
     speed: Number(params.get('speed') ?? 1) || 1,
@@ -73,6 +78,8 @@ async function main(): Promise<void> {
     relics: Number.isInteger(relics) && relics > 0 ? relics : undefined,
     ruins: Number.isInteger(ruins) && ruins > 0 ? ruins : undefined,
     wonder: params.get('wonder') === '1',
+    buildings: ids('buildings'),
+    units: ids('units'),
     testMap: params.get('map') === 'test',
     seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
     perturb: params.has('perturb') && Number.isInteger(Number(params.get('perturb'))) ? Number(params.get('perturb')) : undefined,

@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 13;
+export const PACK_VERSION = 14;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -207,6 +207,8 @@ export interface PackManifest {
   units: Record<string, PackUnit>;
   /** Keyed by tech id: what the research buttons show (pack version 7). */
   techs: Record<string, PackTech>;
+  /** `icon_set` (the player's culture) of each civ, Gaia first: whose interface art the game screen shows (pack version 14). */
+  cultures: number[];
   /** `map_color` of each player colour table (the dat's player colours, in order; player n uses n - 1): a palette index. */
   playerColours: number[];
   /** The minimap's shape; null when the install has no map.bmp. */

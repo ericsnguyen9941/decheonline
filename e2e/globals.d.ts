@@ -54,6 +54,7 @@ interface Window {
     delayPongs(ms: number): void;
     age(player?: number): number;
     techState(tech: number, player?: number): number;
+    objectName(id: number): string | null;
     tileVisibility(col: number, row: number, player?: number): number;
     relation(player: number, other: number): number;
     alliedVictory(player: number): boolean;

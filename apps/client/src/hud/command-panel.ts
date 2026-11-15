@@ -3,7 +3,7 @@ import type { AssetProvider, ImageFrame } from '../assets';
 import { paintFrame } from './frame-image';
 import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, itemsMadeAt, type CommandButton, type CommandMode } from './commands';
 import { buttonLetter, pressedLetter, unitLetter } from './hotkeys';
-import { SLP } from './layout';
+import { cultureSlp, SLP } from './layout';
 import { infoOf } from './records';
 import { commandMessage, objectName, shortMessage, techName } from './text';
 
@@ -29,7 +29,7 @@ export interface CommandPanelOptions {
   world: World;
   provider: AssetProvider;
   player: number;
-  /** Interface culture of the art (Egyptian 0). */
+  /** The player's culture, its civ's `icon_set` (Egyptian 0): the slot borders' and the building icons' art. */
   culture: number;
   /** Send a command through the lockstep. */
   issue: (command: Command) => void;
@@ -213,7 +213,7 @@ export class CommandPanel {
     const disabled = b?.kind === 'research' && b.disabled;
     slot.classList.toggle('disabled', disabled);
     const border = (b?.kind === 'research' ? RESEARCH_BORDER : 0) + (down ? 1 : 0);
-    paintFrame(slot, b ? provider.interfaceFrame(SLP.buttonBorder + this.o.culture, border) : null);
+    paintFrame(slot, b ? provider.interfaceFrame(cultureSlp(SLP.buttonBorder, this.o.culture), border) : null);
     const art = b ? this.icon(b) : null;
     paintFrame(icon, art);
     icon.textContent = b && !art ? this.label(b) : '';
@@ -226,7 +226,7 @@ export class CommandPanel {
     let frame: ImageFrame | null;
     if (b.kind === 'place') {
       const info = infoOf(provider, master(world, player, b.unit));
-      frame = info && info.icon >= 0 ? provider.interfaceFrame(SLP.buildingIcons + culture, buildingFacet(world, player, b.unit) + info.icon, player) : null;
+      frame = info && info.icon >= 0 ? provider.interfaceFrame(cultureSlp(SLP.buildingIcons, culture), buildingFacet(world, player, b.unit) + info.icon, player) : null;
     } else if (b.kind === 'train') {
       const info = infoOf(provider, master(world, player, b.unit));
       frame = info && info.icon >= 0 ? provider.interfaceFrame(SLP.unitIcons, info.icon, player) : null;
