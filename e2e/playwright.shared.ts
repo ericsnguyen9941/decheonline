@@ -29,7 +29,8 @@ export const shared: PlaywrightTestConfig = {
     command: BUNDLES_COMMAND,
     cwd: '..',
     url: baseURL,
-    env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir },
+    // Every player starts the lobby Egyptian, not a random civ, so a test that does not pick one plays the same civ.
+    env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir, LOBBY_CIV: '1' },
     reuseExistingServer: false,
     timeout: 300_000,
   },

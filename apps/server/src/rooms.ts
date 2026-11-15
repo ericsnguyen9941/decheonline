@@ -1,8 +1,10 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import {
+  CIV_COUNT,
   CODE_ALPHABET,
   CODE_LENGTH,
   COMMAND_DELAY_TURNS,
+  DEFAULT_GAME_SETTINGS,
   DROP_AFTER_MS,
   MAX_PLAYERS,
   MAX_TURNS_AHEAD,
@@ -11,6 +13,7 @@ import {
   type ClientMessage,
   type Command,
   type ErrorCode,
+  type GameSettings,
   type PlayerInfo,
   type ServerMessage,
   type SpeedChange,
@@ -38,6 +41,8 @@ interface Member {
   peer: Peer | null;
   name: string;
   ready: boolean;
+  /** The civ drop-down's value (docs/spec/lobby.md §3). */
+  civ: number;
   /** Next turn this member must submit. */
   nextTurn: number;
   /** Submitted but not yet released batches. */
@@ -69,13 +74,15 @@ export class Room {
   readonly desyncs: number[] = [];
   started = false;
   seed = 0;
+  /** The host's map type, map size and victory condition (docs/spec/lobby.md §2). */
+  settings: GameSettings = structuredClone(DEFAULT_GAME_SETTINGS);
   /** Step size and buffer frames: the server plays the host (docs/spec/turn-timing.md §8.2). */
   readonly speed = new SpeedHost();
 
   constructor(readonly code: string) {}
 
   players(): PlayerInfo[] {
-    return this.members.map((m, slot) => ({ slot, name: m.name, ready: m.ready }));
+    return this.members.map((m, slot) => ({ slot, name: m.name, ready: m.ready, civ: m.civ }));
   }
 
   broadcast(message: ServerMessage): void {
@@ -84,7 +91,7 @@ export class Room {
 
   sendLobby(): void {
     const players = this.players();
-    this.members.forEach((m, you) => m.peer?.send({ t: 'lobby', code: this.code, you, players }));
+    this.members.forEach((m, you) => m.peer?.send({ t: 'lobby', code: this.code, you, players, settings: this.settings }));
   }
 }
 
@@ -99,6 +106,8 @@ export interface RoomRegistryOptions {
   generateToken?: () => string;
   /** Run `fn` after `ms`; returns a cancel function (tests). */
   schedule?: (fn: () => void, ms: number) => () => void;
+  /** A new player's civ before it picks one; default a random civ, as the host rolls it (docs/spec/lobby.md §3). */
+  generateCiv?: () => number;
 }
 
 function schedule(fn: () => void, ms: number): () => void {
@@ -121,6 +130,7 @@ export class RoomRegistry {
   private readonly now: () => number;
   private readonly generateToken: () => string;
   private readonly schedule: (fn: () => void, ms: number) => () => void;
+  private readonly generateCiv: () => number;
 
   constructor(options: RoomRegistryOptions = {}) {
     this.generateCode = options.generateCode ?? randomCode;
@@ -128,6 +138,7 @@ export class RoomRegistry {
     this.now = options.now ?? (() => performance.now());
     this.generateToken = options.generateToken ?? (() => randomBytes(16).toString('hex'));
     this.schedule = options.schedule ?? schedule;
+    this.generateCiv = options.generateCiv ?? (() => randomInt(CIV_COUNT) + 1);
   }
 
   roomOf(peer: Peer): Room | undefined {
@@ -158,6 +169,17 @@ export class RoomRegistry {
       case 'ready':
         if (room.started) return reject(peer, 'room-started', 'game already started');
         member.ready = message.ready;
+        return room.sendLobby();
+      case 'settings':
+        if (room.started) return reject(peer, 'room-started', 'game already started');
+        if (slot !== 0) return reject(peer, 'not-host', 'only the host can change the settings');
+        if (member.ready) return reject(peer, 'locked', 'the settings cannot change while the host is ready');
+        room.settings = message.settings;
+        return room.sendLobby();
+      case 'civ':
+        if (room.started) return reject(peer, 'room-started', 'game already started');
+        if (member.ready) return reject(peer, 'locked', 'the civilization cannot change while ready');
+        member.civ = message.civ;
         return room.sendLobby();
       case 'start':
         return this.start(room, slot, peer);
@@ -264,6 +286,7 @@ export class RoomRegistry {
       peer,
       name: name === '' ? `Player ${slot + 1}` : name,
       ready: false,
+      civ: this.generateCiv(),
       nextTurn: 0,
       pending: new Map(),
       hashes: new Map(),
@@ -314,7 +337,7 @@ export class RoomRegistry {
     const players = room.players();
     for (const m of room.members) {
       m.token = this.generateToken();
-      m.peer?.send({ t: 'start', seed: room.seed, commandDelay: COMMAND_DELAY_TURNS, players, token: m.token });
+      m.peer?.send({ t: 'start', seed: room.seed, commandDelay: COMMAND_DELAY_TURNS, players, settings: room.settings, token: m.token });
     }
     for (const m of room.members) this.ping(m, true);
   }

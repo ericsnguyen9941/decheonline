@@ -931,7 +931,9 @@ discoveries and ruins are 0 (those victories are not ported). Not covered:
 alliances (none in a 2-player room), randomized positions, Nomad, the
 resource levels.
 
-The client builds every game this way (`apps/client/src/lockstep/lockstep.ts`);
+The client builds every game this way (`apps/client/src/lockstep/lockstep.ts`),
+with the map type and size the host picked in the lobby (`lobbyWorldOptions`,
+lobby.md §6; the map types offered are those without water between the starts);
 `?debug=net&map=test` keeps the fixed test map (`createTestMap`,
 `startingObjects`) for the e2e that need fixed layouts. The camera starts on
 the player's Town Center (`random_start`'s view). Tests:

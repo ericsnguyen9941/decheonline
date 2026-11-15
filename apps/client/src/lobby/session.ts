@@ -1,5 +1,5 @@
-import type { ErrorCode, PlayerInfo, ServerMessage, Slot } from '@aoe/protocol';
-import { normalizeCode } from '@aoe/protocol';
+import type { ErrorCode, GameSettings, PlayerInfo, ServerMessage, Slot } from '@aoe/protocol';
+import { DEFAULT_GAME_SETTINGS, normalizeCode } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
 export type StartMessage = Extract<ServerMessage, { t: 'start' }>;
@@ -10,13 +10,15 @@ export interface LobbyState {
   /** This client's slot; -1 before joining. */
   you: Slot;
   players: PlayerInfo[];
+  /** The host's map type, map size and victory condition, as the server last sent them. */
+  settings: GameSettings;
   /** Last error from the server (bad code, room full, ...), cleared by the next action. */
   error: { code: ErrorCode | 'connection'; message: string } | null;
 }
 
 /** Lobby logic over a link, no DOM: create/join by code, ready, host start. Gameplay messages belong to lockstep. */
 export class Session {
-  state: LobbyState = { phase: 'idle', code: '', you: -1, players: [], error: null };
+  state: LobbyState = { phase: 'idle', code: '', you: -1, players: [], settings: DEFAULT_GAME_SETTINGS, error: null };
   /** Called after every state change. */
   onChange: (state: LobbyState) => void = () => {};
   /** Called when the host starts the game. */
@@ -44,6 +46,18 @@ export class Session {
     this.link.send({ t: 'ready', ready });
   }
 
+  /** Host only, while not ready: the game's settings (docs/spec/lobby.md §4). */
+  setSettings(settings: GameSettings): void {
+    this.set({ error: null });
+    this.link.send({ t: 'settings', settings });
+  }
+
+  /** This player's civilization, while not ready. */
+  setCiv(civ: number): void {
+    this.set({ error: null });
+    this.link.send({ t: 'civ', civ });
+  }
+
   start(): void {
     this.set({ error: null });
     this.link.send({ t: 'start' });
@@ -64,10 +78,10 @@ export class Session {
   private handle(m: ServerMessage): void {
     switch (m.t) {
       case 'lobby':
-        this.set({ phase: 'lobby', code: m.code, you: m.you, players: m.players, error: null });
+        this.set({ phase: 'lobby', code: m.code, you: m.you, players: m.players, settings: m.settings, error: null });
         return;
       case 'start':
-        this.set({ phase: 'playing', players: m.players });
+        this.set({ phase: 'playing', players: m.players, settings: m.settings });
         this.onStart(m, this.state.you);
         return;
       case 'error':

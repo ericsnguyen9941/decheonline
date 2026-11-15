@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { ClientMessage, Command, ServerMessage, SpeedChange } from '@aoe/protocol';
-import { DEFAULT_RANDOM_MAP, World } from '@aoe/sim';
+import { CIV_RANDOM, DEFAULT_RANDOM_MAP, MAP_HILLY, resolveCivs, VICTORY_TIME_LIMIT, World } from '@aoe/sim';
 import type { Link } from '../net/link';
 import { Lockstep, NOT_RESPONDING_MS, type Timers } from './lockstep';
 
@@ -68,6 +68,17 @@ function runThrough(link: FakeLink, timers: FakeTimers, lockstep: Lockstep, turn
 }
 
 describe('lockstep', () => {
+  test("the world plays the lobby's map type, size, victory and civs, Random resolved from the seed", () => {
+    const settings = { mapType: MAP_HILLY, mapSize: 72, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 } };
+    const lockstep = new Lockstep({ link: new FakeLink(), start: { ...start, settings, civs: [10, CIV_RANDOM] }, timers: new FakeTimers() });
+    const { world } = lockstep;
+    expect([world.map.width, world.map.height]).toEqual([72, 72]);
+    expect(world.civs).toEqual([0, 10, resolveCivs(start.seed, [10, CIV_RANDOM])[1]]);
+    expect(world.victory.type).toBe(VICTORY_TIME_LIMIT);
+    expect(world.hash()).toBe(new World({ players: 3, randomSeed: start.seed, randomMap: { type: MAP_HILLY, size: 72 }, civs: world.civs, victory: settings.victory }).hash());
+    lockstep.stop();
+  });
+
   test('turns 0 and 1 need no batch; each sends its hash and the commands issued during it', () => {
     const { link, timers, lockstep } = setup();
     expect(link.sent).toEqual([]);
@@ -132,7 +143,7 @@ describe('lockstep', () => {
 
   test('applies both batches and the agreed speed like a World fed the same input', () => {
     const { link, timers, lockstep } = setup();
-    const reference = new World({ players: 3, randomSeed: start.seed, randomMap: DEFAULT_RANDOM_MAP });
+    const reference = new World({ players: 3, randomSeed: start.seed, randomMap: DEFAULT_RANDOM_MAP, civs: [0, 1, 1] });
     const test = { type: 'test', x: 5, y: 6 } as const;
     const speed = { turn: 12, granularity: 30, frames: 9 };
     for (let turn = 0; turn < 20; turn++) {

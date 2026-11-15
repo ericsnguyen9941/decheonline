@@ -60,4 +60,5 @@ in the clone; specs that depend on it say so.
 - `support-actions.md` — convert, heal, repair, trade.
 - `victory.md` — victory conditions and score.
 - `random-maps.md` — random map generation.
+- `lobby.md` — the multiplayer setup screen: map, victory and civ settings, who may change them, Random civ.
 - `unit-ai.md` — idle behaviour, auto-attack, reactions.

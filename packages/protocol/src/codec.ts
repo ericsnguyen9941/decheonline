@@ -1,9 +1,10 @@
-import { parseCommand } from '@aoe/sim';
+import { isLobbyCiv, isLobbySettings, parseCommand } from '@aoe/sim';
 import {
   MAX_COMMANDS_PER_BATCH,
   MAX_NAME_LENGTH,
   type ClientMessage,
   type Command,
+  type GameSettings,
   type ServerMessage,
 } from './messages';
 
@@ -39,6 +40,17 @@ function commands(v: unknown): Command[] | null {
   return out;
 }
 
+/** A setting the lobby offers (`isLobbySettings`); unknown fields are dropped. */
+function settings(v: unknown): GameSettings | null {
+  if (!isObj(v) || !isObj(v['victory'])) return null;
+  const { mapType, mapSize } = v;
+  const { type, amount } = v['victory'];
+  if (typeof mapType !== 'number' || typeof mapSize !== 'number' || typeof type !== 'number') return null;
+  if (amount !== undefined && typeof amount !== 'number') return null;
+  const s: GameSettings = { mapType, mapSize, victory: amount === undefined ? { type } : { type, amount } };
+  return isLobbySettings(s) ? s : null;
+}
+
 export function encode(message: ClientMessage | ServerMessage): string {
   return JSON.stringify(message);
 }
@@ -67,6 +79,16 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
     case 'ready':
       if (typeof v['ready'] !== 'boolean') return fail('bad ready flag');
       return { ok: true, message: { t: 'ready', ready: v['ready'] } };
+    case 'settings': {
+      const s = settings(v['settings']);
+      if (s === null) return fail('bad settings');
+      return { ok: true, message: { t: 'settings', settings: s } };
+    }
+    case 'civ': {
+      const civ = v['civ'];
+      if (typeof civ !== 'number' || !isLobbyCiv(civ)) return fail('bad civ');
+      return { ok: true, message: { t: 'civ', civ } };
+    }
     case 'start':
       return { ok: true, message: { t: 'start' } };
     case 'leave':

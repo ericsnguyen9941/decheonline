@@ -27,6 +27,8 @@ export interface NetDebug {
   entityOwners(): number[];
   /** Sim player number of this client. */
   player(): number;
+  /** Each player's civ (Gaia first), the victory type and the time limit's clock: what the lobby started. */
+  gameSetup(): { civs: number[]; victory: { type: number; countdown: number } };
   /** Units in the sim, in id order; `col`/`row` is the tile under the unit. */
   units(): DebugUnit[];
   /** Queue a move order for `units` to tile coordinates (x, y), as a right click would. */
@@ -199,6 +201,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   const session = new Session(link);
   const view = new LobbyView(session);
   host.append(view.root);
+  // The setup screen's names (civs, maps, victory) from the pack's language strings once it loads.
+  void createAssetProvider().then((provider) => view.setText((id, fallback) => provider.string(id) ?? fallback));
 
   let lockstep: Lockstep | undefined;
   let panel: HTMLElement | undefined;
@@ -243,7 +247,15 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       link,
       speed,
       // A broken socket comes back to the same room and slot (docs/spec/turn-timing.md §9).
-      start: { seed: debug && seed !== undefined ? seed : start.seed, commandDelay: start.commandDelay, playerCount: start.players.length, rejoin: { code: session.state.code, slot: you, token: start.token }, testMap: debug && testMap },
+      start: {
+        seed: debug && seed !== undefined ? seed : start.seed,
+        commandDelay: start.commandDelay,
+        playerCount: start.players.length,
+        settings: start.settings,
+        civs: start.players.map((p) => p.civ),
+        rejoin: { code: session.state.code, slot: you, token: start.token },
+        testMap: debug && testMap,
+      },
       frameMs: () => frames.average(),
     });
     // Player names by player number (slot + 1), as the score and the achievements show them.
@@ -388,6 +400,7 @@ function debugPanel(
     applied: () => game.applied,
     entityOwners: () => [...game.world.entities.all()].filter((e) => !e.sprite).map((e) => e.owner),
     player: () => player,
+    gameSetup: () => ({ civs: [...game.world.civs], victory: { type: game.world.victory.type, countdown: game.world.victory.countdownClock } }),
     units: () =>
       [...game.world.entities.all()]
         .filter(isUnit)

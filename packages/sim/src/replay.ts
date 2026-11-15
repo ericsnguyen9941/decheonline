@@ -1,7 +1,10 @@
 import type { Command } from './commands';
+import { CIV_RANDOM, lobbyWorldOptions, type GameSettings } from './game-settings';
+import { MAP_HILLY, MAP_MEDIUM } from './rmm-controller';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
+import { VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
 import { startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit } from './world';
 
 /** Everything needed to rerun a game: start state plus every batch, keyed by the turn it was issued on. */
@@ -12,6 +15,10 @@ export interface ReplayLog {
   units?: StartUnit[];
   /** A random map game: the map and the start objects come from the seed (`units` is not used). */
   randomMap?: RandomMapOptions;
+  /** Each player's civ, Gaia's included; default Egyptian. */
+  civs?: number[];
+  /** The lobby's victory setting; default Standard. */
+  victory?: VictorySettings;
   turns: number;
   batches: { turn: number; player: number; commands: Command[] }[];
   /** Step size and buffer frame changes, each given to the world on the turn it was agreed for (turn-timing.md §8.7). */
@@ -21,7 +28,14 @@ export interface ReplayLog {
 /** Run a log from the start; returns the state hash after every turn. */
 export function runReplay(
   log: ReplayLog,
-  world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units, ...(log.randomMap ? { randomMap: log.randomMap } : {}) }),
+  world = new World({
+    players: log.players,
+    randomSeed: log.randomSeed,
+    units: log.units,
+    ...(log.randomMap ? { randomMap: log.randomMap } : {}),
+    ...(log.civs ? { civs: log.civs } : {}),
+    ...(log.victory ? { victory: log.victory } : {}),
+  }),
 ): number[] {
   const hashes: number[] = [];
   while (world.turn < log.turns) {
@@ -90,11 +104,12 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
  * The same kind of log on a random map game (Large, Mostly Land, the multiplayer default) without the skirmish: the
  * orders aim at the start objects the seed placed (each side's Villagers and Town Center, the resources near it).
  */
-export function sampleRandomMapReplay(turns = 60, seed = 20261115): ReplayLog {
+export function sampleRandomMapReplay(turns = 60, seed = 20261115, lobby?: { randomSeed: number; settings: GameSettings; civs: number[] }): ReplayLog {
   const players = 3;
-  const randomSeed = 4243;
-  const randomMap: RandomMapOptions = {};
-  const world = new World({ players, randomSeed, randomMap });
+  const randomSeed = lobby?.randomSeed ?? 4243;
+  const options = lobby ? lobbyWorldOptions(randomSeed, lobby.settings, lobby.civs) : { players, randomSeed, randomMap: {} };
+  const randomMap: RandomMapOptions = options.randomMap ?? {};
+  const world = new World(options);
   const objects = [...world.entities.all()];
   const start: ReplayStart = {
     count: Math.max(...objects.map((e) => e.id)),
@@ -103,7 +118,17 @@ export function sampleRandomMapReplay(turns = 60, seed = 20261115): ReplayLog {
     resources: objects.flatMap((e) => (e.owner === 0 && e.heldAmount > 0 ? [{ id: e.id, x: e.x, y: e.y }] : [])),
     at: (id) => world.entities.get(id),
   };
-  return { players, randomSeed, randomMap, turns, batches: sampleBatches(start, turns, seed, false), speeds: sampleSpeeds(turns) };
+  const settings = lobby ? { civs: [...world.civs], victory: options.victory! } : {};
+  return { players, randomSeed, randomMap, ...settings, turns, batches: sampleBatches(start, turns, seed, false), speeds: sampleSpeeds(turns) };
+}
+
+/**
+ * The same on a game with lobby settings other than the defaults (docs/spec/lobby.md): Medium Hill Country, a
+ * 3,000-year time limit, a Random civ (resolved from the seed) against Shang.
+ */
+export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
+  const settings: GameSettings = { mapType: MAP_HILLY, mapSize: MAP_MEDIUM, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 } };
+  return sampleRandomMapReplay(turns, seed, { randomSeed: 4244, settings, civs: [CIV_RANDOM, 10] });
 }
 
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */

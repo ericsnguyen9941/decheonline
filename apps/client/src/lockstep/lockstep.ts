@@ -1,4 +1,4 @@
-import { COMMAND_DELAY_TURNS, DEFAULT_RANDOM_MAP, SINGLE_STEP_TURNS, startingObjects, World, type Command } from '@aoe/sim';
+import { CIV_EGYPTIAN, COMMAND_DELAY_TURNS, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, SINGLE_STEP_TURNS, World, type Command, type GameSettings } from '@aoe/sim';
 import type { ClientMessage, EndReason, SpeedChange, TurnBatch } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
@@ -7,6 +7,10 @@ export interface LockstepStart {
   commandDelay: number;
   /** Number of human players; protocol slot s is sim player s + 1 (player 0 is Gaia). */
   playerCount: number;
+  /** The host's map type, map size and victory condition; default the original's (Large, Mostly Land, Standard). */
+  settings?: GameSettings;
+  /** Each slot's civ from the lobby (17 Random is resolved from the seed); default Egyptian. */
+  civs?: readonly number[];
   /** Room, slot and token to take the slot back with after a broken socket; without it a broken link ends the game. */
   rejoin?: { code: string; slot: number; token: string };
   /**
@@ -105,12 +109,10 @@ export class Lockstep {
     this.now = now;
     this.frameMs = frameMs;
     this.paceScale = 1 / speed;
-    const players = start.playerCount + 1;
-    // A random map game at the original's multiplayer defaults (Large, Mostly Land): both peers build the same map and
-    // start objects from the shared seed (docs/spec/random-maps.md).
-    this.world = start.testMap
-      ? new World({ players, randomSeed: start.seed, units: startingObjects(players) })
-      : new World({ players, randomSeed: start.seed, randomMap: DEFAULT_RANDOM_MAP });
+    // A random map game with the lobby's settings and civs: both peers build the same map and start objects from the
+    // shared seed (docs/spec/random-maps.md, docs/spec/lobby.md §5).
+    const civs = start.civs ?? new Array<number>(start.playerCount).fill(CIV_EGYPTIAN);
+    this.world = new World(lobbyWorldOptions(start.seed, start.settings ?? DEFAULT_GAME_SETTINGS, civs, start.testMap));
     this.unsubscribe = link.onMessage((m) => {
       if (this.stopped) return;
       if (m.t === 'turn') {

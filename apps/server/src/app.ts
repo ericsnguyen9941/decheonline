@@ -1,8 +1,8 @@
 import { createServer, type Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { decodeClientMessage, encode } from '@aoe/protocol';
+import { decodeClientMessage, encode, isLobbyCiv } from '@aoe/protocol';
 import { DEFAULT_ASSETS_DIR, serveAsset } from './assets';
-import { RoomRegistry, type Peer } from './rooms';
+import { RoomRegistry, type Peer, type RoomRegistryOptions } from './rooms';
 
 const MAX_FRAME_BYTES = 64 * 1024;
 
@@ -12,9 +12,18 @@ export interface AppOptions {
   assetsDir?: string;
 }
 
+/**
+ * Env `LOBBY_CIV` (1-17): every player starts the lobby with that civ instead of a random one, so the e2e games that do
+ * not pick a civ play the same civ every run.
+ */
+function roomOptionsFromEnv(): RoomRegistryOptions {
+  const civ = Number(process.env.LOBBY_CIV);
+  return isLobbyCiv(civ) ? { generateCiv: () => civ } : {};
+}
+
 /** HTTP server with `/health`, `/assets/*` and the game relay on WebSocket path `/ws`. */
 export function createApp({
-  rooms = new RoomRegistry(),
+  rooms = new RoomRegistry(roomOptionsFromEnv()),
   assetsDir = process.env.ASSETS_DIR ?? DEFAULT_ASSETS_DIR,
 }: AppOptions = {}): Server {
   const server = createServer((req, res) => {

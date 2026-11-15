@@ -1,9 +1,11 @@
 /** Wire messages between client and relay server. One JSON object per WebSocket text frame, tagged by `t`. */
 
-import { BUFFER_FRAMES, COMMAND_DELAY_TURNS, STEP_MS, type Command, type SpeedChange } from '@aoe/sim';
+import { BUFFER_FRAMES, CIV_COUNT, CIV_RANDOM, COMMAND_DELAY_TURNS, DEFAULT_GAME_SETTINGS, isLobbyCiv, STEP_MS, type Command, type GameSettings, type SpeedChange } from '@aoe/sim';
 
 /** Games start at `STEP_MS` per step and `BUFFER_FRAMES`; the server retunes both (docs/spec/turn-timing.md §8). */
 export { BUFFER_FRAMES, COMMAND_DELAY_TURNS, STEP_MS, type Command, type SpeedChange };
+/** The lobby's settings and civs (docs/spec/lobby.md). */
+export { CIV_COUNT, CIV_RANDOM, DEFAULT_GAME_SETTINGS, isLobbyCiv, type GameSettings };
 export const MAX_PLAYERS = 2;
 export const MAX_NAME_LENGTH = 24;
 export const MAX_COMMANDS_PER_BATCH = 256;
@@ -19,6 +21,8 @@ export interface PlayerInfo {
   slot: Slot;
   name: string;
   ready: boolean;
+  /** The player's civilization drop-down: 1 Egyptian .. 16 Macedonian, 17 Random (docs/spec/lobby.md §3). */
+  civ: number;
 }
 
 export interface TurnBatch {
@@ -32,6 +36,10 @@ export type ClientMessage =
   | { t: 'create'; name: string }
   | { t: 'join'; code: string; name: string }
   | { t: 'ready'; ready: boolean }
+  /** Host only, while not ready: the map type, map size and victory condition (docs/spec/lobby.md §2, §4). */
+  | { t: 'settings'; settings: GameSettings }
+  /** This player's civilization, while not ready (docs/spec/lobby.md §3, §4). */
+  | { t: 'civ'; civ: number }
   /** Host only, once every player is ready. */
   | { t: 'start' }
   /**
@@ -66,18 +74,21 @@ export type ErrorCode =
   | 'not-started'
   | 'bad-turn'
   /** The room, slot or token of a `rejoin` is wrong, or the slot was dropped. */
-  | 'bad-rejoin';
+  | 'bad-rejoin'
+  /** A ready player's civ, or the settings while the host is ready, cannot change (docs/spec/lobby.md §4). */
+  | 'locked';
 
 export type EndReason = 'peer-left';
 
 export type ServerMessage =
   /** Sent on create/join and whenever the lobby changes. `you` is the receiver's slot. */
-  | { t: 'lobby'; code: string; you: Slot; players: PlayerInfo[] }
+  | { t: 'lobby'; code: string; you: Slot; players: PlayerInfo[]; settings: GameSettings }
   /**
    * The game begins. Every client seeds its sim with `seed` and submits each turn's batch once it has run it. `token`
-   * is the receiver's own: it takes the slot back with `rejoin` after a dropped socket.
+   * is the receiver's own: it takes the slot back with `rejoin` after a dropped socket. `settings` and each player's
+   * `civ` are the lobby's at the start (`lobbyWorldOptions` turns them into the world).
    */
-  | { t: 'start'; seed: number; commandDelay: number; players: PlayerInfo[]; token: string }
+  | { t: 'start'; seed: number; commandDelay: number; players: PlayerInfo[]; settings: GameSettings; token: string }
   /**
    * Answer to a good `rejoin`: the slot is this client's again. `nextTurn` is the first turn the server has no batch
    * of it for: the client sends its batches from there. The released turns it lacks follow as `turn` messages.

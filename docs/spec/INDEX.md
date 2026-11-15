@@ -135,6 +135,16 @@ Spec: [support-actions.md](support-actions.md).
 | `src/t_c_obj.cpp` | 38/0/1/0 | `TRIBE_Combat_Object::convert` :525, `heal` :552, `repair` :579, `trade` :638 (all [M]) | R3 |
 | `src/tact_art.cpp`, `tact_dar.cpp`, `tact_wnd.cpp` | 11/0/0/0, 8/0/0/0, 6/0/0/0 | artifact capture, discovery, wonder | R3 |
 
+## Game setup (lobby)
+
+Spec: [lobby.md](lobby.md).
+
+| file | entry points | spec |
+| --- | --- | --- |
+| `src/scr_mps.cpp` | `TribeMPSetupScreen::init_vars` :348 [M], `action` :613 [L], `fillPlayers` :1478 [M], `updateSummary` :1718 [M], `startGame` :848 [N] | lobby.md §2-4 |
+| `src/scr_set.cpp` | `TribeGameSettingsScreen` :19 [M], `action` :487 [M], `sendSettings` :712 [M] | lobby.md §2 |
+| `src/tribegam.cpp` | `TRIBE_Game::create_game` :2739 [L] (Random civ) | lobby.md §5 |
+
 ## Victory, score
 
 Spec: [victory.md](victory.md).

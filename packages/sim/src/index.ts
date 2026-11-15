@@ -27,5 +27,6 @@ export * from './hash';
 export * from './visibility';
 export * from './victory';
 export * from './world';
+export * from './game-settings';
 export * from './replay';
 export * from './rmm-controller';

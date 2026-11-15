@@ -20,7 +20,8 @@ export default defineConfig({
     command: BUNDLES_COMMAND,
     cwd: '..',
     url: baseURL,
-    env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: join(import.meta.dirname, '..', 'assets-local', 'pack') },
+    // Every player starts the lobby Egyptian (the main config's reason).
+    env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: join(import.meta.dirname, '..', 'assets-local', 'pack'), LOBBY_CIV: '1' },
     reuseExistingServer: false,
     timeout: 300_000,
   },

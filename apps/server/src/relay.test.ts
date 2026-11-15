@@ -89,7 +89,8 @@ async function connect(): Promise<TestClient> {
 }
 
 beforeEach(async () => {
-  rooms = new RoomRegistry({ generateSeed: () => 1234 });
+  let civ = 0;
+  rooms = new RoomRegistry({ generateSeed: () => 1234, generateCiv: () => (civ++ % 2) + 5 });
   server = createApp({ rooms });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   port = (server.address() as AddressInfo).port;
@@ -133,7 +134,8 @@ describe('rooms', () => {
     expect(created.code).toHaveLength(CODE_LENGTH);
     expect(isValidCode(created.code)).toBe(true);
     expect(created.you).toBe(0);
-    expect(created.players).toEqual([{ slot: 0, name: 'Eric', ready: false }]);
+    expect(created.players).toEqual([{ slot: 0, name: 'Eric', ready: false, civ: 5 }]);
+    expect(created.settings).toEqual({ mapType: 3, mapSize: 144, victory: { type: 0 } });
 
     // Lower-case and dashes are accepted.
     guest.send({ t: 'join', code: created.code.toLowerCase().replace(/^(..)/, '$1-'), name: 'Bao' });
@@ -181,6 +183,42 @@ describe('rooms', () => {
     await guest.expect('start');
   });
 
+  test('the host sets map and victory, each player its civ, both see them and the start carries them', async () => {
+    const { host, guest } = await pair();
+    const settings = { mapType: 7, mapSize: 96, victory: { type: 2, amount: 5000 } };
+    guest.send({ t: 'settings', settings });
+    expect((await guest.expect('error')).code).toBe('not-host');
+    host.send({ t: 'settings', settings });
+    for (const c of [host, guest]) expect((await c.expect('lobby')).settings).toEqual(settings);
+    guest.send({ t: 'civ', civ: 17 });
+    for (const c of [host, guest]) expect((await c.expect('lobby')).players.map((p) => p.civ)).toEqual([5, 17]);
+    host.send({ t: 'civ', civ: 10 });
+    for (const c of [host, guest]) expect((await c.expect('lobby')).players.map((p) => p.civ)).toEqual([10, 17]);
+    // Ready locks the player's civ, and the host's settings (scr_mps.cpp fillPlayers, action).
+    host.send({ t: 'ready', ready: true });
+    for (const c of [host, guest]) await c.expect('lobby');
+    host.send({ t: 'civ', civ: 1 });
+    expect((await host.expect('error')).code).toBe('locked');
+    host.send({ t: 'settings', settings: { mapType: 3, mapSize: 144, victory: { type: 0 } } });
+    expect((await host.expect('error')).code).toBe('locked');
+    guest.send({ t: 'ready', ready: true });
+    for (const c of [host, guest]) await c.expect('lobby');
+    host.send({ t: 'start' });
+    for (const c of [host, guest]) {
+      const start = await c.expect('start');
+      expect(start.settings).toEqual(settings);
+      expect(start.players.map((p) => p.civ)).toEqual([10, 17]);
+    }
+  });
+
+  test('settings the sim cannot play are refused by the codec', async () => {
+    const { host } = await pair();
+    host.send({ t: 'settings', settings: { mapType: 0, mapSize: 144, victory: { type: 0 } } });
+    expect((await host.expect('error')).code).toBe('bad-message');
+    host.send({ t: 'civ', civ: 0 });
+    expect((await host.expect('error')).code).toBe('bad-message');
+  });
+
   test('joining a started game is rejected', async () => {
     const { host, guest, code } = await pair();
     await startGame(host, guest);
@@ -202,7 +240,7 @@ describe('rooms', () => {
     host.send({ t: 'leave' });
     const lobby = await guest.expect('lobby');
     expect(lobby.you).toBe(0);
-    expect(lobby.players).toEqual([{ slot: 0, name: 'Guest', ready: false }]);
+    expect(lobby.players).toEqual([{ slot: 0, name: 'Guest', ready: false, civ: 6 }]);
     guest.send({ t: 'leave' });
     await guest.expectSilence();
     expect(rooms.rooms.has(code)).toBe(false);

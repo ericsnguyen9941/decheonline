@@ -56,7 +56,7 @@ header h1 {
 
 #lobby .panel {
   box-sizing: border-box;
-  width: min(26rem, 90vw);
+  width: min(30rem, 92vw);
   padding: 1.5rem 2rem 2rem;
   color: var(--ink);
   background: linear-gradient(180deg, #e2d1a6 0%, var(--parchment) 40%, var(--parchment-dark) 100%);
@@ -155,6 +155,37 @@ button.primary {
 }
 #lobby .players li {
   padding: 0.2rem 0;
+}
+#lobby .players select,
+#lobby .settings select {
+  font: inherit;
+  padding: 0.15rem 0.3rem;
+  color: var(--ink);
+  background: #f1e6c6;
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-dark) var(--stone-light) var(--stone-light) var(--stone-dark);
+}
+#lobby .players .civ {
+  font-weight: bold;
+}
+#lobby .settings {
+  margin: 1rem 0 0;
+}
+#lobby .settings h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+#lobby .settings label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin: 0 0 0.35rem;
+}
+#lobby .settings ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 #lobby .error {
   margin: 1rem 0 0;
