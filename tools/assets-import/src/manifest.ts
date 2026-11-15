@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 11;
+export const PACK_VERSION = 12;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -60,6 +60,11 @@ export interface PackTerrain {
    */
   rows: number;
   cols: number;
+  /**
+   * The dat's tile pictures per tile type (`RGE_Tile_Set::tiles`, pack version 12): `[count, animations, shapeIndex]`;
+   * type t draws frame `shapeIndex + animations * variant`, the variant from `rows` x `cols` when `count` > 1.
+   */
+  tiles: [number, number, number][];
   /** `map_hi_color`, `map_med_color`, `map_low_color`: the minimap's palette indices (a flat tile uses the middle one). */
   minimap: [number, number, number];
 }
@@ -184,8 +189,8 @@ export interface PackManifest {
   playerColours: number[];
   /** The minimap's shape; null when the install has no map.bmp. */
   minimap: PackMinimap | null;
-  /** The fog's tile edges; null when the install has no TILEEDGE.DAT and BLKEDGE.DAT. */
-  tileEdges: PackTileEdges | null;
+  /** The fog's tile edges per tile type (0-16, pack version 12); null when the install has no TILEEDGE.DAT and BLKEDGE.DAT. */
+  tileEdges: PackTileEdges[] | null;
   /** The game's text by string id: language.dll's string tables with languagex.dll's (Rise of Rome) over them. */
   strings: Record<string, string>;
   /** Keyed by the dat's sound id (pack version 9). */

@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
 import { slpImagePath, slpKey, soundPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
-import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, UnitInfo } from './provider';
+import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, TerrainLayout, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -115,9 +115,9 @@ class PackProvider implements AssetProvider {
     });
   }
 
-  terrainLayout(terrainId: number): { rows: number; cols: number } {
+  terrainLayout(terrainId: number): TerrainLayout {
     const t = this.manifest.terrains[terrainId];
-    return { rows: t?.rows ?? 1, cols: t?.cols ?? 1 };
+    return { rows: t?.rows ?? 1, cols: t?.cols ?? 1, tiles: t?.tiles ?? [] };
   }
 
   async terrainFrames(terrainId: number): Promise<SpriteFrame[]> {

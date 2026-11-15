@@ -198,7 +198,7 @@ function buildManifest(
   slps: Record<string, PackSlp>,
   strings: Map<number, string>,
   minimap: PackMinimap | null,
-  tileEdges: PackTileEdges | null,
+  tileEdges: PackTileEdges[] | null,
   wavs: number[],
   screens: Record<string, PackScreen>,
 ): PackManifest {
@@ -255,6 +255,7 @@ function buildManifest(
       slp: t.slp >= 0 && slps[key] ? key : null,
       rows: Math.max(rows, 1),
       cols: Math.max(cols, 1),
+      tiles: t.elevationGraphics.map((g) => [g.frameCount, g.angleCount, g.shapeId]),
       minimap: [t.colours[0] ?? 0, t.colours[1] ?? 0, t.colours[2] ?? 0],
     };
   });

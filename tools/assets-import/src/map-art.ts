@@ -38,16 +38,20 @@ export function parseMinimapShape(bmp: Uint8Array): PackMinimap {
 }
 
 /**
- * Tile type 0's (flat) tables of `RGE_View::Init_Tile_Edge_Tables` (src/view.cpp:277): each file starts with 17
+ * Every tile type's tables of `RGE_View::Init_Tile_Edge_Tables` (src/view.cpp:277): each file starts with 17
  * offsets, one table per tile type; a TILEEDGE table holds 47 pairs of offsets (`normal_draw`, `fog_draw`), a BLKEDGE
  * table 47 offsets (`black_UNdraw`); each points at 3-byte spans `(Y_delta, X_start, X_end)` ended by `Y_delta` 0xFF,
- * and 0 is no list (drawn as an empty one).
+ * and 0 is no list (drawn as an empty one). `Y_delta` runs over the type's box (`tilesizes[type].height` + 1 rows).
  */
-export function parseTileEdges(tileEdge: Uint8Array, blackEdge: Uint8Array): PackTileEdges {
+export function parseTileEdges(tileEdge: Uint8Array, blackEdge: Uint8Array): PackTileEdges[] {
+  return Array.from({ length: TILE_TYPES }, (_, type) => parseTypeEdges(tileEdge, blackEdge, type));
+}
+
+function parseTypeEdges(tileEdge: Uint8Array, blackEdge: Uint8Array, type: number): PackTileEdges {
   const tables = (file: Uint8Array, perEdge: number): TileSpan[][][] => {
     const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
     if (file.byteLength < TILE_TYPES * 4) throw new Error('tile edge file too short');
-    const table = view.getUint32(0, true);
+    const table = view.getUint32(type * 4, true);
     return Array.from({ length: perEdge }, (_, k) =>
       Array.from({ length: EDGE_COUNT }, (_, edge) => {
         let p = view.getUint32(table + (edge * perEdge + k) * 4, true);

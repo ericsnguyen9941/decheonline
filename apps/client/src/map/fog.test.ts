@@ -1,5 +1,7 @@
 import { expect, test } from 'vitest';
-import { EDGE_NUMBER, edgeNumber, FOG_W, fogPixels, PLAIN_EDGES, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE } from './fog';
+import { EDGE_NUMBER, edgeNumber, FOG_W, fogHeight, fogPixels, PLAIN_EDGES as PLAIN_BY_TYPE, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, tileSpans } from './fog';
+
+const PLAIN_EDGES = PLAIN_BY_TYPE[0]!;
 
 test('the 256 neighbour masks map to the 47 edges of the tile edge files', () => {
   expect(new Set(EDGE_NUMBER).size).toBe(47);
@@ -44,4 +46,26 @@ test('an unexplored tile is black over its whole diamond, so the low objects und
   expect(black[32]).toBe(255);
   // Outside the diamond (top-left corner) the neighbours' terrain is left alone.
   expect(black[0]).toBe(0);
+});
+
+test('the spans of a tile type outline its box as TILEEDGE.DAT edge 0 does', () => {
+  // The flat diamond, row by row (the real file's type 0 starts [0, 32, 32], [1, 30, 34] and ends [32, 32, 32]).
+  expect(tileSpans(0).slice(0, 2)).toEqual([[0, 32, 32], [1, 30, 34]]);
+  expect(tileSpans(0)[16]).toEqual([16, 0, 64]);
+  expect(tileSpans(0)).toHaveLength(33);
+  // Type 13 (left, bottom and right raised) is a 17-row triangle; type 15 (all but left) 33 rows ending on a flat edge.
+  expect(fogHeight(13)).toBe(17);
+  expect(tileSpans(13)[0]).toEqual([0, 0, 64]);
+  expect(tileSpans(13)[16]).toEqual([16, 32, 32]);
+  expect(tileSpans(15).slice(-2)).toEqual([[31, 1, 34], [32, 0, 32]]);
+  // Type 2 (top raised, box 49 rows).
+  expect(fogHeight(2)).toBe(49);
+  expect(tileSpans(2)[48]).toEqual([48, 32, 32]);
+});
+
+test('a fogged slope tile is dotted over its own box height', () => {
+  const tall = fogPixels(PLAIN_BY_TYPE[2]!, TILE_FOGGED, 0, 0, 0, fogHeight(2))!;
+  expect(tall).toHaveLength(FOG_W * 49);
+  expect(tall[48 * FOG_W + 32]).toBe(0);
+  expect(tall[47 * FOG_W + 32]).toBe(255);
 });

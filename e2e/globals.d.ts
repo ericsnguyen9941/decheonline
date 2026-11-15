@@ -74,6 +74,8 @@ interface Window {
     drawnTiles(): number;
     tileScreenPos(col: number, row: number): { x: number; y: number };
     tileAt(canvasX: number, canvasY: number): { col: number; row: number } | null;
+    tileInfo(col: number, row: number): { terrain: number; height: number; type: number };
+    showAll(): void;
   };
 }
 

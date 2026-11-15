@@ -108,8 +108,8 @@ export interface MapArt {
   playerColour(player: number): number | null;
   /** map.bmp's lines; null when the pack has none. */
   readonly minimap: PackMinimap | null;
-  /** The flat tile's fog edge spans; null when the pack has none. */
-  readonly tileEdges: PackTileEdges | null;
+  /** The fog edge spans of each tile type (0-16); null when the pack has none. */
+  readonly tileEdges: readonly PackTileEdges[] | null;
 }
 
 /** What the sounds read from the pack (pack version 9; docs/spec/sounds.md). */
@@ -122,6 +122,16 @@ export interface SoundTable {
   graphicSounds(graphicId: number): { sound: number; frameSounds: readonly (readonly (readonly [number, number])[])[] | null } | null;
   /** URL of wav resource `id`; null when the pack does not have it. */
   wavUrl(id: number): string | null;
+}
+
+/**
+ * A terrain's tile pictures: flat-tile variants form a `rows` x `cols` grid; `tiles[type]` is `[count, animations,
+ * shapeIndex]` per tile type (slopes), and an entry it lacks is the flat tile's.
+ */
+export interface TerrainLayout {
+  rows: number;
+  cols: number;
+  tiles: readonly (readonly [number, number, number])[];
 }
 
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */
@@ -145,8 +155,8 @@ export interface AssetProvider {
   string(id: number): string | null;
   /** Palette, minimap colours and shape and fog edges; null without a pack. */
   mapArt(): MapArt | null;
-  /** Flat-tile variants of a terrain: a `rows` x `cols` grid at the start of its frames (RGE_View::get_tile_picture). */
-  terrainLayout(terrainId: number): { rows: number; cols: number };
+  /** Where a terrain's tile pictures are in its frames (RGE_View::get_tile_picture). */
+  terrainLayout(terrainId: number): TerrainLayout;
   /** The dat's sounds and the wavs; null without a pack. */
   soundTable(): SoundTable | null;
   /** The look of a screen or dialog by its info file's interfac.drs id (pack version 11); null when unknown. */

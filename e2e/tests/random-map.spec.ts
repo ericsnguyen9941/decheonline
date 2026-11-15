@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { walkOntoHill } from '../hills';
 
 // A game without `map=test`: the random map the seed makes (docs/spec/random-maps.md), at the multiplayer defaults.
 const URL = '/?debug=net&speed=20';
@@ -57,4 +58,12 @@ test('both players build the same 144-tile random map, start on their own Town C
   const hashes = await Promise.all([host, guest].map((p) => p.evaluate(() => window.__game!.hash(30))));
   expect(hashes[0]).toBeDefined();
   expect(hashes[0]).toBe(hashes[1]);
+});
+
+test('a right click on a raised tile walks a Villager up the hill, drawn at its height, and a click on it there selects it', async ({ browser }) => {
+  const [host] = await startGame(browser);
+  const walk = await walkOntoHill(host);
+  console.log(`hill walk: ${JSON.stringify(walk)}`);
+  // On a plateau tile the ground is the tile's height: 16 px per level.
+  expect(walk.lift).toBeCloseTo(16 * walk.hill.height, 0);
 });

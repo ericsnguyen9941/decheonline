@@ -2,7 +2,7 @@ import { DebugProvider } from './debug-provider';
 import { loadPackProvider } from './pack-provider';
 import type { AssetProvider } from './provider';
 
-export type { AssetProvider, FramePart, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, UnitInfo } from './provider';
+export type { AssetProvider, FramePart, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TerrainLayout, UnitInfo } from './provider';
 
 /** The pack from the server when it has one, otherwise debug shapes. */
 export async function createAssetProvider(): Promise<AssetProvider> {

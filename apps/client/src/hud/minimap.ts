@@ -2,6 +2,7 @@
 // RGE_Diamond_Map_View (src/vw_dimap.cpp). docs/spec/hud.md "Minimap".
 import { TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, typeOf, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, MapArt } from '../assets';
+import { tileShade, tileType } from '../map/elevation';
 import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import type { Doppelganger } from '../units/fog-objects';
@@ -149,14 +150,15 @@ export class Minimap {
   }
 
   /**
-   * `draw_tile` (src/diam_map.cpp:459): the flat tile's `map_med_color`, or the `map_color` of a `map_draw_level` 4
-   * object on it or next to it.
+   * `draw_tile` (src/diam_map.cpp:459): the terrain's `map_med_color` on a flat tile, `map_hi_color` or `map_low_color`
+   * on a slope by its `tile_type` (`tileShade`), or the `map_color` of a `map_draw_level` 4 object on it or next to it.
    */
   private drawTile(col: number, row: number, objectColour: number | undefined): void {
     const r = tileRect(this.geometry, col, row);
     if (!r) return;
     const { world } = this.o;
-    let colour = this.art ? this.index(this.art.terrainColours(world.map.terrainAt(col, row))?.[1] ?? BACKGROUND) : FALLBACK_TERRAIN;
+    const shade = 1 - tileShade(tileType(world.map, col, row));
+    let colour = this.art ? this.index(this.art.terrainColours(world.map.terrainAt(col, row))?.[shade] ?? BACKGROUND) : FALLBACK_TERRAIN;
     if (objectColour !== undefined) colour = this.index(objectColour);
     const rgba = this.rgba(colour);
     const w = this.canvas.width;

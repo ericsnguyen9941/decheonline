@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { walkOntoHill } from '../hills';
 
 // Local only; the screenshots land in assets-local/ (gitignored) because they show game art.
 const dir = process.env.AOE1_DIR;
@@ -72,4 +73,36 @@ test('two random map games: each player starts on its own Town Center, different
     await guest.context().close();
   }
   expect(games[0]![0]!.map).not.toBe(games[1]![0]!.map);
+});
+
+test('hills: slopes and heights drawn from the terrain art, a Villager walked up one by a right click and selected there', async ({ browser }) => {
+  test.setTimeout(480_000);
+  mkdirSync(shots, { recursive: true });
+  const [host, guest] = await playGame(browser);
+  const walk = await walkOntoHill(host);
+  console.log(`hill walk: ${JSON.stringify(walk)}`);
+  expect(walk.lift).toBeCloseTo(16 * walk.hill.height, 0);
+  await host.evaluate(([c, r]) => window.__map!.centerOnTile(c!, r!), [walk.hill.col, walk.hill.row] as const);
+  await shot(host, 'elevation-hill.png');
+  // The map's highest ground (the one nearest the Villager), the fog off (debug only), to show tall hills.
+  const peak = await host.evaluate(([c0, r0]) => {
+    const m = window.__map!;
+    let best = { col: c0!, row: r0!, height: -1, d: 0 };
+    for (let row = 0; row < m.height; row++) {
+      for (let col = 0; col < m.width; col++) {
+        const h = m.tileInfo(col, row).height;
+        const d = Math.hypot(col - c0!, row - r0!);
+        if (h > best.height || (h === best.height && d < best.d)) best = { col, row, height: h, d };
+      }
+    }
+    return best;
+  }, [walk.hill.col, walk.hill.row] as const);
+  console.log(`peak: ${JSON.stringify(peak)}`);
+  await host.evaluate(([c, r]) => {
+    window.__map!.showAll();
+    window.__map!.centerOnTile(c!, r!);
+  }, [peak.col, peak.row] as const);
+  await shot(host, 'elevation-peak.png');
+  await host.context().close();
+  await guest.context().close();
 });

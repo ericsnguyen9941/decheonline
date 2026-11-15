@@ -27,6 +27,7 @@ test('maps graphics, terrains and units by their dat ids', () => {
   expect(manifest.terrains[0]?.slp).toBe(slpKey('terrain', 15000));
   expect(manifest.terrains[0]).toMatchObject({ rows: 1, cols: 2 });
   expect(manifest.terrains[1]).toMatchObject({ rows: 1, cols: 1 });
+  expect(manifest.terrains[0]?.tiles).toHaveLength(19);
   expect(manifest.units[SYNTHETIC.unitId]?.standingGraphic).toBe(SYNTHETIC.standingGraphic);
 });
 
@@ -63,7 +64,9 @@ test("imports map.bmp's lines, the tile edges, the minimap colours and each unit
   // The widest line is the middle row; each line is centred.
   expect(shape.lines[56]).toEqual([0, 220]);
   for (const [x, len] of shape.lines) expect(x * 2 + len).toBe(220);
-  const edges = manifest.tileEdges!;
+  // The synthetic files share one table between the 17 tile types.
+  expect(manifest.tileEdges).toHaveLength(17);
+  const edges = manifest.tileEdges![16]!;
   expect(edges.normal).toHaveLength(47);
   expect(edges.normal[0]).toEqual(WHOLE_TILE);
   expect(edges.fog[3]).toEqual([]);

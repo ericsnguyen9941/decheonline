@@ -8,7 +8,7 @@ import { frameCursor } from '../hud/frame-image';
 import { HOTKEY_STRING, hotkeyLetter, pressedLetter } from '../hud/hotkeys';
 import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
 import { attackRollover } from '../hud/text';
-import { mapPixelSize, pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
+import { mapPixelSize, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import { composeGraphic, GROUND_LAYER, splitsShadow, splitsTerrain, type PartSet } from './composite';
 import { facingFrame } from './facing';
@@ -374,7 +374,7 @@ export class UnitLayer {
     const t = this.tracks.get(id);
     if (!t) return null;
     const { x, y } = this.drawnAt(t, performance.now());
-    const p = tileCoordsToPixel(x, y, this.o.world.map.width);
+    const p = this.o.view.ground.pixel(x, y);
     return { x: p.x - this.o.view.camera.x, y: p.y - this.o.view.camera.y };
   }
 
@@ -479,7 +479,6 @@ export class UnitLayer {
     const duration = newStep ? this.o.stepMs() : 0;
     this.seenStep = step;
     if (newStep) this.doppelgangers.update(world);
-    const width = world.map.width;
     const alive = new Set<number>();
     this.shown = 0;
     for (const e of world.entities.all()) {
@@ -512,8 +511,9 @@ export class UnitLayer {
         t.lastFrame = -1;
       }
       const at = this.drawnAt(t, now);
-      const pos = tileCoordsToPixel(at.x, at.y, width);
-      // Missiles fly above the ground: `world_z` raises the sprite (the map is flat, so others stay at 0). The parts of
+      // Everything stands on the ground as drawn (`world_z` is the hill's height there, `teleport`).
+      const pos = view.ground.pixel(at.x, at.y);
+      // Missiles fly above the ground: the sim's `world_z` raises the sprite over it (others stay at 0). The parts of
       // the graphic at `draw_level` 10 or less stay at the shadow point on the ground (`RGE_Sprite::draw`).
       const graphicInfo = this.o.provider.graphicInfo(graphic);
       let lift = Math.round(e.z * Z_PIXELS);
@@ -552,7 +552,7 @@ export class UnitLayer {
         ? facingFrame(facetOf(e, info.angleCount), frameStep, info.angleCount, info.frameCount, info.mirroringMode)
         : { index: 0, flipped: false };
       if (under) {
-        const s = (t.under ??= view.layer.addChild(new Sprite()));
+        const s = (t.under ??= view.terrainLayer.addChild(new Sprite()));
         this.place(s, under.frames[pick.index] ?? under.frames[0]!, pick.flipped, pos.x, pos.y, false);
         s.zIndex = this.terrainZ(0, pos.y);
         s.visible = true;
@@ -563,6 +563,8 @@ export class UnitLayer {
       }
       const frame = art.frames[pick.index] ?? art.frames[0]!;
       this.place(t.sprite, frame, pick.flipped, pos.x, pos.y - lift, fog === 'fogged');
+      const parent = fog === 'terrain' ? view.terrainLayer : view.layer;
+      if (t.sprite.parent !== parent) parent.addChild(t.sprite);
       t.frame = frame;
       t.layer = info?.layer ?? DEFAULT_LAYER;
       // Above every terrain tile; nearer the bottom of the screen draws later. Draw levels 0-5 go under the fog overlay.
@@ -604,14 +606,14 @@ export class UnitLayer {
   }
 
   /**
-   * `zIndex` of a sprite drawn through the terrain's clip masks (`RGE_View::draw`, src/view.cpp:2335-2377, levels 0-5):
-   * over every terrain tile and under the fog overlay (map-view.ts), by draw level, then nearer the bottom later.
+   * `zIndex` in `MapView.terrainLayer` (over every terrain tile, under the fog overlay) of a sprite drawn through the
+   * terrain's clip masks (`RGE_View::draw`, src/view.cpp:2335-2377, levels 0-5): by draw level, then nearer the bottom later.
    */
   private terrainZ(layer: number, y: number): number {
     const { width, height } = this.o.world.map;
     const level = Math.min(Math.max(layer, 0), TERRAIN_LAYER);
     const h = mapPixelSize(width, height).h;
-    return width * height - 1 + 0.05 + 0.07 * level + (0.06 * Math.min(Math.max(y, 0), h)) / h;
+    return level + Math.min(Math.max(y, 0), h) / (h + 1);
   }
 
   /** What the player knows of the tile under map point (x, y): `TILE_VISIBLE`, `TILE_FOGGED` or `TILE_BLACK`. */
@@ -709,9 +711,9 @@ export class UnitLayer {
       if (underSprite) underSprite.visible = false;
       const info = (art ?? under)?.info;
       const pick = info ? facingFrame(copyFacet(c, info.angleCount), c.frame % Math.max(1, info.frameCount), info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
-      const pos = tileCoordsToPixel(c.x, c.y, world.map.width);
+      const pos = view.ground.pixel(c.x, c.y);
       if (under) {
-        const s = underSprite ?? view.layer.addChild(new Sprite());
+        const s = underSprite ?? view.terrainLayer.addChild(new Sprite());
         this.copyUnder.set(c.id, s);
         this.place(s, under.frames[pick.index] ?? under.frames[0]!, pick.flipped, pos.x, pos.y, false);
         s.zIndex = this.terrainZ(0, pos.y);
@@ -721,6 +723,8 @@ export class UnitLayer {
       // Draw levels 0-5 go plain under the fog overlay, which fogs them with the terrain.
       const low = !clipped && layer <= TERRAIN_LAYER;
       this.place(sprite, art.frames[pick.index] ?? art.frames[0]!, pick.flipped, pos.x, pos.y, !low);
+      const parent = low ? view.terrainLayer : view.layer;
+      if (sprite.parent !== parent) parent.addChild(sprite);
       sprite.zIndex = low ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y);
     }
   }
@@ -741,7 +745,7 @@ export class UnitLayer {
     // The player's own master: its sprite follows the age (the Tool Age House).
     const t = master(world, player, unit);
     const { camera } = view;
-    const at = pixelToTileCoords(this.pointer.x + camera.x, this.pointer.y + camera.y, world.map.width);
+    const at = view.ground.pointAt(this.pointer.x + camera.x, this.pointer.y + camera.y);
     // `fixup_pick_info`: a point off the map is pulled onto its last tile.
     const col = Math.min(Math.max(at.col, 0), world.map.width - 1);
     const row = Math.min(Math.max(at.row, 0), world.map.height - 1);
@@ -754,7 +758,7 @@ export class UnitLayer {
     const facet = buildingFacet(world, player, unit);
     const pick = info ? facingFrame(facet, 0, info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
     const frame = art.frames[pick.index] ?? art.frames[0]!;
-    const pos = tileCoordsToPixel(x, y, world.map.width);
+    const pos = view.ground.pixel(x, y);
     sprite.texture = frame.texture;
     sprite.scale.x = pick.flipped ? -1 : 1;
     sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - frame.hotspotY);
@@ -803,7 +807,7 @@ export class UnitLayer {
       const type = typeOf(world, e);
       const [rx, ry, rz] = provider.unitInfo(e.type)?.outline ?? [type.radiusX, type.radiusY, type.radiusZ];
       const at = this.drawnAt(t, now);
-      const o = tileCoordsToPixel(at.x, at.y, world.map.width);
+      const o = this.o.view.ground.pixel(at.x, at.y);
       const corners = [outlinePoint(o, rx, -ry, 0), outlinePoint(o, rx, ry, 0), outlinePoint(o, -rx, ry, 0), outlinePoint(o, -rx, -ry, 0)];
       lines.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: flashing.has(id) ? BAR_FILLED : SELECTION_COLOUR });
       if (!this.selected.has(id)) continue;
@@ -1014,8 +1018,8 @@ export class UnitLayer {
   /** The left click of the Move mode: the selected units walk to the map point (a click off the map only ends the mode). */
   private moveTo(x: number, y: number): void {
     this.commandMove = false;
-    const { camera } = this.o.view;
-    const { col, row } = pixelToTileCoords(x + camera.x, y + camera.y, this.o.world.map.width);
+    const { camera, ground } = this.o.view;
+    const { col, row } = ground.pointAt(x + camera.x, y + camera.y);
     const { width, height } = this.o.world.map;
     if (col < 0 || row < 0 || col >= width || row >= height) return;
     const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
@@ -1230,8 +1234,8 @@ export class UnitLayer {
   private orderAt(x: number, y: number): void {
     const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
     if (units.length === 0) return;
-    const { camera } = this.o.view;
-    const { col, row } = pixelToTileCoords(x + camera.x, y + camera.y, this.o.world.map.width);
+    const { camera, ground } = this.o.view;
+    const { col, row } = ground.pointAt(x + camera.x, y + camera.y);
     const { width, height } = this.o.world.map;
     if (col < 0 || row < 0 || col >= width || row >= height) return;
     // `command_make_do`: an order on an object flashes it (`display_object_selection(id, 1500, 2, 2)`, which ends the

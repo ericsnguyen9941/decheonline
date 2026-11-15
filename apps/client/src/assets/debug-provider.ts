@@ -1,6 +1,7 @@
 import { UNIT_TYPES } from '@aoe/sim';
 import { Texture } from 'pixi.js';
-import type { AssetProvider, GraphicInfo, SpriteFrame } from './provider';
+import { TILE_TYPES, tileBoxHeight, tileCorners, tileShade } from '../map/elevation';
+import type { AssetProvider, GraphicInfo, SpriteFrame, TerrainLayout } from './provider';
 
 const OWNER_COLOURS = ['#808080', '#3b6fd8', '#d83b3b', '#3bb54a', '#d8c43b', '#3bc4c4', '#a43bd8', '#8a8a8a', '#e8892b'];
 
@@ -88,21 +89,28 @@ export class DebugProvider implements AssetProvider {
     return null;
   }
 
-  terrainLayout(): { rows: number; cols: number } {
-    return { rows: 1, cols: 1 };
+  terrainLayout(): TerrainLayout {
+    return { rows: 1, cols: 1, tiles: Array.from({ length: TILE_TYPES }, (_, type) => [1, 1, type] as const) };
   }
 
+  /** One frame per tile type: the slope's outline, lighter or darker as the minimap shades it. */
   async terrainFrames(terrainId: number): Promise<SpriteFrame[]> {
-    const texture = await draw(65, 33, (g) => {
-      g.fillStyle = `hsl(${(terrainId * 47) % 360} 45% 38%)`;
-      g.beginPath();
-      g.moveTo(32, 0);
-      g.lineTo(64, 16);
-      g.lineTo(32, 32);
-      g.lineTo(0, 16);
-      g.closePath();
-      g.fill();
-    });
-    return [{ texture, hotspotX: 0, hotspotY: 0 }];
+    return Promise.all(
+      Array.from({ length: TILE_TYPES }, async (_, type) => {
+        const lightness = 38 + 8 * tileShade(type);
+        const texture = await draw(65, tileBoxHeight(type) + 1, (g) => {
+          g.fillStyle = `hsl(${(terrainId * 47) % 360} 45% ${lightness}%)`;
+          const [l, t, b, r] = tileCorners(type) as [readonly [number, number], readonly [number, number], readonly [number, number], readonly [number, number]];
+          g.beginPath();
+          g.moveTo(...t);
+          g.lineTo(...r);
+          g.lineTo(...b);
+          g.lineTo(...l);
+          g.closePath();
+          g.fill();
+        });
+        return { texture, hotspotX: 0, hotspotY: 0 };
+      }),
+    );
   }
 }
