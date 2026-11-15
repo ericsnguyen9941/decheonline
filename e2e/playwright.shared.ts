@@ -27,6 +27,6 @@ export const shared: PlaywrightTestConfig = {
     url: baseURL,
     env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir },
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 300_000,
   },
 };
