@@ -262,8 +262,11 @@ test(`two clients play ${MINUTES} minutes of game time by invite code without a 
     for (const page of pages) await page.waitForFunction((t) => window.__game!.turn() >= t, turn, { timeout: STALL_MS });
     const failure = await desyncMessage(host, guest);
     if (failure) throw new Error(failure);
-    const [time, over] = await host.evaluate(() => [window.__game!.gameTime(), window.__game!.gameResult() !== null] as const);
-    if (over) throw new Error(`the game ended at turn ${turn} (game time ${Math.round(time / 1000)} s) before the ${MINUTES} minutes were up`);
+    const [time, result] = await host.evaluate(() => [window.__game!.gameTime(), window.__game!.gameResult()] as const);
+    if (result) {
+      const scores = await host.evaluate(() => [1, 2].map((p) => window.__game!.score(p).total));
+      throw new Error(`the game ended at turn ${turn} (game time ${Math.round(time / 1000)} s) before the ${MINUTES} minutes were up: ${JSON.stringify(result)}, scores ${scores.join(' and ')}`);
+    }
     if (time >= endMs) break;
     for (const bot of bots) await bot.round();
     if (++rounds % 25 === 0) console.log(`soak: turn ${turn}, game time ${Math.round(time / 1000)} s, wall ${Math.round((Date.now() - wallStart) / 1000)} s`);
