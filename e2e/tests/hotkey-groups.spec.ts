@@ -58,10 +58,10 @@ test('Ctrl+digit assigns a group, a digit recalls it, Shift adds, Alt centres, a
   const bowman = all.find((u) => u.owner === 1 && u.type === BOWMAN)!.id;
   const hostile = all.find((u) => u.owner === 2 && u.type === BOWMAN)!.id;
 
-  // The host's Bowman walks off, so that only the Villagers are in a box round them (and out of the other Bowman's sight).
-  await host.evaluate((id) => window.__game!.issueMove([id], 4.5, 4.5), bowman);
+  // The host's Bowman walks off, so that only the Villagers are in a box round them (and out of the way of the other Bowman and the fleeing Villager).
+  await host.evaluate((id) => window.__game!.issueMove([id], 4.5, 20.5), bowman);
   await host.waitForFunction(
-    (id) => window.__game!.units().some((u) => u.id === id && !u.moving && Math.hypot(u.x - 4.5, u.y - 4.5) < 2),
+    (id) => window.__game!.units().some((u) => u.id === id && !u.moving && Math.hypot(u.x - 4.5, u.y - 20.5) < 2),
     bowman,
   );
 
@@ -100,8 +100,21 @@ test('Ctrl+digit assigns a group, a digit recalls it, Shift adds, Alt centres, a
   // The other player's Bowman kills v3: it leaves the selection and, recalled later, the group.
   await host.keyboard.press('Digit1');
   expect(await selection(host)).toEqual([v2, v3]);
-  const prey = (await units(host)).find((u) => u.id === v3)!;
-  await guest.evaluate(([id, target, x, y]) => window.__game!.issueWork([id!], target!, x!, y!), [hostile, v3, prey.x, prey.y]);
+  // A Villager that is shot at runs, so the order is given again, to where it stands, until it is dead.
+  await guest.waitForFunction(
+    ([shooter, target]) => {
+      const game = window.__game!;
+      const prey = game.units().find((u) => u.id === target);
+      if (!prey) return true;
+      const state = window as unknown as { shot?: number };
+      if (state.shot === undefined || game.turn() - state.shot >= 20) {
+        state.shot = game.turn();
+        game.issueWork([shooter!], target!, prey.x, prey.y);
+      }
+      return false;
+    },
+    [hostile, v3],
+  );
   await host.waitForFunction((id) => !window.__game!.units().some((u) => u.id === id), v3);
   expect(await selection(host)).toEqual([v2]);
   await host.keyboard.press('Digit2');
