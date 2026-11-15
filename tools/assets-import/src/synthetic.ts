@@ -184,6 +184,11 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'languagex.dll'), buildPe({ [SYNTHETIC.overriddenString[0]]: SYNTHETIC.overriddenString[1] }));
   const dat = buildSyntheticDat();
   dat.terrainBlock.terrains[0]!.terrainDimensions = [1, 2];
+  // Terrain 1 names itself as terrain_to_draw (the e2e's water looks the same), and terrain 0 draws border 3 against
+  // it (not loaded: there is no Border.drs).
+  dat.terrainBlock.terrains[1]!.terrainToDraw = 1;
+  dat.terrainBlock.terrains[0]!.borders[1] = 3;
+  dat.terrainBlock.borders[3]!.borderStyle = 1;
   for (const civ of dat.civs) {
     // The trailing null stays last; the Villager sits at its real id.
     const villager = Object.assign(syntheticUnit(UnitType.Creatable, SYNTHETIC.villager, 'Man'), {

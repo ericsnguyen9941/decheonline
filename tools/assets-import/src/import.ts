@@ -213,6 +213,7 @@ function buildManifest(
     slps,
     graphics: {},
     terrains: {},
+    borders: {},
     units: {},
     techs: {},
     playerColours: dat.playerColours.map((c) => c.minimapColour),
@@ -256,7 +257,21 @@ function buildManifest(
       rows: Math.max(rows, 1),
       cols: Math.max(cols, 1),
       tiles: t.elevationGraphics.map((g) => [g.frameCount, g.angleCount, g.shapeId]),
+      draw: t.terrainToDraw,
+      borders: [...t.borders],
       minimap: [t.colours[0] ?? 0, t.colours[1] ?? 0, t.colours[2] ?? 0],
+    };
+  });
+  // `load_border_types` (src/map.cpp:1460): a border is loaded when the dat enables it and its SLP opens.
+  dat.terrainBlock.borders.forEach((b, id) => {
+    if (!b.enabled) return;
+    const key = slpKey('border', b.slp);
+    manifest.borders[id] = {
+      name: b.name,
+      slp: b.slp >= 0 && slps[key] ? key : null,
+      style: b.borderStyle,
+      drawTile: b.drawTerrain,
+      frames: b.frames.map((row) => row.map((f) => [f.frameCount, f.angleCount, f.shapeId])),
     };
   });
   // Trees, mines, forage and animals exist only in Gaia's table (civ 0).

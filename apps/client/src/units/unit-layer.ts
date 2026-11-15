@@ -759,7 +759,7 @@ export class UnitLayer {
     const facet = buildingFacet(world, player, unit);
     const pick = info ? facingFrame(facet, 0, info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
     const frame = art.frames[pick.index] ?? art.frames[0]!;
-    const pos = view.ground.pixel(x, y);
+    const pos = view.ground.placePixel(x, y, t.radiusX, t.radiusY);
     sprite.texture = frame.texture;
     sprite.scale.x = pick.flipped ? -1 : 1;
     sprite.position.set(pick.flipped ? pos.x + frame.hotspotX : pos.x - frame.hotspotX, pos.y - frame.hotspotY);

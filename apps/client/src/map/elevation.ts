@@ -45,6 +45,11 @@ const SHAPES: readonly (readonly [number, boolean])[] = [
   [L | T | B, true],
 ];
 
+/** `tilesizes[type].y_delta` (`init_tile_sizes`, src/map.cpp:175): -8 or 8 on a slope, read only by `get_tile_screen_coords`. */
+const Y_DELTA = [0, -8, 8, -8, -8, -8, 8, -8, 8, -8, 8, -8, -8, -8, 8, 8, 8];
+/** The tile types `get_tile_screen_coords` drops by a further `elev_height` (src/view.cpp:1452-1459). */
+const DROPPED = [3, 5, 6, 11];
+
 /** Whether a tile type has its top corner raised: its box starts `ELEV_H` higher (`coordinate_map`, src/map.cpp:428). */
 export function raisedTop(type: number): boolean {
   return ((SHAPES[type]?.[0] ?? 0) & T) !== 0;
@@ -158,6 +163,32 @@ export class Ground {
   pixel(x: number, y: number, lift = 0): { x: number; y: number } {
     const p = tileCoordsToPixel(x, y, this.map.width);
     return { x: p.x, y: p.y - (this.z(x, y) + lift) * ELEV_H };
+  }
+
+  /**
+   * Map pixel where the building being placed is drawn when aligned at map point (x, y) (`draw_place_object`, src/
+   * view.cpp:1160): the tile's box (`get_tile_screen_coords` with `drop`, view.cpp:1430: plus its type's `y_delta`, 8
+   * lower on any slope and `ELEV_H` higher on types 3, 5, 6 and 11) and the middle of `alignment_box`'s corners (src/
+   * m_s_obj.cpp:1132), which is the point's flat place in the tile. On flat ground that is `pixel(x, y)`.
+   */
+  placePixel(x: number, y: number, radiusX: number, radiusY: number): { x: number; y: number } {
+    const col = Math.trunc(x);
+    const row = Math.trunc(y);
+    const box = this.tileBox(col, row);
+    const type = this.type(col, row);
+    let top = box.y + Y_DELTA[type]!;
+    if (type !== 0) top += ELEV_H / 2;
+    if (DROPPED.includes(type)) top -= ELEV_H;
+    let tx = x - col + radiusX;
+    let ty = y - row + radiusY;
+    const x1 = Math.trunc((tx + ty) * (TILE_W / 2));
+    tx -= 2 * radiusX;
+    const y2 = Math.trunc((ty + 1 - tx) * (TILE_H / 2));
+    ty -= 2 * radiusY;
+    const x3 = Math.trunc((tx + ty) * (TILE_W / 2));
+    tx += 2 * radiusX;
+    const y4 = Math.trunc((ty + 1 - tx) * (TILE_H / 2));
+    return { x: box.x + Math.trunc((x1 - x3) / 2) + x3, y: top + Math.trunc((y2 - y4) / 2) + y4 };
   }
 
   /**

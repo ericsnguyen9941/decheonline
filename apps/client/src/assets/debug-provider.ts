@@ -93,6 +93,19 @@ export class DebugProvider implements AssetProvider {
     return { rows: 1, cols: 1, tiles: Array.from({ length: TILE_TYPES }, (_, type) => [1, 1, type] as const) };
   }
 
+  /** Without the dat every terrain draws its own debug art, with no borders. */
+  terrainRules(): null {
+    return null;
+  }
+
+  border(): null {
+    return null;
+  }
+
+  async borderFrames(): Promise<SpriteFrame[]> {
+    return [];
+  }
+
   /** One frame per tile type: the slope's outline, lighter or darker as the minimap shades it. */
   async terrainFrames(terrainId: number): Promise<SpriteFrame[]> {
     return Promise.all(

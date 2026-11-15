@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
 import { slpImagePath, slpKey, soundPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
-import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, TerrainLayout, UnitInfo } from './provider';
+import type { AssetProvider, BorderLayout, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, TerrainLayout, TerrainRules, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -122,6 +122,20 @@ class PackProvider implements AssetProvider {
 
   async terrainFrames(terrainId: number): Promise<SpriteFrame[]> {
     return this.slpFrames(this.manifest.terrains[terrainId]?.slp ?? null, 1);
+  }
+
+  terrainRules(terrainId: number): TerrainRules | null {
+    const t = this.manifest.terrains[terrainId];
+    return t ? { draw: t.draw, borders: t.borders } : null;
+  }
+
+  border(borderId: number): BorderLayout | null {
+    const b = this.manifest.borders[borderId];
+    return b?.slp ? { style: b.style, drawTile: b.drawTile, pictures: b.frames } : null;
+  }
+
+  async borderFrames(borderId: number): Promise<SpriteFrame[]> {
+    return this.slpFrames(this.manifest.borders[borderId]?.slp ?? null, 1);
   }
 
   private async slpFrames(key: string | null, owner: number): Promise<SpriteFrame[]> {

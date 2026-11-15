@@ -41,6 +41,15 @@ test('imports interface slps, a data2 Interfac.drs overriding the base one, and 
   expect(unit.displayed).toHaveLength(4);
 });
 
+test("imports each terrain's terrain_to_draw and border table, and the borders (no Border.drs: no slp)", () => {
+  expect(manifest.terrains[0]?.draw).toBe(-1);
+  expect(manifest.terrains[1]?.draw).toBe(1);
+  expect(manifest.terrains[0]?.borders[1]).toBe(3);
+  expect(manifest.borders[3]).toMatchObject({ slp: null, style: 1, drawTile: 0 });
+  expect(manifest.borders[3]?.frames).toHaveLength(19);
+  expect(manifest.borders[3]?.frames[0]).toHaveLength(12);
+});
+
 test("imports a screen's info file with its colours through the screen's own palette", () => {
   const { id, background } = SYNTHETIC.screen;
   expect(manifest.screens[id]).toEqual({

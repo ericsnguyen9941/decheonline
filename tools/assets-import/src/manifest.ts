@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 12;
+export const PACK_VERSION = 13;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -65,8 +65,28 @@ export interface PackTerrain {
    * type t draws frame `shapeIndex + animations * variant`, the variant from `rows` x `cols` when `count` > 1.
    */
   tiles: [number, number, number][];
+  /**
+   * `terrain_to_draw` (pack version 13): the terrain whose art and tile pictures this one is drawn with (Beach as
+   * Desert, Forest as Grass, Shallows as Water, ...); -1 its own (`RGE_View::draw`, src/view.cpp:2139).
+   */
+  draw: number;
+  /** The border id a tile of this terrain draws against each neighbouring terrain, by terrain id (pack version 13). */
+  borders: number[];
   /** `map_hi_color`, `map_med_color`, `map_low_color`: the minimap's palette indices (a flat tile uses the middle one). */
   minimap: [number, number, number];
+}
+
+/** A border between terrains (`RGE_Border_Set`, the dat's terrain block; pack version 13). */
+export interface PackBorder {
+  name: string;
+  /** Key into `slps` (Border.drs); null when the install does not contain it. */
+  slp: string | null;
+  /** `border_style`: 0 one picture per tile (12 shapes), 1 up to four edge pictures over the terrain (4 shapes). */
+  style: number;
+  /** `draw_tile`: whether a style 0 border draws the tile's own terrain under its picture. */
+  drawTile: number;
+  /** `borders[tile type][shape - 1]`: `[count, animations, shapeIndex]`, 19 tile types of 12 shapes. */
+  frames: [number, number, number][][];
 }
 
 export interface PackUnit {
@@ -181,6 +201,8 @@ export interface PackManifest {
   graphics: Record<string, PackGraphic>;
   /** Keyed by the dat's terrain id. */
   terrains: Record<string, PackTerrain>;
+  /** Keyed by the dat's border id: the enabled borders (pack version 13). */
+  borders: Record<string, PackBorder>;
   /** Keyed by unit id; the first playable civ's table (the sprites are shared across civs), Gaia's for the ids it lacks. */
   units: Record<string, PackUnit>;
   /** Keyed by tech id: what the research buttons show (pack version 7). */

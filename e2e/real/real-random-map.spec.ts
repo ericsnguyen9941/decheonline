@@ -11,9 +11,9 @@ test.skip(!dir, 'set AOE1_DIR (and run npm run assets:import first)');
 
 const TOWN_CENTER = 109;
 
-async function open(browser: Browser): Promise<Page> {
+async function open(browser: Browser, query = ''): Promise<Page> {
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
-  await page.goto('/?debug=net&speed=2');
+  await page.goto(`/?debug=net&speed=2${query}`);
   return page;
 }
 
@@ -24,9 +24,9 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 /** A 2-player invite-code game on the random map its seed makes; returns both pages once each has drawn its start. */
-async function playGame(browser: Browser): Promise<[Page, Page]> {
-  const host = await open(browser);
-  const guest = await open(browser);
+async function playGame(browser: Browser, query = ''): Promise<[Page, Page]> {
+  const host = await open(browser, query);
+  const guest = await open(browser, query);
   await host.getByTestId('name').fill('Alice');
   await host.getByTestId('create').click();
   const code = (await host.getByTestId('invite-code').textContent())!;
@@ -103,6 +103,47 @@ test('hills: slopes and heights drawn from the terrain art, a Villager walked up
     window.__map!.centerOnTile(c!, r!);
   }, [peak.col, peak.row] as const);
   await shot(host, 'elevation-peak.png');
+  await host.context().close();
+  await guest.context().close();
+});
+
+test('terrain art: beach, shallows and forest drawn with their terrain_to_draw art, borders between terrains', async ({ browser }) => {
+  mkdirSync(shots, { recursive: true });
+  // Seed 6's map has a coast with grass, water, beach, shallows and forest round tile (40, 84).
+  const [host, guest] = await playGame(browser, '&seed=6');
+  const coast = await host.evaluate(() => {
+    const m = window.__map!;
+    const terrains: Record<number, number> = {};
+    const borders: Record<number, number> = {};
+    let bordered: { col: number; row: number } | null = null;
+    for (let row = 80; row <= 88; row++) {
+      for (let col = 36; col <= 44; col++) {
+        const t = m.tileInfo(col, row);
+        terrains[t.terrain] = (terrains[t.terrain] ?? 0) + 1;
+        if (t.border) borders[t.border] = (borders[t.border] ?? 0) + 1;
+        if (t.border && t.borderShape && !bordered) bordered = { col, row };
+      }
+    }
+    return { debug: m.debugTerrains(), terrains, borders, bordered };
+  });
+  console.log(`coast: ${JSON.stringify(coast)}`);
+  expect(coast.debug).toEqual([]);
+  for (const t of [1, 2, 4, 10]) expect(coast.terrains[t] ?? 0).toBeGreaterThan(0);
+  // Desert/water (2) on the beach by the water and shallows, grass/desert2 (6) edges on the grass and forest by the beach.
+  expect(coast.borders[2] ?? 0).toBeGreaterThan(0);
+  expect(coast.borders[6] ?? 0).toBeGreaterThan(0);
+  await host.evaluate(() => {
+    window.__map!.showAll();
+    window.__map!.centerOnTile(40, 84);
+  });
+  // A click on a bordered tile picks that tile.
+  const b = coast.bordered!;
+  const picked = await host.evaluate(([c, r]) => {
+    const p = window.__map!.tileScreenPos(c!, r!);
+    return window.__map!.tileAt(p.x, p.y);
+  }, [b.col, b.row] as const);
+  expect(picked).toEqual(b);
+  await shot(host, 'terrain-coast.png');
   await host.context().close();
   await guest.context().close();
 });

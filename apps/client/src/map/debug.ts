@@ -20,7 +20,9 @@ export interface MapDebug {
   /** Draw the whole map without fog from now on (the scenario editor's view), for screenshots. */
   showAll(): void;
   /** Terrain id, height level and slope shape (`tile_type`) of tile (col, row). */
-  tileInfo(col: number, row: number): { terrain: number; height: number; type: number };
+  tileInfo(col: number, row: number): { terrain: number; height: number; type: number; border: number; borderShape: number };
+  /** The map's terrains drawn with debug art because the provider has none for them (or for their `terrain_to_draw`). */
+  debugTerrains(): number[];
 }
 
 declare global {
@@ -60,7 +62,14 @@ export function exposeMapDebug(view: MapView): MapDebug {
       return col >= 0 && row >= 0 && col < map.width && row < map.height ? { col, row } : null;
     },
     showAll: () => view.setFog(null),
-    tileInfo: (col, row) => ({ terrain: map.terrainAt(col, row), height: map.elevationAt(col, row), type: view.ground.type(col, row) }),
+    tileInfo: (col, row) => ({
+      terrain: map.terrainAt(col, row),
+      height: map.elevationAt(col, row),
+      type: view.ground.type(col, row),
+      border: view.borders.type[row * map.width + col]!,
+      borderShape: view.borders.shape[row * map.width + col]!,
+    }),
+    debugTerrains: () => [...view.debugTerrains],
   };
   window.__map = debug;
   return debug;

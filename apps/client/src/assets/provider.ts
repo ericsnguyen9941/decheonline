@@ -134,6 +134,23 @@ export interface TerrainLayout {
   tiles: readonly (readonly [number, number, number])[];
 }
 
+/** How a terrain is drawn (pack version 13): `terrain_to_draw` (-1: its own art) and its border per neighbouring terrain. */
+export interface TerrainRules {
+  draw: number;
+  borders: readonly number[];
+}
+
+/**
+ * A border between terrains (`RGE_Border_Set`): `style` 0 one picture per tile, 1 edge pictures over the terrain;
+ * `drawTile` whether a style 0 picture has the terrain drawn under it; `pictures[type][shape - 1]` is `[count,
+ * animations, shapeIndex]`.
+ */
+export interface BorderLayout {
+  style: number;
+  drawTile: number;
+  pictures: readonly (readonly (readonly [number, number, number])[])[];
+}
+
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */
 export interface AssetProvider {
   readonly kind: 'pack' | 'debug';
@@ -157,6 +174,12 @@ export interface AssetProvider {
   mapArt(): MapArt | null;
   /** Where a terrain's tile pictures are in its frames (RGE_View::get_tile_picture). */
   terrainLayout(terrainId: number): TerrainLayout;
+  /** `terrain_to_draw` and the border table of a terrain; null without a pack. */
+  terrainRules(terrainId: number): TerrainRules | null;
+  /** A loaded border (enabled, its SLP in the pack); null when unknown. */
+  border(borderId: number): BorderLayout | null;
+  /** Every frame of a border's SLP. */
+  borderFrames(borderId: number): Promise<SpriteFrame[]>;
   /** The dat's sounds and the wavs; null without a pack. */
   soundTable(): SoundTable | null;
   /** The look of a screen or dialog by its info file's interfac.drs id (pack version 11); null when unknown. */

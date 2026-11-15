@@ -149,3 +149,24 @@ test('get_tile_picture: a slope draws its tiles[type] frame, a flat tile its var
   // A layout without tile pictures (an old or partial pack) uses the flat grid.
   expect(tilePicture({ rows: 2, cols: 2, tiles: [] }, 6, 3, 1)).toBe(3);
 });
+
+test('the building being placed is drawn where get_tile_screen_coords puts it: y_delta, the drop, the flat place in the tile', () => {
+  const flat = new Ground(new TileMap(10, 10));
+  for (const [x, y, r] of [[4, 5, 1.5], [4.5, 2.5, 0.5], [7, 1, 1]] as const) expect(flat.placePixel(x, y, r, r)).toEqual(flat.pixel(x, y));
+  const map = hill(3);
+  const ground = new Ground(map);
+  const seen = new Set<number>();
+  for (let row = 1; row < 15; row++) {
+    for (let col = 1; col < 15; col++) {
+      const type = ground.type(col, row);
+      seen.add(type);
+      // A 3x3 building aligns to a tile corner: the tile's left corner, drawn at the tile's height, one level higher on
+      // types 3, 5, 6 and 11 (y_delta, the drop's 8 and its elev_height cancel out on every other type).
+      const lift = map.elevationAt(col, row) + ([3, 5, 6, 11].includes(type) ? 1 : 0);
+      const at = ground.placePixel(col, row, 1.5, 1.5);
+      const flatAt = tileCoordsToPixel(col, row, map.width);
+      expect([type, at.x, at.y]).toEqual([type, flatAt.x, flatAt.y - lift * ELEV_H]);
+    }
+  }
+  expect([...seen].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+});

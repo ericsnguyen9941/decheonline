@@ -2,7 +2,8 @@ import { AlphaFilter, Container, Graphics, Sprite, Texture, type Application, ty
 import type { TileMap } from '@aoe/sim';
 import type { PackTileEdges } from '@aoe/assets-import/manifest';
 import { DebugProvider } from '../assets/debug-provider';
-import type { AssetProvider, SpriteFrame, TerrainLayout } from '../assets';
+import type { AssetProvider, BorderLayout, SpriteFrame, TerrainLayout } from '../assets';
+import { tileBorders, tileDraw, type TileBorders } from './borders';
 import { Camera, CameraControls } from './camera';
 import { ELEV_H, Ground, tileCorners, tilePicture } from './elevation';
 import { edgeNumber, FOG_W, fogHeight, fogPixels, PLAIN_EDGES, TILE_BLACK, TILE_VISIBLE } from './fog';
@@ -20,11 +21,16 @@ interface TerrainArt extends TerrainLayout {
   frames: SpriteFrame[];
 }
 
+interface BorderArt extends BorderLayout {
+  frames: SpriteFrame[];
+}
+
 
 /**
  * Draws a `TileMap` as isometric tiles in `app.stage`, scrolled by a `Camera`. Only tiles that touch the viewport have
- * sprites. Each tile picks its frame like the original (`RGE_View::get_tile_picture`): its variant, and its slope's
- * picture raised by its height (`elevation.ts`), in the original's draw order (screen rows top to bottom).
+ * sprites. Each tile picks its frame like the original (`RGE_View::get_tile_picture`): the art of its `terrain_to_draw`,
+ * its variant, and its slope's picture raised by its height (`elevation.ts`), in the original's draw order (screen rows
+ * top to bottom), with its border pictures over it (`borders.ts`).
  * With a `FogSource` (`setFog`) unexplored tiles are left black and fogged ones and the edges are shaded (`fog.ts`).
  */
 export class MapView {
@@ -39,6 +45,8 @@ export class MapView {
   readonly terrainLayer = new Container();
   private readonly controls: CameraControls;
   private readonly active = new Map<number, Sprite>();
+  /** The border pictures drawn over a tile's own sprite (style 1 edges; a style 0 picture over its terrain). */
+  private readonly edgeSprites = new Map<number, Sprite[]>();
   private readonly spare: Sprite[] = [];
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = (width: number, height: number) => {
@@ -62,6 +70,11 @@ export class MapView {
     private readonly art: Map<number, TerrainArt>,
     readonly source: AssetProvider['kind'],
     private readonly edges: readonly PackTileEdges[],
+    private readonly borderArt: Map<number, BorderArt>,
+    /** Every tile's border type and shape (`get_border_type`). */
+    readonly borders: TileBorders,
+    /** The map's terrains drawn with debug art: the provider has no art for them or their `terrain_to_draw`. */
+    readonly debugTerrains: readonly number[],
   ) {
     this.camera = new Camera(map.width, map.height, app.screen.width, app.screen.height);
     this.ground = new Ground(map);
@@ -91,20 +104,33 @@ export class MapView {
     this.refresh();
   }
 
-  /** Loads the art of every terrain the map uses; terrains the provider has no art for get debug shapes. */
+  /**
+   * Loads the art of every terrain the map uses, each drawn as its `terrain_to_draw` (src/view.cpp:2139), and of the
+   * borders its tiles draw; terrains the provider has no art for get debug shapes.
+   */
   static async create(app: Application, map: TileMap, provider: AssetProvider): Promise<MapView> {
     const fallback = new DebugProvider();
     const art = new Map<number, TerrainArt>();
+    const debugTerrains: number[] = [];
     for (const id of new Set(map.terrain)) {
-      let frames = await provider.terrainFrames(id);
-      let layout = provider.terrainLayout(id);
+      const draw = provider.terrainRules(id)?.draw ?? -1;
+      const drawn = draw >= 0 ? draw : id;
+      let frames = await provider.terrainFrames(drawn);
+      let layout = provider.terrainLayout(drawn);
       if (frames.length === 0) {
         frames = await fallback.terrainFrames(id);
         layout = fallback.terrainLayout();
+        debugTerrains.push(id);
       }
       art.set(id, { frames, ...layout });
     }
-    return new MapView(app, map, art, provider.kind, provider.mapArt()?.tileEdges ?? PLAIN_EDGES);
+    const borders = tileBorders(map, (id) => provider.terrainRules(id), (id) => provider.border(id));
+    const borderArt = new Map<number, BorderArt>();
+    for (const id of new Set(borders.type)) {
+      const layout = id === 0 ? null : provider.border(id);
+      if (layout) borderArt.set(id, { ...layout, frames: await provider.borderFrames(id) });
+    }
+    return new MapView(app, map, art, provider.kind, provider.mapArt()?.tileEdges ?? PLAIN_EDGES, borderArt, borders, debugTerrains);
   }
 
   /** Map pixel rectangle the camera shows. */
@@ -167,6 +193,11 @@ export class MapView {
       this.layer.removeChild(sprite);
       this.spare.push(sprite);
       this.active.delete(index);
+      for (const edge of this.edgeSprites.get(index) ?? []) {
+        this.layer.removeChild(edge);
+        this.spare.push(edge);
+      }
+      this.edgeSprites.delete(index);
       this.erasers.get(index)?.destroy();
       this.erasers.delete(index);
     }
@@ -176,15 +207,17 @@ export class MapView {
       const row = (index - col) / map.width;
       const type = ground.types[index]!;
       const art = this.art.get(map.terrain[index]!)!;
-      const frame = art.frames[tilePicture(art, type, col, row)] ?? art.frames[0]!;
-      const sprite = this.spare.pop() ?? new Sprite();
+      const border = this.borderArt.get(this.borders.type[index]!);
+      const draw = tileDraw(border ?? null, type, this.borders.shape[index]!, col, row);
+      const pictures: SpriteFrame[] = border ? draw.borders.map((f) => border.frames[f]).filter((f) => f !== undefined) : [];
+      // A style 0 border without `draw_tile` is the tile's whole picture.
+      const frame = draw.terrain || pictures.length === 0 ? (art.frames[tilePicture(art, type, col, row)] ?? art.frames[0]!) : pictures.shift()!;
       const box = ground.tileBox(col, row);
-      sprite.texture = frame.texture;
-      sprite.position.set(box.x - frame.hotspotX, box.y - frame.hotspotY);
       // Painter's order: the original scans the screen's rows top to bottom (a flat map keeps rows over earlier rows).
-      sprite.zIndex = ground.flat ? index : ground.rank[index]!;
-      this.layer.addChild(sprite);
+      const z = ground.flat ? index : ground.rank[index]!;
+      const sprite = this.tileSprite(frame, box, z);
       this.active.set(index, sprite);
+      if (pictures.length > 0) this.edgeSprites.set(index, pictures.map((f, i) => this.tileSprite(f, box, z + (i + 1) / 32)));
       if (!ground.flat && (type !== 0 || map.elevation[index]! > 0)) {
         const eraser = this.fogLayer.addChild(new Sprite(this.eraserTexture(type)));
         eraser.blendMode = 'erase';
@@ -194,6 +227,17 @@ export class MapView {
       }
     }
     this.drawFog(version, parity);
+  }
+
+  /** A sprite of terrain or border frame `frame` at tile box `box`, in the map layer at `zIndex`. */
+  private tileSprite(frame: SpriteFrame, box: { x: number; y: number }, zIndex: number): Sprite {
+    const sprite = this.spare.pop() ?? new Sprite();
+    sprite.texture = frame.texture;
+    sprite.position.set(box.x - frame.hotspotX, box.y - frame.hotspotY);
+    sprite.zIndex = zIndex;
+    sprite.visible = true;
+    this.layer.addChild(sprite);
+    return sprite;
   }
 
   /**
@@ -211,6 +255,7 @@ export class MapView {
     }
     if (!fog) {
       for (const sprite of this.active.values()) sprite.visible = true;
+      for (const edges of this.edgeSprites.values()) for (const edge of edges) edge.visible = true;
       return;
     }
     const visible = (c: number, r: number) => fog.state(c, r) === TILE_VISIBLE;
@@ -220,6 +265,7 @@ export class MapView {
       const row = (index - col) / width;
       const state = fog.state(col, row);
       sprite.visible = state !== TILE_BLACK;
+      for (const edge of this.edgeSprites.get(index) ?? []) edge.visible = sprite.visible;
       const texture = this.fogTexture(
         this.ground.types[index]!,
         state,
