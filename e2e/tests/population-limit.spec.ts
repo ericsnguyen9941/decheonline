@@ -57,7 +57,8 @@ test("the host's Population Limit shows on the guest's screen and caps training 
   for (const page of [host, guest]) await page.waitForFunction((t) => window.__game!.gameTime() > t + 40000, time!);
   for (const page of [host, guest]) {
     expect(await page.evaluate(() => window.__game!.population(1))).toEqual({ count: 25, headroom: 3, limit: 25 });
-    expect(await page.evaluate((id) => window.__game!.queue(id), tc)).toEqual({ records: [{ unit: VILLAGER, count: 2 }], training: null });
+    // The queue's first unit shows 0%: queued, never started (`production_queue_status`).
+    expect(await page.evaluate((id) => window.__game!.queue(id), tc)).toEqual({ records: [{ unit: VILLAGER, count: 2 }], training: { unit: VILLAGER, progress: 0 } });
   }
 
   // A House's panel row: population / min(population + headroom, limit) (tpnl_obj.cpp:463-470).
