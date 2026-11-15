@@ -72,7 +72,8 @@ test('the top strip shows the age and buttons in the original strings; a wood ca
   await expect(host.getByTestId('object-held')).toHaveText(/^\d+$/);
   expect(Number(await host.getByTestId('object-held').textContent())).toBeGreaterThanOrEqual(4);
   const style = (testid: string, prop: string) => host.getByTestId(testid).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
-  expect(await style('object-held-icon', 'background-image')).toContain('/assets/sprites/interface/50731.png');
+  // The panel's rows are made again on every update: poll, as a read can land on a row just taken away.
+  await expect.poll(() => style('object-held-icon', 'background-image')).toContain('/assets/sprites/interface/50731.png');
   await away();
   await host.screenshot({ path: join(shots, 'selection-wood.png') });
 
@@ -92,8 +93,11 @@ test('the top strip shows the age and buttons in the original strings; a wood ca
   await away();
   await host.screenshot({ path: join(shots, 'selection-multi.png') });
 
-  // Over a guest's Villager with own units selected: the sword and the rollover text 3701.
+  // Over a guest's Villager with own units selected: the sword and the rollover text 3701. The selected Villagers walk
+  // to it until the fog shows it.
   const enemy = (await host.evaluate(() => window.__game!.objects())).find((o) => o.owner === 2 && o.type === VILLAGER)!;
+  await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids, x, y), [rest.map((u) => u.id), enemy.x, enemy.y] as const);
+  await host.waitForFunction((id) => window.__game!.objectScreenPos(id) !== null, enemy.id);
   await host.evaluate((id) => {
     const p = window.__game!.unitScreenPos(id)!;
     const camera = window.__map!.camera();
