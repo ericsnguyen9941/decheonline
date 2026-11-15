@@ -18,6 +18,8 @@ export interface LobbyState {
 
 /** Lobby logic over a link, no DOM: create/join by code, ready, host start. Gameplay messages belong to lockstep. */
 export class Session {
+  /** Settings messages sent whose lobby echo has not come back. */
+  private settingsInFlight = 0;
   state: LobbyState = { phase: 'idle', code: '', you: -1, players: [], settings: DEFAULT_GAME_SETTINGS, error: null };
   /** Called after every state change. */
   onChange: (state: LobbyState) => void = () => {};
@@ -48,7 +50,9 @@ export class Session {
 
   /** Host only, while not ready: the game's settings (docs/spec/lobby.md §4). */
   setSettings(settings: GameSettings): void {
-    this.set({ error: null });
+    // Shown at once, so the next change builds on it; the echoes of the settings still in flight are older and ignored.
+    this.settingsInFlight++;
+    this.set({ error: null, settings });
     this.link.send({ t: 'settings', settings });
   }
 
@@ -66,6 +70,7 @@ export class Session {
   /** Leave the room (or the game) and return to the entry screen. */
   leave(): void {
     this.link.send({ t: 'leave' });
+    this.settingsInFlight = 0;
     this.set({ phase: 'idle', code: '', you: -1, players: [], error: null });
   }
 
@@ -78,13 +83,15 @@ export class Session {
   private handle(m: ServerMessage): void {
     switch (m.t) {
       case 'lobby':
-        this.set({ phase: 'lobby', code: m.code, you: m.you, players: m.players, settings: m.settings, error: null });
+        if (this.settingsInFlight > 0) this.settingsInFlight--;
+        this.set({ phase: 'lobby', code: m.code, you: m.you, players: m.players, error: null, ...(this.settingsInFlight === 0 && { settings: m.settings }) });
         return;
       case 'start':
         this.set({ phase: 'playing', players: m.players, settings: m.settings });
         this.onStart(m, this.state.you);
         return;
       case 'error':
+        this.settingsInFlight = 0;
         this.set({ error: { code: m.code, message: m.message } });
         return;
       default:

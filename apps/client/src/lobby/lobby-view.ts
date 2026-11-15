@@ -146,7 +146,7 @@ export class LobbyView {
       box.append(el('ul', { testid: 'settings-summary' }, ...summaryLines(this.text, s).map((line) => el('li', {}, line))));
       return box;
     }
-    const change = (patch: Partial<GameSettings>) => this.session.setSettings({ ...s, ...patch });
+    const change = (patch: Partial<GameSettings>) => this.session.setSettings({ ...this.session.state.settings, ...patch });
     const field = (key: keyof typeof LABELS, control: HTMLElement) => el('label', {}, this.label(key), control);
     box.append(
       field('mapSize', select('map-size', this.label('mapSize'), LOBBY_MAP_SIZES.map((v) => [v, mapSizeName(this.text, v)]), s.mapSize, (mapSize) => change({ mapSize }))),

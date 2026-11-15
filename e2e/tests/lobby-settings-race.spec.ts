@@ -1,0 +1,38 @@
+import { expect, test } from '@playwright/test';
+
+// The host changes several settings before the server's echo of the first arrives: every pick must reach the server
+// and the guest, and the host's own selects keep what was picked (no lost update from a stale snapshot).
+const URL = '/?debug=net&speed=20';
+
+test('quick successive setting changes by the host all arrive, with the server slow to answer', async ({ browser }) => {
+  const hostPage = await (await browser.newContext()).newPage();
+  const guest = await (await browser.newContext()).newPage();
+  // Server -> host messages are held back 300 ms; host -> server ones go through at once.
+  await hostPage.routeWebSocket(/\/ws/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((m) => server.send(m));
+    server.onMessage((m) => setTimeout(() => ws.send(m), 300));
+  });
+  await hostPage.goto(URL);
+  await guest.goto(URL);
+  await hostPage.getByTestId('name').fill('Alice');
+  await hostPage.getByTestId('create').click();
+  const code = (await hostPage.getByTestId('invite-code').textContent())!;
+  await guest.getByTestId('name').fill('Bob');
+  await guest.getByTestId('code').fill(code);
+  await guest.getByTestId('join').click();
+  await expect(hostPage.getByTestId('player-1')).toContainText('Bob');
+
+  await hostPage.getByTestId('map-size').selectOption('96');
+  await hostPage.getByTestId('map-type').selectOption({ label: 'Hill Country' });
+  await hostPage.getByTestId('victory').selectOption({ label: 'Conquest' });
+
+  const lines = ['Map Size: Small', 'Map Type: Hill Country', 'Victory: Conquest', 'Population Limit: 50'];
+  await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText(lines);
+  // Past every delayed echo the host's selects still show the picks.
+  await hostPage.waitForTimeout(1000);
+  await expect(hostPage.getByTestId('map-size')).toHaveValue('96');
+  await expect(hostPage.getByTestId('map-type').locator('option:checked')).toHaveText('Hill Country');
+  await expect(hostPage.getByTestId('victory').locator('option:checked')).toHaveText('Conquest');
+  await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText(lines);
+});
