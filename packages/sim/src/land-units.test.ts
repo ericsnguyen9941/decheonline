@@ -89,7 +89,7 @@ function train(world: World, building: number, unit: number): Entity {
 }
 
 /**
- * The land units of the Barracks, Archery Range, Stable and Academy: the button's unit type, its building, a civ whose
+ * The land units of the Barracks, Archery Range, Stable, Academy and Siege Workshop: the button's unit type, its building, a civ whose
  * tree has the line, the techs researched first and the record the type then copies (`copy_obj`, techs.md §4.5).
  */
 const LINES: [name: string, unit: number, building: number, civ: number, techs: number[], record: number][] = [
@@ -116,9 +116,14 @@ const LINES: [name: string, unit: number, building: number, civ: number, techs: 
   ['Hoplite', 93, ACADEMY, CIV_GREEK, [], 93],
   ['Phalanx', 93, ACADEMY, CIV_GREEK, [73], 94],
   ['Centurion', 93, ACADEMY, CIV_GREEK, [79], 291],
+  ['Stone Thrower', 35, SIEGE_WORKSHOP, CIV_EGYPTIAN, [], 35],
+  ['Catapult', 35, SIEGE_WORKSHOP, CIV_GREEK, [54], 36],
+  ['Heavy Catapult', 35, SIEGE_WORKSHOP, CIV_GREEK, [36], 280],
+  ['Ballista', 11, SIEGE_WORKSHOP, CIV_GREEK, [], 11],
+  ['Helepolis', 11, SIEGE_WORKSHOP, CIV_GREEK, [27], 279],
 ];
 
-describe('land units: every Barracks, Archery Range, Stable and Academy unit trains at its building', () => {
+describe('land units: every Barracks, Archery Range, Stable, Academy and Siege Workshop unit trains at its building', () => {
   for (const [name, unit, building, civ, techs, record] of LINES) {
     const source = UNIT_TYPES.get(record)!;
     test(`${name}: ${source.name} (${record}) as unit ${unit} at building ${building}, ${source.hitPoints} hp`, () => {
@@ -221,6 +226,10 @@ describe('no land-unit tech is a no-op for want of a master', () => {
     [78, 'Cataphracts', 37, 283],
     [125, 'Armored Elephants', 46, 345],
     [126, 'Heavy Chariots', 40, 339],
+    [54, 'Heavy Catapult', 35, 36],
+    [36, 'Massive Catapult', 35, 280],
+    [58, 'Balista', 11, null],
+    [27, 'Helepolis', 11, 279],
   ];
   for (const [tech, name, unit, record] of rows) {
     test(`${name} (${tech}) changes unit ${unit}${record === null ? ': enabled' : ` into ${UNIT_TYPES.get(record)!.name}`}`, () => {

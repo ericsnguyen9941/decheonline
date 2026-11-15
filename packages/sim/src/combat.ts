@@ -10,7 +10,7 @@ import { ObjectState, type Entity } from './entities';
 import { deleteActions, transform } from './gather';
 import { master, typeOf, type PlayerMasters } from './masters';
 import { ActionResult, currentSprite, endAction, facetOf, maximumSpeed, startMoveTo, updateMover } from './movement';
-import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
+import { add32, div32, f32, i16, mul32, sqrt32, sub32, toInt } from './num';
 import { framePassed, newSprite } from './sprites';
 import { atan2, cos, sin } from './trig';
 import { AI_ACTION_ATTACK, AI_ORDER_STAND_GROUND, GROUP_BUILDING, GROUP_WALL, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
@@ -41,6 +41,8 @@ export interface AttackAction {
   fightSprite: number;
   waitSprite: number;
   sub: boolean;
+  /** `indirect_fire_flag`: 2 for a ground attack (commands.md §5), spent by walking; absent on an object attack (0). */
+  indirect?: number;
 }
 
 /** `RGE_Action_Missile` state: 3 aim, 4 flying, 1 done. */
@@ -120,6 +122,10 @@ const ATTR_RAZINGS = 43;
 const MAN = 83;
 /** `MASTER_OBJECT_FLARE`: the minimap flare a ranged attack shows its target's owner. */
 const FLARE = 112;
+/** War Elephant, Chariot, Scythe Chariot, Armored Elephant: their blast spares their owner's objects (src/t_c_obj.cpp:935-941). */
+const BLAST_SPARES_OWN = [46, 40, 339, 345];
+/** Stone Thrower, Catapult, Heavy Catapult: a led target's speed counts as 1 at most (src/act_misl.cpp:80-86). */
+const CATAPULTS = [35, 36, 280];
 /** Archer groups and tower ids that take a building down 0.1 hp a hit at the least (src/t_b_obj.cpp:784-793). */
 const ARCHER_GROUPS = [0, 23, 26, 36];
 const TOWERS = [79, 69, 199, 383, 380];
@@ -209,14 +215,50 @@ export function startAttack(
     sub,
   };
   e.attack = a;
-  if (!holdsPosition(e, t)) setAttackState(ctx, e, a, ATTACK_MOVING);
+  firstInStack(ctx, e, a);
+  return a;
+}
+
+/** `RGE_Action_Attack::first_in_stack` (src/act_atak.cpp:168): a unit that can move starts by walking into range. */
+function firstInStack(ctx: GameContext, e: Entity, a: AttackAction): void {
+  if (!holdsPosition(e, typeOf(ctx, e))) setAttackState(ctx, e, a, ATTACK_MOVING);
   else if (!readyToAttack(ctx, e, a)) {
     if (a.state === 0) setAttackState(ctx, e, a, ATTACK_WAITING);
   } else {
-    e.attackTimer = c.reloadTime;
+    e.attackTimer = typeOf(ctx, e).combat!.reloadTime;
     setAttackState(ctx, e, a, ATTACK_ATTACKING);
   }
-  return a;
+}
+
+/**
+ * `RGE_Combat_Object::attack(x, y, z, unconditional)` (src/com_obj.cpp:569; commands.md §5), Attack Ground's way in: a
+ * ground attack on (x, y, 0) with the weapon range (0 → 0.4) and `indirect_fire_flag` 2 replaces every action. No
+ * civilian transformation, no unit-AI order. False without a mover or a combat block (as `combatAttack`).
+ */
+export function attackGround(ctx: GameContext, e: Entity, x: number, y: number): boolean {
+  const t = typeOf(ctx, e);
+  const c = t.combat;
+  if (!e.mover || !c) return false;
+  deleteActions(ctx, e);
+  const a: AttackAction = {
+    state: 0,
+    target: -1,
+    x: f32(x),
+    y: f32(y),
+    z: 0,
+    range: c.range === 0 ? DEFAULT_RANGE : c.range,
+    minRange: c.minRange,
+    timer: 0,
+    needToAttack: false,
+    moveSprite: (t.walking ?? t.standing).graphic,
+    fightSprite: (c.attackSprite ?? t.standing).graphic,
+    waitSprite: t.standing.graphic,
+    sub: false,
+    indirect: 2,
+  };
+  e.attack = a;
+  firstInStack(ctx, e, a);
+  return true;
 }
 
 /** `RGE_Action_Attack::set_state` (src/act_atak.cpp:195): every change first deletes the sub-action. */
@@ -225,13 +267,19 @@ export function setAttackState(ctx: GameContext, e: Entity, a: AttackAction, sta
   a.state = state;
   const c = typeOf(ctx, e).combat!;
   switch (state) {
+    case ATTACK_TARGET_LOST:
+      if (a.indirect) a.indirect = 0;
+      return;
     case ATTACK_MOVING: {
+      // Each walk spends one of a ground attack's two (src/act_atak.cpp:205-207).
+      if (a.indirect) a.indirect--;
       const target = a.target === -1 ? null : (ctx.entities.get(a.target) ?? null);
       startMoveTo(e, target, a.x, a.y, a.z, a.range, spriteInfo(a.moveSprite), true, ctx);
       a.timer = 0;
       return;
     }
     case ATTACK_WAITING:
+      if (a.indirect && a.target !== -1) a.indirect = 0;
       if (readyToAttack(ctx, e, a)) {
         e.attackTimer = c.reloadTime;
         setAttackState(ctx, e, a, ATTACK_ATTACKING);
@@ -377,7 +425,8 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
     case ATTACK_ATTACKING: {
       if (!a.needToAttack) {
         if ((e.attackTimer ?? 0) <= 0) {
-          if (a.target === -1) {
+          // A ground attack (`indirect_fire_flag` set) has no target and goes on firing (src/act_atak.cpp:362).
+          if (a.target === -1 && !a.indirect) {
             setAttackState(ctx, e, a, ATTACK_TARGET_LOST);
             return ActionResult.Continue;
           }
@@ -390,15 +439,17 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
         }
         if (!a.needToAttack) {
           if (!e.sprite?.looped && (currentSprite(e, typeOf(ctx, e)).flags & 1) !== 0) return ActionResult.Continue;
-          setAttackState(ctx, e, a, a.target === -1 ? ATTACK_TARGET_LOST : ATTACK_WAITING);
+          setAttackState(ctx, e, a, a.target === -1 && !a.indirect ? ATTACK_TARGET_LOST : ATTACK_WAITING);
           return ActionResult.Continue;
         }
       }
       const c = typeOf(ctx, e).combat!;
       const frame = c.frameDelay !== 0 ? c.frameDelay : toInt(mul32(currentSprite(e, typeOf(ctx, e)).frames, HALF)) << 16 >> 16;
       if (e.sprite && framePassed(e.sprite, frame)) {
+        // `RGE_Action_Attack::do_attack` (src/act_atak.cpp:542): the target, or else the target point.
         const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
         if (target) launch(ctx, e, target);
+        else launchAt(ctx, e, a.x, a.y, a.z);
         a.needToAttack = false;
       }
       return ActionResult.Continue;
@@ -422,9 +473,25 @@ export function launch(ctx: GameContext, e: Entity, target: Entity): void {
   const c = t.combat!;
   if (c.projectileUnitId >= 0 && target.owner > 0) ctx.create(target.owner, FLARE, e.x, e.y, e.z);
   if (c.projectileUnitId < 0) {
-    doAttack(ctx, e, target);
+    doAttack(ctx, e, target, e.x, e.y);
     return;
   }
+  throwMissile(ctx, e, target.id, target.x, target.y, target.z);
+}
+
+/**
+ * `RGE_Combat_Object::attack(x, y, z, attacker)` (src/com_obj.cpp:237; commands.md §5): a missile user throws at the
+ * point, with no flare; a melee unit does nothing.
+ */
+function launchAt(ctx: GameContext, e: Entity, x: number, y: number, z: number): void {
+  if (typeOf(ctx, e).combat!.projectileUnitId < 0) return;
+  throwMissile(ctx, e, -1, x, y, z);
+}
+
+/** Spawn the missile at the weapon offset and `init_missile` (combat.md §4.2, §5.1): aimed at once, or done (state 1). */
+function throwMissile(ctx: GameContext, e: Entity, targetId: number, x: number, y: number, z: number): void {
+  const t = typeOf(ctx, e);
+  const c = t.combat!;
   const maxRange = sub32(add32(length32(t.radiusX, t.radiusY), c.range), MISSILE_RANGE_SLACK);
   const angle = e.mover!.angle;
   const co = f32(cos(angle));
@@ -435,11 +502,11 @@ export function launch(ctx: GameContext, e: Entity, target: Entity): void {
   const missile = ctx.create(e.owner, c.projectileUnitId, mx, my, add32(e.z, offZ));
   const action: MissileAction = {
     state: 3,
-    target: target.id,
+    target: targetId,
     launcher: e.id,
-    x: target.x,
-    y: target.y,
-    z: target.z,
+    x,
+    y,
+    z,
     vx: 0,
     vy: 0,
     vz: 0,
@@ -449,19 +516,95 @@ export function launch(ctx: GameContext, e: Entity, target: Entity): void {
     maxRange,
   };
   missile.missile = action;
-  aim(ctx, missile, action);
+  // `first_in_stack(1)` (src/act_misl.cpp:33-43): no target and no point means done.
+  if (targetId === -1 && (x === -1 || y === -1)) die(ctx, missile, action);
+  else aim(ctx, missile, action);
 }
 
-/** `do_attack` (combat.md §4.3) without blast: one hit roll, then damage on a hit. */
-export function doAttack(ctx: GameContext, attacker: Entity, target: Entity): void {
-  const c = typeOf(ctx, attacker).combat!;
-  const chance = Math.trunc((ctx.rng.rand() * 100) / 0x7fff);
-  if (chance > c.accuracy) return;
+/**
+ * `do_attack` (combat.md §4.3) at the point (x, y), the attacker's own position for melee and the missile's at impact.
+ * A `TRIBE_Combat_Object` (master type 70, 80) with a blast radius and a range under 0.99 splashes around the point,
+ * sparing the target, then rolls for the target; any other attacker with a blast radius only blasts the point; else one
+ * hit roll, then damage on a hit.
+ */
+export function doAttack(ctx: GameContext, attacker: Entity, target: Entity, x: number, y: number): void {
+  const t = typeOf(ctx, attacker);
+  const c = t.combat!;
+  if (c.blastWidth > 0) {
+    if (!isTribe(t) || c.range >= f32(0.99)) {
+      areaAttack(ctx, attacker, x, y, null);
+      return;
+    }
+    areaAttack(ctx, attacker, x, y, target);
+  }
+  if (hitRoll(ctx) > c.accuracy) return;
   damage(ctx, target, attacker, attackModifier(ctx, attacker, target));
 }
 
-/** `calc_attack_modifier` (combat.md §2.3): ×1.5 for a ranged attacker higher than its target, ×0.6666 for a lower melee one. */
+/** `rand() × 100 / 0x7FFF`, C integer division: 0..100. */
+function hitRoll(ctx: GameContext): number {
+  return Math.trunc((ctx.rng.rand() * 100) / 0x7fff);
+}
+
+/** `TRIBE_Combat_Object`s are the dat's master types 70 and 80 (src/tmplayer.cpp:19-27); a missile (60) is an RGE one. */
+function isTribe(t: UnitType): boolean {
+  return t.masterType >= 70;
+}
+
+/**
+ * `area_attack` (combat.md §4.4; `TRIBE_Combat_Object`, src/t_c_obj.cpp:894, or the RGE base, src/com_obj.cpp:117, for
+ * a missile): every object in the tiles around (x, y) whose edge lies within the blast radius, other than `ignore` and
+ * the attacker, with `area_effect_object_level` at least the blast's level, gets its own hit roll and the attacker's full
+ * damage. A War Elephant, Chariot, Scythe Chariot or Armored Elephant spares its owner's objects; a `TRIBE` victim left
+ * below 1 hp loses its carried resource. Tile lists are taken as each tile's objects by descending id.
+ */
+export function areaAttack(ctx: GameContext, attacker: Entity, x: number, y: number, ignore: Entity | null): void {
+  const t = typeOf(ctx, attacker);
+  const c = t.combat!;
+  const r = c.blastWidth;
+  if (!(r > 0)) return;
+  const r2 = mul32(r, r);
+  const { width, height } = ctx.map;
+  const x0 = Math.max(0, i16(toInt(sub32(x, r))) - 2);
+  const x1 = Math.min(width, i16(toInt(add32(x, r))) + 2);
+  const y0 = Math.max(0, i16(toInt(sub32(y, r))) - 2);
+  const y1 = Math.min(height, i16(toInt(add32(y, r))) + 2);
+  const tribe = isTribe(t);
+  const sparesOwn = tribe && BLAST_SPARES_OWN.includes(t.id);
+  const listed: { o: Entity; tile: number }[] = [];
+  for (const o of ctx.entities.all()) {
+    if (!ctx.masters[o.owner]?.[o.type]) continue;
+    const col = Math.min(Math.max(toInt(o.x), 0), width - 1);
+    const row = Math.min(Math.max(toInt(o.y), 0), height - 1);
+    if (col < x0 || col >= x1 || row < y0 || row >= y1) continue;
+    listed.push({ o, tile: row * width + col });
+  }
+  listed.sort((a, b) => a.tile - b.tile || b.o.id - a.o.id);
+  for (const { o } of listed) {
+    if (o === ignore || o === attacker || (sparesOwn && o.owner === attacker.owner)) continue;
+    const ot = typeOf(ctx, o);
+    if (ot.blastDefense < c.blastLevel) continue;
+    let dx = Math.abs(sub32(o.x, x));
+    let dy = Math.abs(sub32(o.y, y));
+    dx = dx > ot.radiusX ? sub32(dx, ot.radiusX) : 0;
+    dy = dy > ot.radiusY ? sub32(dy, ot.radiusY) : 0;
+    if (!(r2 > add32(mul32(dx, dx), mul32(dy, dy)))) continue;
+    if (i16(hitRoll(ctx)) > c.accuracy) continue;
+    damage(ctx, o, attacker, attackModifier(ctx, attacker, o));
+    if (tribe && o.hp < 1) {
+      // `set_attribute_amount(0, 0, 1)`: none held, then the clamp to `attribute_max_amount`.
+      o.heldAmount = ot.resourceCapacity < 0 ? f32(ot.resourceCapacity) : 0;
+    }
+  }
+}
+
+/**
+ * `calc_attack_modifier` (combat.md §2.3): ×1.5 for a ranged attacker higher than its target, ×0.6666 for a lower melee
+ * one; always 1 for a missile (`RGE_Combat_Object::calc_attack_modifier`, src/com_obj.cpp:113), the source when its
+ * launcher is gone.
+ */
 function attackModifier(ctx: GameContext, attacker: Entity, target: Entity): number {
+  if (!isTribe(typeOf(ctx, attacker))) return 1;
   const c = typeOf(ctx, attacker).combat!;
   if (c.projectileUnitId >= 0) return higherThanTarget(ctx, attacker, target) ? f32(1.5) : 1;
   return attacker.z < target.z ? MELEE_LOW : 1;
@@ -623,6 +766,7 @@ export function combatAttack(ctx: GameContext, e: Entity, target: Entity, uncond
 export function attackWork(ctx: GameContext, e: Entity, target: Entity): boolean {
   const a = e.attack!;
   if (target.id === a.target && (a.state === ATTACK_MOVING || a.state === ATTACK_WAITING || a.state === ATTACK_ATTACKING)) return true;
+  if (a.indirect) a.indirect = 0;
   a.target = target.id;
   a.x = target.x;
   a.y = target.y;
@@ -644,8 +788,10 @@ function aim(ctx: GameContext, e: Entity, a: MissileAction): void {
   const dz = sub32(tz, e.z);
   const len = (x: number, y: number) => sqrt32(add32(add32(mul32(x, x), mul32(y, y)), mul32(dz, dz)));
   let d = len(dx, dy);
-  const targetSpeed = target?.mover?.speed ?? 0;
+  let targetSpeed = target?.mover?.speed ?? 0;
   if (mi.targetting === 1 && target && targetSpeed > 0) {
+    const launcher = a.launcher === -1 ? undefined : ctx.entities.get(a.launcher);
+    if (launcher && CATAPULTS.includes(typeOf(ctx, launcher).id) && targetSpeed > 1) targetSpeed = 1;
     const angle = target.mover!.angle;
     const tvx = mul32(f32(cos(angle)), targetSpeed);
     const tvy = mul32(f32(sin(angle)), targetSpeed);
@@ -717,14 +863,17 @@ export function updateMissile(ctx: GameContext, e: Entity): ActionResult {
   const source = (a.launcher === -1 ? undefined : ctx.entities.get(a.launcher)) ?? e;
   const target = a.target === -1 ? undefined : ctx.entities.get(a.target);
   if ((mi.type === 0 || mi.type === 2) && target && collides(ctx, e, target, s)) {
-    doAttack(ctx, source, target);
+    doAttack(ctx, source, target, e.x, e.y);
     die(ctx, e, a);
   } else if (mi.type === 3 && target) {
-    doAttack(ctx, source, target);
+    doAttack(ctx, source, target, e.x, e.y);
     die(ctx, e, a);
   }
   // Hitting the ground: `area_attack` at the missile, which does nothing without a blast radius.
-  if (hitGround && (a.state as number) !== 1) die(ctx, e, a);
+  if (hitGround && (a.state as number) !== 1) {
+    areaAttack(ctx, source, e.x, e.y, null);
+    die(ctx, e, a);
+  }
   return ActionResult.Continue;
 }
 

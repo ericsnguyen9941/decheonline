@@ -133,6 +133,17 @@ export interface StandGroundCommand {
   units: number[];
 }
 
+/**
+ * Attack Ground (`TRIBE_Command::command_attack_ground`, docs/spec/commands.md §5): the listed units of the sender fire
+ * at map point (x, y), in tiles, until another order replaces it.
+ */
+export interface AttackGroundCommand {
+  type: 'attack-ground';
+  units: number[];
+  x: number;
+  y: number;
+}
+
 /** Resign (`RGE_Command::do_command_resign`, victory.md §4): the sender loses. */
 export interface ResignCommand {
   type: 'resign';
@@ -183,6 +194,7 @@ export type Command =
   | ResignCommand
   | RepairCommand
   | StandGroundCommand
+  | AttackGroundCommand
   | RelationCommand
   | AlliedVictoryCommand
   | TributeCommand;
@@ -285,6 +297,13 @@ export function parseCommand(v: unknown): Command | null {
       const { units } = o;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'stand-ground', units: [...(units as number[])] };
+    }
+    case 'attack-ground': {
+      const { units, x, y } = o;
+      // The unit count is a byte on the wire (src/tcommand.cpp:869).
+      if (!isPoint(x, y)) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'attack-ground', units: [...(units as number[])], x: x as number, y: y as number };
     }
     case 'relation': {
       const { player, relation } = o;

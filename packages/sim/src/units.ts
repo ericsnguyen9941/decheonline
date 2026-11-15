@@ -101,6 +101,8 @@ export interface CombatInfo {
   accuracy: number;
   /** `area_effect_range`. */
   blastWidth: number;
+  /** `area_effect_level`: the least `area_effect_object_level` a blast victim needs. */
+  blastLevel: number;
   /** `fight_sprite`. */
   attackSprite: SpriteInfo | null;
   /** Missile spawn offset (x, y, z). */
@@ -151,6 +153,8 @@ export interface UnitType {
   /** The restriction row: per terrain id, > 0 passable (and the speed multiplier). */
   terrainTable: readonly number[];
   combatLevel: number;
+  /** `area_effect_object_level`: a blast hits this object when it is at least the blast's level (combat.md §4.4). */
+  blastDefense: number;
   standing: SpriteInfo;
   /** `move_sprite`; null means the standing sprite is used for walking too. */
   walking: SpriteInfo | null;
@@ -300,6 +304,7 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     terrainRestriction: r.terrainRestriction,
     terrainTable: TERRAIN_ROWS[r.terrainRestriction]!,
     combatLevel: r.combatLevel,
+    blastDefense: r.blastDefense,
     standing: sprite(r.standing)!,
     walking: sprite(r.walking),
     dying: sprite(r.dying),
@@ -319,6 +324,7 @@ export function toUnitType(r: SimUnitRecord): UnitType {
       frameDelay: c.frameDelay,
       accuracy: c.accuracy,
       blastWidth: c.blastWidth,
+      blastLevel: c.blastLevel,
       attackSprite: sprite(c.attackSprite),
       displacement: c.displacement,
     },

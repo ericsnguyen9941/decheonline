@@ -1,4 +1,4 @@
-# Unit commands: stop, stand ground, repair (and the ones not ported)
+# Unit commands: stop, stand ground, repair, attack ground (and the ones not ported)
 
 Source: aoe1-decomp @ `6d6d8b1` (see `README.md` for the version caveat and
 reference format). The repair action itself is support-actions.md §6; the
@@ -14,6 +14,7 @@ here); e2e: `e2e/tests/unit-commands.spec.ts`.
 | stop | `RGE_Command_Stop`, `command_stop` (`src/Command.cpp:897`) | `{ type: 'stop', objects }` | 9 |
 | repair | `TRIBE_Command_Repair`, `command_repair` (`src/tcommand.cpp:73`, `do_command_repair` `:500`) | `{ type: 'repair', units, target }` | 11 |
 | stand ground | a group AI order, `command_group_ai_order(..., UNIT_AI_ORDER_STAND_GROUND, -1, -1, -1, -1, -1, 1.0, 1, 0, 100)` (`src/player.cpp:1883`) | `{ type: 'stand-ground', units }` | 12 |
+| attack ground | `TRIBE_Command_Attack_Ground`, `command_attack_ground` (`src/tcommand.cpp:852`, `do_command_attack_ground` `:442`) | `{ type: 'attack-ground', units, x, y }` | 17 |
 
 Every command is checked by `parseCommand` (ids positive integers, 1 to 255
 units). Port-side guard (economy.md §5.5): objects of another player than
@@ -108,11 +109,82 @@ Center's cost row, support-actions.md §6.3) is 500 from `new_game`
 Boat targets (`meet_target`, the state 10 boat order) are not ported: the
 sim has no boats.
 
-## 5. Not ported
+## 5. Attack Ground
+
+**Sender** (`TRIBE_Player::command_attack_ground(x, y)`, `src/tplayer.cpp:963`):
+the selected objects that are active, the player's own, of select level 4 or
+more and of `unit_level` 4 (the dat's combat level; the Stone Thrower line,
+35/36/280, has it) and of master type 40 or more but not a tree
+(`get_selected_objects_to_command(.., 4, -1, -1, 4)`, `src/player.cpp:1648`).
+The first plays its command sound. `TRIBE_Command::command_attack_ground`
+(`src/tcommand.cpp:852`) packs `TRIBE_COMMAND_ID_ATTACK_GROUND`, the unit
+count (a byte), the map point `location_x`, `location_y` (floats) and the
+listed ids. The filter is the sender's only: the receiver runs any listed
+object.
+
+**Receiver** (`TRIBE_Command::do_command_attack_ground`, `src/tcommand.cpp:442`):
+each listed object that still exists gets `attack(location_x, location_y,
+0.0, 1)`. A static object's `attack(float, float, float, int)` does nothing
+(`include/stat_obj.h:281`); a combat object's
+(`RGE_Combat_Object::attack(x, y, z, unconditional)`, `src/com_obj.cpp:569`):
+
+- `unconditional` is 1, so the "already attacking this point" test before it
+  (which compares the point's y and z against the action's **x**, a bug) is
+  skipped.
+- A new ground attack action (`RGE_Action_Attack` point constructor,
+  `src/act_atak.cpp:90`): target none, target point `(x, y, 0)`, range
+  `weapon_range` (0 → 0.4, combat.md §3.1), `minimum_weapon_range`, the
+  master's sprites, and `indirect_fire_flag = 2` (an object attack has 0).
+  It replaces every action (`delete_list`, `set_only_action`). No civilian
+  transformation, no unit-AI order: the unit AI keeps its current order
+  (a stand-ground unit stays put, `first_in_stack`, combat.md §3.1).
+
+**The action** is the attack state machine (combat.md §3.2) with no target:
+
+- `first_in_stack`: a mobile unit not standing its ground walks into range of
+  the point (state 4); else `ready_to_attack` measures from the attacker's
+  edge to the point (`ready_to_attack`, no-target branch: the point is never
+  re-latched); too close → waits (mobile) or fails (stand ground); out of
+  reach while holding → fails (state 13).
+- State 7: with no target, an object attack goes to state 2 (target lost,
+  done); a ground attack (`indirect_fire_flag != 0`) does not
+  (`src/act_atak.cpp:362`, `:380`), so the unit keeps firing at the point,
+  every `speed_of_attack`, until another order replaces the action.
+- `set_state` spends the flag (`src/act_atak.cpp:199-232`): every entry to
+  state 4 (walking into range) takes 1 off while it is above 0, state 2 sets
+  it to 0, and state 6 sets it to 0 when the action has a target. A mobile
+  unit always starts in state 4 (even in reach), so it fires with flag 1; if
+  it has to walk a second time (pushed out of reach) the flag reaches 0 and
+  the next swing that ends goes to state 2: the attack is over. A unit that
+  cannot move or stands its ground keeps flag 2.
+- Each shot: `RGE_Action_Attack::do_attack` (`src/act_atak.cpp:542`) calls
+  `attack(target_x, target_y, target_z, self)` (`src/com_obj.cpp:237`): a
+  missile user spawns its missile as against an object (combat.md §4.2;
+  no flare, `TRIBE_Combat_Object` overrides only the object overload) and
+  `init_missile(launcher, x, y, z, max_range)` (`src/misl_obj.cpp:69`) gives
+  it the point and no target; a melee unit does nothing (returns 0).
+- The missile aims at the point (`intercept`, combat.md §5.2; z is 0), finds
+  no target in its collision list (hit info 0 hits only the target), and on
+  hitting the ground runs the launcher's `area_attack` at its own position
+  (combat.md §5.3 step 8, §4.4). A launcher without blast radius (Ballista,
+  Bowman) hurts nothing; type-0 missiles that fly past `max_range` die
+  without a blast.
+- `RGE_Action_Attack::work` with an object (a task-driven right click) clears
+  `indirect_fire_flag` and chases the object (`src/act_atak.cpp:405`).
+
+Ours: `{ type: 'attack-ground', units, x, y }` (`packages/sim/src/commands.ts`),
+`World.doCommandAttackGround` → `combat.ts` `attackGround`; the action is
+`AttackAction` with `target` −1 and `indirect` 2. Port-side guards: objects of
+another player than the sender, and objects not active, are skipped (the
+sender's own filter); objects without a mover or a combat block are skipped,
+as `combatAttack` does. The receiver does not check `unit_level`, as the
+original. The client's button, cursor and click mode are not ported yet
+(hud.md). Tests: `packages/sim/src/siege.test.ts` "commands.md §5".
+
+## 6. Not ported
 
 | command | original | why |
 | --- | --- | --- |
-| Attack Ground | `TRIBE_Player::command_attack_ground` (`src/tplayer.cpp:963`), `do_command_attack_ground` (`src/tcommand.cpp:442`): each unit `attack(x, y, 0, 1)` | only units firing area-effect missiles get the button (the Stone Thrower line); the sim has none |
 | Heal | `TRIBE_Combat_Object::heal` (`src/t_c_obj.cpp:552`), support-actions.md §5 | no Priest in the sim |
 | Convert | `TRIBE_Combat_Object::convert` (`src/t_c_obj.cpp:525`), support-actions.md §4 | no Priest in the sim |
 | Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | no boats in the sim |

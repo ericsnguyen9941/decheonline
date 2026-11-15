@@ -25,6 +25,8 @@ export interface SimUnitRecord {
   flying: boolean;
   terrainRestriction: number;
   combatLevel: number;
+  /** `area_effect_object_level`: a blast hits this object when it is at least the blast's level. */
+  blastDefense: number;
   canBeBuiltOn: number;
   elevationMode: number;
   placementTerrain: [number, number];
@@ -54,6 +56,7 @@ export interface SimUnitRecord {
     frameDelay: number;
     accuracy: number;
     blastWidth: number;
+    blastLevel: number;
     attackSprite: SimSprite | null;
     displacement: [number, number, number];
   } | null;

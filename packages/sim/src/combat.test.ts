@@ -94,7 +94,7 @@ describe('combat.md §8 Example 1: damage from the dat weapons and armours', () 
       if (higher) a.z = 1;
       const ctx = stepContext(w);
       ctx.rng.srand(14);
-      doAttack(ctx, a, t);
+      doAttack(ctx, a, t, a.x, a.y);
       expect(t.hp).toBe(after);
     });
   }
@@ -105,7 +105,7 @@ describe('combat.md §8 Example 1: damage from the dat weapons and armours', () 
     const a = w.entities.get(1)!;
     t.hp = f32(1.5);
     t.z = 1;
-    doAttack(stepContext(w), a, t);
+    doAttack(stepContext(w), a, t, a.x, a.y);
     // 3 x 0.6666 = 1.9998 takes it below 1 (clamped to 0): no minimum; the kill counts.
     expect([t.hp, w.attributes[1]![ATTR_KILLS]]).toEqual([0, 1]);
   });
@@ -139,7 +139,7 @@ describe('combat.md §2.3: the hill modifier from world_z (calc_attack_modifier,
       expect([a.z, t.z]).toEqual([az, tz]);
       const ctx = stepContext(w);
       ctx.rng.srand(14);
-      doAttack(ctx, a, t);
+      doAttack(ctx, a, t, a.x, a.y);
       expect(t.hp).toBe(after);
     });
   }
@@ -158,7 +158,7 @@ describe('combat.md §2.3: the hill modifier from world_z (calc_attack_modifier,
       expect([a.z, t.z]).toEqual([0, 0]);
       const ctx = stepContext(w);
       ctx.rng.srand(14);
-      doAttack(ctx, a, t);
+      doAttack(ctx, a, t, a.x, a.y);
       expect(t.hp).toBe(after);
     });
   }

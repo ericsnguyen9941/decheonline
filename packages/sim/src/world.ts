@@ -1,7 +1,9 @@
 import { build, cancelBuild, checkDestructables, checkPlacement, connectWall, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
+import { attackGround } from './combat';
 import {
   CommandQueue,
   type AttackCommand,
+  type AttackGroundCommand,
   type BuildCommand,
   type BuildWallCommand,
   type CancelCommand,
@@ -294,7 +296,7 @@ export interface Snapshot {
   diplomacy: DiplomacyState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
@@ -802,6 +804,8 @@ export class World {
         return this.doCommandRepair(player, command);
       case 'stand-ground':
         return this.doCommandStandGround(player, command);
+      case 'attack-ground':
+        return this.doCommandAttackGround(player, command);
       case 'relation':
         return this.doCommandRelation(player, command);
       case 'allied-victory':
@@ -1090,6 +1094,20 @@ export class World {
   }
 
   /**
+   * Attack Ground (`TRIBE_Command::do_command_attack_ground`, src/tcommand.cpp:442, commands.md §5): each listed unit
+   * gets `attack(x, y, 0, 1)`. Port-side guards: only the sender's active objects (the sender's own filter,
+   * `get_selected_objects_to_command`).
+   */
+  private doCommandAttackGround(player: number, command: AttackGroundCommand): void {
+    const ctx = this.gameContext();
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e || e.owner !== player || e.state !== ObjectState.Active) continue;
+      attackGround(ctx, e, command.x, command.y);
+    }
+  }
+
+  /**
    * Stance (`TRIBE_Command::do_command_game` game command 0, src/tcommand.cpp:370-375, diplomacy.md §4): the sender's
    * stance towards `command.player` changes, then the mutual-ally masks. Port-side guards (the Diplomacy dialog's rows,
    * src/dlg_dip.cpp:124-131, 440-455): only towards another player, 1 and up, still playing.
@@ -1176,7 +1194,7 @@ export class World {
     for (const q of queued) {
       h.u32(q.turn).u32(q.player).u32(q.seq).u32(COMMAND_TYPE_IDS[q.command.type]);
       if (q.command.type === 'test') h.f64(q.command.x).f64(q.command.y);
-      if (q.command.type === 'move' || q.command.type === 'work') {
+      if (q.command.type === 'move' || q.command.type === 'work' || q.command.type === 'attack-ground') {
         h.u32(q.command.units.length);
         for (const id of q.command.units) h.u32(id);
         h.f64(q.command.x).f64(q.command.y);

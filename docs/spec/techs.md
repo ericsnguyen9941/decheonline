@@ -704,11 +704,14 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
   41, Horse Archer 39, Heavy Horse Archer 281, Elephant Archer 25),
   Stable (Scout 299, Cavalry 37, Heavy Cavalry 38, Cataphract 283,
   Chariot 40, Scythe Chariot 339, Camel Rider 338, War/Armored Elephant
-  46/345) and Academy (Hoplite 93, Phalanx 94, Centurion 291), and the
-  Academy 0, Government Center 82, Temple 104 and Siege Workshop 49. A
-  line's upgrades are `copy_obj` into the button's type (75, 5, 39, 37,
-  40, 46, 93). Not in the table yet: siege units, Priest, boats and the
-  Dock, so the Siege Workshop and Temple train nothing and their unit
-  upgrades (Heavy Catapult, …) change no master; the elephants' and the
-  Scythe Chariot's blast damage is not ported (`combat.ts` `do_attack`
-  without blast). Tests: `land-units.test.ts`.
+  46/345), Academy (Hoplite 93, Phalanx 94, Centurion 291) and Siege
+  Workshop (Stone Thrower 35, Catapult 36, Heavy Catapult 280, Ballista 11,
+  Helepolis 279; their missiles, the stone 34 and the bolt 204, and Alchemy's
+  flaming stone 329 and bolt 205 come with them), and the Academy 0,
+  Government Center 82, Temple 104 and Siege Workshop 49. A line's upgrades
+  are `copy_obj` into the button's type (75, 5, 39, 37, 40, 46, 93; Heavy
+  Catapult 54 and Massive Catapult 36 into 35, Helepolis 27 into 11; Alchemy
+  37 copies 329 into 34 and 205 into 204). Not in the table yet: Priest,
+  boats and the Dock, so the Temple trains nothing. Blast and melee splash
+  (combat.md §4.3-§4.4) are ported. Tests: `land-units.test.ts` (training,
+  the upgrade techs), `siege.test.ts` (Alchemy, Engineering, Ballistics).

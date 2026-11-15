@@ -393,22 +393,64 @@ always consumed. On a hit: `modifier = calc_attack_modifier(target)`, then
 
 ### 4.4 `area_attack` (`src/t_c_obj.cpp:894`, M)
 
+Runs on the object whose `do_attack` called it (`this`: the attacker, or
+the launcher of a missile, §5.4); every number below is that object's
+master's.
+
+- **Centre.** The point passed in. A melee attacker passes its **own**
+  position (`RGE_Combat_Object::attack` calls `do_attack(target, self,
+  world_x, world_y, world_z)`, `src/com_obj.cpp:231`), so melee splash is a
+  ring around the attacker, not around the target. A missile passes its
+  own position at impact (`src/act_misl.cpp:226-266`, `:283`, `:296`).
 - `R = area_effect_range`; return at once if `R ≤ 0` (`:906-907`).
 - Scan tiles `x ∈ [(short)(x−R) − 2, (short)(x+R) + 2)`, same for y,
-  clipped to the map (`:910-928`); objects in each tile's list order.
-- Skip: the ignored object; the attacker itself; and own-player objects when
-  the attacker is a war elephant, chariot, heavy chariot or armoured elephant
-  (`:935-941`). Victims need `area_effect_object_level ≥` the attacker's
+  clipped to `[0, width)` × `[0, height)` (`:910-928`); rows outer, columns
+  inner, and in each tile its object list from the head.
+- Skip: the ignored object; the attacker itself; and the attacker's
+  owner's own objects when the attacker's master is a War Elephant (46),
+  Chariot (40), Scythe Chariot (`MASTER_OBJECT_SOLDIER_HVY_CHARIOT`, 339) or
+  Armored Elephant (345) (`:935-941`, ids `include/m_s_obj.h:96`, `:100`,
+  `:363`, `:369`). Every other blast hits its owner's and allies' objects
+  too. Victims need `area_effect_object_level ≥` the attacker's
   `area_effect_level` (`:942-943`).
-- Edge distance: `ex = max(0, |obj.x − x| − obj.rx)`, `ey` likewise; inside
-  if `R² > ex² + ey²` (`:944-960`).
+- **Distance, no falloff.** Edge distance: `ex = max(0, |obj.x − x| −
+  obj.rx)`, `ey` likewise (object radii only, the attacker's are not
+  used); inside if `R² > ex² + ey²` (`:944-960`). Every victim inside takes
+  the attacker's full weapon list: there is no falloff with distance.
 - Each victim inside gets its **own** roll (`rand`, same formula with a
   `(short)` cast), and on success
-  `damage(…, calc_attack_modifier(victim), …)`; a victim brought below 1 hp
-  has its carried resource zeroed (`:961-972`).
+  `damage(weapon_num, weapon, calc_attack_modifier(victim), owner,
+  attacker)` — the victim's own `damage`: armour for combat objects, the
+  building rules for buildings, the plain sum for static objects such as
+  trees (§2.1); a victim then below 1 hp has its carried resource set to 0
+  (`set_attribute_amount(0, 0, 1)`, clamped to `attribute_max_amount`;
+  `:961-972`). A tree felled by a blast loses its wood.
 
 The RGE base version (`src/com_obj.cpp:117`, M) is the same without the
-own-unit exclusion and the resource zeroing.
+own-unit exclusion and the resource zeroing; it runs when `this` is a
+missile (master type 60, `RGE_Missile_Object`) whose launcher died, and its
+`calc_attack_modifier` is always 1 (`src/com_obj.cpp:113`). Master types 70
+and 80 are `TRIBE_Combat_Object`s (`src/tmplayer.cpp:19-27`).
+
+*dat* blast numbers (`area_effect_range` / `area_effect_level`; objects'
+`area_effect_object_level`): Stone Thrower 35 0.5 / 2, Catapult 36 1.5 / 2,
+Heavy Catapult 280 1.5 / **1**, War and Armored Elephant 46, 345 2 / 2,
+Scythe Chariot 339 2 / 2; Ballista 11, Helepolis 279, Chariot 40 and every
+other unit 0. Object levels: units and buildings 3, Gazelle and Elephant
+(the animals) 2, trees 1, missiles, flares, dead units, mines, forage,
+cliffs and relics 0. So every blast hits units and buildings, every blast
+but the Heavy Catapult's spares nothing at level 2 or 3, and only the Heavy
+Catapult hits trees. Melee splash (§4.3 step 2) is the elephants' and the
+Scythe Chariot's; the catapults' blast goes through the base path (range ≥
+0.99).
+
+Port (`packages/sim/src/combat.ts` `areaAttack`): each tile's object list is
+taken as the tile's objects in **descending id** (lists add at the front;
+an object that walks onto a tile is also put at the front, which the port
+does not track, so objects that moved can be visited in another order than
+the original's). The order only changes which victim draws which random
+number and the order of the attacked notifications. Tests:
+`packages/sim/src/siege.test.ts` "combat.md §4.4".
 
 ## 5. Projectiles
 
@@ -738,6 +780,13 @@ leaves its dead unit (`dead_unit_id` 327, the rubble).
 
 ## 9. Implications for the port
 
+- **Port status** (`packages/sim/src/combat.ts`): the attack action, hit
+  roll, damage, missiles with hit info 0 (every missile the sim has), the
+  hill modifier, blast and melee splash (`doAttack`, `areaAttack`, §4.3-§4.4;
+  tests `siege.test.ts`), the catapults' lead cap (§5.2 step 3) and the
+  ground attack (`attackGround`, commands.md §5). Not ported: hit info 1 and
+  2 (§5.3 step 6), missile types 1 and 2, the 0x200/0x1FD/0x1FE/0x20F
+  notifications.
 - Keep `hp` as f32, apply the minimum-damage rule after the clamp exactly as
   in §2.1, and take the **last** matching armour entry.
 - Model the reload timer in f32 with clamp at 0 and reset at swing start;

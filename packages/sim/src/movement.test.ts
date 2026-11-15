@@ -27,6 +27,7 @@ const UNIT: UnitType = {
   group: 0,
   flying: false,
   combatLevel: 0,
+  blastDefense: 0,
   dying: null,
   deadUnitId: -1,
   storages: [],

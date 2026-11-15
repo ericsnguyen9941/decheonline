@@ -183,6 +183,47 @@ export function sampleDiplomacyReplay(turns = 120, seed = 20261117): ReplayLog {
   return { ...log, units: [...log.units!, ...markets], batches };
 }
 
+/** Each side's siege and splash units for `sampleSiegeReplay`, west and east of the test map's middle. */
+const SIEGE: readonly StartUnit[] = [
+  { owner: 1, type: 35, x: 14.5, y: 18.5 },
+  { owner: 1, type: 280, x: 14.5, y: 20.5 },
+  { owner: 1, type: 11, x: 14.5, y: 22.5 },
+  { owner: 1, type: 46, x: 17.5, y: 19.5 },
+  { owner: 1, type: 339, x: 17.5, y: 21.5 },
+  { owner: 2, type: 36, x: 26.5, y: 18.5 },
+  { owner: 2, type: 279, x: 26.5, y: 20.5 },
+  { owner: 2, type: 345, x: 23.5, y: 19.5 },
+  { owner: 2, type: 93, x: 23.5, y: 21.5 },
+  { owner: 2, type: 93, x: 24.5, y: 21.5 },
+];
+
+/**
+ * `sampleReplay`'s game (with the skirmish) plus each side's siege and splash units (`SIEGE`) and, from a fifth
+ * generator, now and then an `attack-ground` by some of them at a point around the middle of the map (sometimes one of
+ * the other side's units, which is ignored): stones, bolts, blasts and melee splash in every engine.
+ */
+export function sampleSiegeReplay(turns = 120, seed = 20261118): ReplayLog {
+  const log = sampleReplay(turns, seed);
+  const first = log.units!.length + 1;
+  const ids = SIEGE.map((u, i) => ({ id: first + i, owner: u.owner }));
+  const fire = new CrtRand();
+  fire.srand(seed + 32452843);
+  const batches = [...log.batches];
+  for (let turn = 0; turn < turns; turn++) {
+    for (const player of [1, 2]) {
+      if (fire.rand() % 6 !== 0) continue;
+      const units = ids.filter((u) => fire.rand() % 2 === 0 && (u.owner === player || fire.rand() % 8 === 0)).map((u) => u.id);
+      if (units.length === 0) continue;
+      const commands: Command[] = [{ type: 'attack-ground', units, x: 16 + (fire.rand() % 1000) / 100, y: 16 + (fire.rand() % 800) / 100 }];
+      const batch = batches.find((b) => b.turn === turn && b.player === player);
+      if (batch) batch.commands = [...batch.commands, ...commands];
+      else batches.push({ turn, player, commands });
+    }
+  }
+  // The siege units come after the other start objects, so those keep their ids.
+  return { ...log, units: [...log.units!, ...SIEGE], batches };
+}
+
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */
 interface ReplayStart {
   count: number;

@@ -57,6 +57,7 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
     flying: u.flyMode === 1,
     terrainRestriction: u.terrainRestriction,
     combatLevel: u.combatLevel,
+    blastDefense: u.blastDefenseLevel,
     canBeBuiltOn: u.canBeBuiltOn,
     elevationMode: u.hillMode,
     placementTerrain: [u.placementTerrain[0]!, u.placementTerrain[1]!],
@@ -89,6 +90,7 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
           frameDelay: u.combat.frameDelay,
           accuracy: u.combat.accuracyPercent,
           blastWidth: f(u.combat.blastWidth),
+          blastLevel: u.combat.blastAttackLevel,
           attackSprite: sprite(rules, u.combat.attackGraphic),
           displacement: [f(u.combat.graphicDisplacement[0]!), f(u.combat.graphicDisplacement[1]!), f(u.combat.graphicDisplacement[2]!)],
         }
