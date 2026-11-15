@@ -1,12 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium, expect, firefox, test, webkit, type BrowserType } from '@playwright/test';
-import { runReplay, sampleLobbyReplay, sampleRandomMapReplay, sampleReplay } from '@aoe/sim';
+import { runReplay, sampleDiplomacyReplay, sampleLobbyReplay, sampleRandomMapReplay, sampleReplay } from '@aoe/sim';
 
 // Each replay must hash the same on every JS engine: float32 math and the CRT rand() port are only
 // deterministic if V8 (Node, Chromium), SpiderMonkey (Firefox) and JavaScriptCore (WebKit) agree bit for bit. The second
 // replay is a random map game: the map generator (sqrt, float32 tables) runs in every engine too. The third is a random
-// map game on lobby settings other than the defaults (map type and size, a Random civ, a time limit).
+// map game on lobby settings other than the defaults (map type and size, a Random civ, a time limit). The fourth changes
+// stances and allied victory and sends tribute (sampleDiplomacyReplay).
 const simEntry = fileURLToPath(new URL('../../packages/sim/src/index.ts', import.meta.url));
 
 // Playwright's Firefox (v1572) does not start on macOS 27 ("Could not find profile folder"; AGENTS.md Traps). Only there
@@ -21,7 +22,7 @@ test('sample replays (test map, random map, lobby settings) give the same hashes
   const bundle = await build({ entryPoints: [simEntry], bundle: true, format: 'iife', globalName: 'AoeSim', write: false });
   const script = bundle.outputFiles[0]!.text;
 
-  const results: Record<string, number[][]> = { node: [runReplay(sampleReplay()), runReplay(sampleRandomMapReplay()), runReplay(sampleLobbyReplay())] };
+  const results: Record<string, number[][]> = { node: [runReplay(sampleReplay()), runReplay(sampleRandomMapReplay()), runReplay(sampleLobbyReplay()), runReplay(sampleDiplomacyReplay())] };
   const engines: [string, BrowserType][] = [
     ['chromium', chromium],
     ['firefox', firefox],
@@ -35,7 +36,7 @@ test('sample replays (test map, random map, lobby settings) give the same hashes
       await page.addScriptTag({ content: script });
       results[name] = await page.evaluate(() => {
         const sim = (globalThis as unknown as { AoeSim: typeof import('@aoe/sim') }).AoeSim;
-        return [sim.runReplay(sim.sampleReplay()), sim.runReplay(sim.sampleRandomMapReplay()), sim.runReplay(sim.sampleLobbyReplay())];
+        return [sim.runReplay(sim.sampleReplay()), sim.runReplay(sim.sampleRandomMapReplay()), sim.runReplay(sim.sampleLobbyReplay()), sim.runReplay(sim.sampleDiplomacyReplay())];
       });
     } finally {
       await browser.close();
@@ -43,8 +44,8 @@ test('sample replays (test map, random map, lobby settings) give the same hashes
   }
 
   const hex = (hashes: number[]) => `${hashes.at(-1)!.toString(16).padStart(8, '0')} after ${hashes.length} turns`;
-  for (const [name, [fixed, random, lobby]] of Object.entries(results)) {
-    console.log(`${name}: final hash ${hex(fixed!)} (test map), ${hex(random!)} (random map), ${hex(lobby!)} (lobby settings)`);
+  for (const [name, [fixed, random, lobby, diplomacy]] of Object.entries(results)) {
+    console.log(`${name}: final hash ${hex(fixed!)} (test map), ${hex(random!)} (random map), ${hex(lobby!)} (lobby settings), ${hex(diplomacy!)} (diplomacy, tribute)`);
   }
   for (const hashes of Object.values(results)) expect(hashes).toEqual(results['node']);
 });

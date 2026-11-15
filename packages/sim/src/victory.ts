@@ -5,9 +5,10 @@
  *
  * The all-relics and all-ruins holds (victory.md §10) count the relics and ruins a random map placed (`artifactCount`,
  * `ruinCount`). Not ported, for want of the objects (victory.md §2, §8): the Wonder (unit 276) and its countdown, and
- * the scenario/MP conditions of §7 other than "victory points". The sim has no diplomacy, so every player is every other's enemy and the allied-victory
- * paths reduce to one-player teams (`teammates`).
+ * the scenario/MP conditions of §7 other than "victory points". The allied-victory paths read the stances and flags of
+ * docs/spec/diplomacy.md (`DiplomacyState`); without one every player is every other's enemy.
  */
+import { relation, RELATION_ALLY, type DiplomacyState } from './diplomacy';
 import type { Entity } from './entities';
 import { ObjectState } from './entities';
 import { div32, f32, mul32, sub32, toInt } from './num';
@@ -222,12 +223,25 @@ export function copyVictory(v: VictoryState): VictoryState {
   };
 }
 
+function allied(d: DiplomacyState | undefined, p: number, q: number): boolean {
+  return relation({ diplomacy: d }, p, q) === RELATION_ALLY;
+}
+
+function alliedVictory(d: DiplomacyState | undefined, p: number): boolean {
+  return d?.alliedVictory[p] ?? false;
+}
+
 /**
- * The players mutually allied with a player, both with allied victory: its allied-victory team. The sim has no
- * diplomacy, so every player's team is itself alone.
+ * The other players 1 and up mutually allied with `player`, both with allied victory, in index order: its allied-victory
+ * team (`win_game_now`, `handle_victory_points`, the time limit's team score; diplomacy.md §6).
  */
-function teammates(): number[] {
-  return [];
+function teammates(v: VictoryState, d: DiplomacyState | undefined, player: number): number[] {
+  if (!alliedVictory(d, player)) return [];
+  const team: number[] = [];
+  for (let j = 1; j < v.status.length; j++) {
+    if (j !== player && allied(d, player, j) && allied(d, j, player) && alliedVictory(d, j)) team.push(j);
+  }
+  return team;
 }
 
 /** `RGE_Player::set_game_status`: a resigned player can only lose. */
@@ -245,10 +259,10 @@ function lossIfGameOn(v: VictoryState, player: number): void {
   if (v.status[player] === STATUS_PLAYING) setGameStatus(v, player, STATUS_LOST);
 }
 
-/** `RGE_Player::win_game_now`: the player and its allied-victory team win, everyone else loses. */
-export function winGameNow(v: VictoryState, player: number): void {
+/** `RGE_Player::win_game_now` (`src/player.cpp:1037-1052`): the player and its allied-victory team win, everyone else loses. */
+export function winGameNow(v: VictoryState, player: number, d?: DiplomacyState): void {
   victoryIfGameOn(v, player);
-  const team = teammates();
+  const team = teammates(v, d, player);
   for (let i = 1; i < v.status.length; i++) {
     if (i === player) continue;
     if (team.includes(i)) victoryIfGameOn(v, i);
@@ -310,11 +324,11 @@ export function countPopulation(attributes: number[], t: { id: number; masterTyp
  * `RGE_Victory_Conditions::update` for `player` after its objects (victory.md §4): the point entries, then the
  * conditions, then `check_for_victory`; a failed verdict loses the game (`RGE_Player::update`, `src/player.cpp:880`).
  */
-export function updateConditions(v: VictoryState, player: number, attributes: readonly (readonly number[])[]): void {
+export function updateConditions(v: VictoryState, player: number, attributes: readonly (readonly number[])[], d?: DiplomacyState): void {
   for (const e of v.scores[player]!) if (e.state !== ENTRY_IMPOSSIBLE && e.state !== ENTRY_INVALID) handlePoints(v, player, e, attributes);
   for (const c of v.conditions[player]!) {
     if (c.state === ENTRY_IMPOSSIBLE || c.state === ENTRY_INVALID) continue;
-    if (c.command === CONDITION_VICTORY_POINTS) handleVictoryPoints(v, player, c);
+    if (c.command === CONDITION_VICTORY_POINTS) handleVictoryPoints(v, player, c, d);
   }
   checkForVictory(v, player);
   if (v.verdicts[player] === 1) setGameStatus(v, player, STATUS_LOST);
@@ -383,12 +397,12 @@ function handlePoints(v: VictoryState, player: number, e: ScoreEntry, attributes
   }
 }
 
-/** `handle_victory_points` (`src/victory.cpp:761`): the team's average total (C division) reaches the count. */
-function handleVictoryPoints(v: VictoryState, player: number, c: ConditionEntry): void {
+/** `handle_victory_points` (`src/victory.cpp:761-790`): the team's average total (C division) reaches the count. */
+function handleVictoryPoints(v: VictoryState, player: number, c: ConditionEntry, d: DiplomacyState | undefined): void {
   let total = v.totals[player]!;
   let members = 1;
   if (c.ally) {
-    for (const j of teammates()) {
+    for (const j of teammates(v, d, player)) {
       total += v.totals[j]!;
       members++;
     }
@@ -442,7 +456,7 @@ function checkForVictory(v: VictoryState, player: number): void {
  * `TRIBE_World::check_game_state` then `RGE_Game_World::check_game_state` (victory.md §5, §9, §10), after every player's
  * update. `deltaSeconds` is `world_time_delta_seconds`; `attributes` every player's attributes.
  */
-export function checkGameState(v: VictoryState, deltaSeconds: number, attributes: number[][]): void {
+export function checkGameState(v: VictoryState, deltaSeconds: number, attributes: number[][], d?: DiplomacyState): void {
   if (v.gameState === 0 && v.type === VICTORY_TIME_LIMIT && v.countdownVictory && v.countdownClock >= 1) {
     v.countdownClock = sub32(v.countdownClock, mul32(deltaSeconds, 2));
     if (v.countdownClock < 1) {
@@ -450,7 +464,7 @@ export function checkGameState(v: VictoryState, deltaSeconds: number, attributes
       let best = -1;
       let winner = -1;
       for (let i = 1; i < v.status.length; i++) {
-        const team = teammates();
+        const team = teammates(v, d, i);
         const score = Math.trunc(team.reduce((sum, j) => sum + v.totals[j]!, v.totals[i]!) / (team.length + 1));
         if (score > best) {
           best = score;
@@ -458,17 +472,24 @@ export function checkGameState(v: VictoryState, deltaSeconds: number, attributes
         }
       }
       if (winner > 0) {
-        winGameNow(v, winner);
+        winGameNow(v, winner, d);
         v.endCondition = END_TIME_LIMIT;
       }
     }
   }
   if (v.gameState === 0 && (v.artifactCount > 0 || v.ruinCount > 0)) {
-    // Teams from player 1 up: with no diplomacy each player is its own (src/tworld.cpp:974-994).
+    // Teams from player 1 up: each player not yet in one starts one with its allied-victory team members not yet in
+    // one (src/tworld.cpp:966-994).
     const teams: number[][] = [];
-    for (let i = 1; i < v.status.length; i++) teams.push([i, ...teammates()]);
-    if (v.artifactCount > 0) for (const team of teams) hold(v, team, deltaSeconds, attributes, v.artifactCount, ATTR_ARTIFACTS, ATTR_ALL_ARTIFACTS, v.artifactHeld, END_ALL_RELICS);
-    if (v.ruinCount > 0) for (const team of teams) hold(v, team, deltaSeconds, attributes, v.ruinCount, ATTR_RUINS, ATTR_ALL_RUINS, v.ruinHeld, END_ALL_RUINS);
+    const placed = new Set<number>();
+    for (let i = 1; i < v.status.length; i++) {
+      if (placed.has(i)) continue;
+      const team = [i, ...teammates(v, d, i).filter((j) => !placed.has(j))];
+      for (const j of team) placed.add(j);
+      teams.push(team);
+    }
+    if (v.artifactCount > 0) for (const team of teams) hold(v, team, deltaSeconds, attributes, v.artifactCount, ATTR_ARTIFACTS, ATTR_ALL_ARTIFACTS, v.artifactHeld, END_ALL_RELICS, d);
+    if (v.ruinCount > 0) for (const team of teams) hold(v, team, deltaSeconds, attributes, v.ruinCount, ATTR_RUINS, ATTR_ALL_RUINS, v.ruinHeld, END_ALL_RUINS, d);
   }
   // `RGE_Game_World::check_game_state`: `check_victory` for each player, then count statuses.
   let playing = 0;
@@ -477,17 +498,15 @@ export function checkGameState(v: VictoryState, deltaSeconds: number, attributes
   let candidate = 0;
   let candidateState = 0;
   for (let i = 1; i < v.status.length; i++) {
-    if (v.status[i] !== STATUS_LOST && v.verdicts[i] === 2) {
-      setGameStatus(v, i, STATUS_WON);
-      v.endCondition = END_CONDITIONS;
-    }
+    checkVictory(v, d, i);
     const status = v.status[i];
     if (status === STATUS_PLAYING) {
       playing++;
       if (candidate <= 0 || candidateState === 0) {
         candidate = i;
         candidateState = 1;
-      } else if (!teammates().includes(i)) candidateState = -1;
+        // The candidate's own allied-victory flag is not read (src/world.cpp:1392-1394).
+      } else if (!alliedVictory(d, i) || !allied(d, candidate, i) || !allied(d, i, candidate)) candidateState = -1;
     } else if (status === STATUS_WON) won++;
     else if (status === STATUS_LOST) lost++;
   }
@@ -499,6 +518,46 @@ export function checkGameState(v: VictoryState, deltaSeconds: number, attributes
     for (let i = 1; i < v.status.length; i++) victoryIfGameOn(v, i);
     v.endCondition = END_CONQUEST;
   }
+}
+
+/**
+ * `RGE_Player::check_victory` (`src/player.cpp:1090-1118`, diplomacy.md §6): a player not lost whose conditions are
+ * achieved wins, unless it has allied victory and either the group check fails for it or one of the players it calls
+ * allies, or one of those allies has not lost and has not achieved its own conditions.
+ */
+function checkVictory(v: VictoryState, d: DiplomacyState | undefined, player: number): void {
+  if (v.status[player] === STATUS_LOST || v.verdicts[player] !== 2) return;
+  if (alliedVictory(d, player)) {
+    const n = v.status.length;
+    const count = { value: -1 };
+    for (let i = 1; i < n; i++) if ((i === player || allied(d, player, i)) && !checkAllyGroup(v, d, i, count)) return;
+    // `check_victory_conditions`: a lost player counts as achieved.
+    for (let i = 1; i < n; i++) if (allied(d, player, i) && v.status[i] !== STATUS_LOST && v.verdicts[i] !== 2) return;
+  }
+  setGameStatus(v, player, STATUS_WON);
+  v.endCondition = END_CONDITIONS;
+}
+
+/**
+ * `RGE_Player::check_ally_group` (`src/player.cpp:1060-1088`, D): for a player not lost, every player it calls an ally
+ * must call it one back and have allied victory; the count is of the players walked (all of them unless one fails), and
+ * must equal the previous member's. A lost player keeps the count and passes unless a previous count differs.
+ */
+function checkAllyGroup(v: VictoryState, d: DiplomacyState | undefined, player: number, count: { value: number }): boolean {
+  const last = count.value;
+  let ok = true;
+  if (v.status[player] !== STATUS_LOST) {
+    count.value = 0;
+    for (let i = 1; i < v.status.length; i++) {
+      if (allied(d, player, i) && (!allied(d, i, player) || !alliedVictory(d, i))) {
+        ok = false;
+        break;
+      }
+      count.value++;
+    }
+  }
+  if (last >= 0 && count.value !== last) ok = false;
+  return ok;
 }
 
 /**
@@ -518,6 +577,7 @@ function hold(
   allAttr: number,
   held: number[],
   endCondition: number,
+  d: DiplomacyState | undefined,
 ): void {
   let total = 0;
   for (const p of team) total += toInt(attributes[p]![attr] ?? 0);
@@ -531,7 +591,7 @@ function hold(
       const next = sub32(time, mul32(deltaSeconds, 2));
       for (const p of team) held[p] = next;
       if (next < 1) {
-        winGameNow(v, first);
+        winGameNow(v, first, d);
         v.endCondition = endCondition;
       }
     }

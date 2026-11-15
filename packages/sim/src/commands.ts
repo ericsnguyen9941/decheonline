@@ -123,10 +123,53 @@ export interface ResignCommand {
   type: 'resign';
 }
 
+/**
+ * Stance (`TRIBE_Command::command_relation`, game command 0, docs/spec/diplomacy.md §4): the sender's stance towards
+ * `player` becomes `relation` (0 ally, 1 neutral, 3 enemy; `RGE_RELATION_*`).
+ */
+export interface RelationCommand {
+  type: 'relation';
+  player: number;
+  relation: number;
+}
+
+/** Allied victory (`TRIBE_Command::command_allied_victory`, game command 5, diplomacy.md §4): the sender's flag. */
+export interface AlliedVictoryCommand {
+  type: 'allied-victory';
+  on: boolean;
+}
+
+/**
+ * Tribute (`TRIBE_Command::command_give_attribute`, diplomacy.md §5): the sender gives `amount` of resource `resource`
+ * (0 food, 1 wood, 2 stone, 3 gold) to `player`, paying its tribute fee on top.
+ */
+export interface TributeCommand {
+  type: 'tribute';
+  player: number;
+  resource: number;
+  amount: number;
+}
+
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand | ResearchCommand | StopCommand | ResignCommand | RepairCommand | StandGroundCommand;
+export type Command =
+  | NoopCommand
+  | TestCommand
+  | MoveCommand
+  | WorkCommand
+  | BuildCommand
+  | QueueCommand
+  | CancelCommand
+  | AttackCommand
+  | ResearchCommand
+  | StopCommand
+  | ResignCommand
+  | RepairCommand
+  | StandGroundCommand
+  | RelationCommand
+  | AlliedVictoryCommand
+  | TributeCommand;
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
@@ -135,6 +178,11 @@ function isId(v: unknown): v is number {
 /** A master object id (`short` on the wire). */
 function isMasterId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 0x7fff;
+}
+
+/** A player number (`unsigned char` on the wire; the original has at most 8 players and Gaia). */
+function isPlayer(v: unknown): v is number {
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 8;
 }
 
 function isPoint(x: unknown, y: unknown): boolean {
@@ -210,6 +258,24 @@ export function parseCommand(v: unknown): Command | null {
       const { units } = o;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'stand-ground', units: [...(units as number[])] };
+    }
+    case 'relation': {
+      const { player, relation } = o;
+      // The Diplomacy dialog sends only ally, neutral or enemy (src/dlg_dip.cpp:443-450).
+      if (!isPlayer(player) || (relation !== 0 && relation !== 1 && relation !== 3)) return null;
+      return { type: 'relation', player, relation };
+    }
+    case 'allied-victory': {
+      const { on } = o;
+      if (typeof on !== 'boolean') return null;
+      return { type: 'allied-victory', on };
+    }
+    case 'tribute': {
+      const { player, resource, amount } = o;
+      // `TRIBE_Player::command_give_attribute` sends nothing for 0 (src/tplayer.cpp:977-982); a negative one gives nothing.
+      if (!isPlayer(player) || !Number.isInteger(resource) || (resource as number) < 0 || (resource as number) > 3) return null;
+      if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null;
+      return { type: 'tribute', player, resource: resource as number, amount };
     }
     default:
       return null;

@@ -115,9 +115,12 @@ away is lost, as on a broken DirectPlay link.
 
 ## 4. Diplomacy in a 2-player game
 
-Our lobby has no teams, so the other player is an enemy (`isEnemy`) and not an
-ally: Allies unchecks the other player (the message reaches this player's own
-screen only), Enemies and Everyone check it.
+Our lobby has no teams, so at the start the other player is an enemy
+(`isEnemy`) and not an ally: Allies unchecks the other player (the message
+reaches this player's own screen only), Enemies and Everyone check it. The
+buttons read this player's own stance (`World.isAlly` / `isEnemy`,
+[diplomacy.md](diplomacy.md) §1): once it calls the other an ally, Allies checks
+it and Enemies does not; at neutral, neither does.
 
 ## 5. The setup screen's chat (`TribeMPSetupScreen`)
 

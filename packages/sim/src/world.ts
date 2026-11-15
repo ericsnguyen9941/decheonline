@@ -11,10 +11,23 @@ import {
   type RepairCommand,
   type ResearchCommand,
   type StandGroundCommand,
+  type RelationCommand,
+  type AlliedVictoryCommand,
+  type TributeCommand,
   type StopCommand,
   type WorkCommand,
 } from './commands';
 import type { GameContext } from './context';
+import {
+  copyDiplomacy,
+  giveAttribute,
+  isAlly,
+  isEnemy,
+  newDiplomacy,
+  relation,
+  updateMutualAllies,
+  type DiplomacyState,
+} from './diplomacy';
 import { EntityStore, ObjectState, type Entity } from './entities';
 import { deleteActions, orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
@@ -239,7 +252,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 12;
+  version: 13;
   players: number;
   turn: number;
   granularity: number;
@@ -276,9 +289,10 @@ export interface Snapshot {
   fogUpdate: number[];
   visibility: VisibilitySnapshot;
   victory: VictoryState;
+  diplomacy: DiplomacyState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
@@ -342,6 +356,8 @@ export class World {
   visibility: Visibility;
   /** Game statuses, score lists and the time-limit countdown (docs/spec/victory.md). */
   victory: VictoryState;
+  /** Stances, allied victory and allied line of sight (docs/spec/diplomacy.md). */
+  diplomacy: DiplomacyState;
   /** `save_random_map_seed`: the map seed a random map game drew, -1 otherwise. Not state: nothing reads it. */
   randomMapSeed = -1;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
@@ -365,6 +381,7 @@ export class World {
     this.pathing = new PathingSystem(this.map, { get: (id) => this.entities.get(id) }, (e) => typeOf(this, e));
     this.pathing.iterations = options.pathingIterations ?? DEFAULT_PATHING_ITERATIONS;
     this.visibility = new Visibility(this.map.width, this.map.height, this.players);
+    this.diplomacy = newDiplomacy(this.players);
     // Player creation copies the civ's masters, draws its `fog_update` and runs its tech tree's first
     // `check_for_new_tech` (techs.md §3.7): the zero-time start techs complete, Gaia's too. The draw comes before the
     // setup seed below: `randomSeed` stands for the stream after player creation (visibility.md §6).
@@ -392,6 +409,8 @@ export class World {
     // Reveal Map: `TRIBE_Game::create_game` explores the whole map for every human player once the world is made
     // (src/tribegam.cpp:3024-3033); the fog stays on.
     if (options.revealMap) for (let p = 1; p < this.players; p++) this.visibility.exploreAll(p);
+    // `TRIBE_Game::create_game` computes the mutual-ally masks once the world is made (src/tribegam.cpp:3021).
+    updateMutualAllies(this.diplomacy, this.visibility);
   }
 
   /**
@@ -584,6 +603,7 @@ export class World {
       researchDone: this.researchDone,
       masters: this.masters,
       visibility: this.visibility,
+      diplomacy: this.diplomacy,
       worldTime: this.worldTime,
       playerTurn: this.playerTurn,
       playerTimeDelta: this.playerTimeDelta,
@@ -595,6 +615,10 @@ export class World {
       changeOwnership: (e, owner) => this.changeOwnership(e, owner),
       mastersChanged: (player) => {
         this.mastersDigest[player] = undefined;
+      },
+      alliedLosOn: (player) => {
+        this.diplomacy.alliedLos[player] = true;
+        updateMutualAllies(this.diplomacy, this.visibility);
       },
     };
   }
@@ -702,7 +726,7 @@ export class World {
       rng.srand(rng.rand());
       this.playerTimeDelta[this.playerTurn] = 0;
       this.playerTurn = (this.playerTurn + 1) % this.players;
-      checkGameState(this.victory, this.deltaSeconds, this.attributes);
+      checkGameState(this.victory, this.deltaSeconds, this.attributes, this.diplomacy);
     }
     this.randomSeed = rng.rand();
   }
@@ -736,7 +760,7 @@ export class World {
       if (e && updateObject(ctx, e)) this.removeObject(e);
     }
     // Then the player's victory points and conditions (`RGE_Player::update`, victory.md §4).
-    updateConditions(this.victory, i, this.attributes);
+    updateConditions(this.victory, i, this.attributes, this.diplomacy);
     // `TRIBE_Player::update` ends by fencing its computer-player AI off the stream (src/tplayer.cpp:607-631): one
     // draw becomes the seed. Gaia's update (`TRIBE_Gaia::update`) has no fence.
     if (i > 0) rng.srand(rng.rand());
@@ -770,6 +794,12 @@ export class World {
         return this.doCommandRepair(player, command);
       case 'stand-ground':
         return this.doCommandStandGround(player, command);
+      case 'relation':
+        return this.doCommandRelation(player, command);
+      case 'allied-victory':
+        return this.doCommandAlliedVictory(player, command);
+      case 'tribute':
+        return this.doCommandTribute(player, command);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
@@ -989,6 +1019,48 @@ export class World {
   }
 
   /**
+   * Stance (`TRIBE_Command::do_command_game` game command 0, src/tcommand.cpp:370-375, diplomacy.md §4): the sender's
+   * stance towards `command.player` changes, then the mutual-ally masks. Port-side guards (the Diplomacy dialog's rows,
+   * src/dlg_dip.cpp:124-131, 440-455): only towards another player, 1 and up, still playing.
+   */
+  private doCommandRelation(player: number, command: RelationCommand): void {
+    const to = command.player;
+    if (to < 1 || to >= this.players || to === player || this.victory.status[to] !== 0) return;
+    this.diplomacy.relations[player]![to] = command.relation;
+    updateMutualAllies(this.diplomacy, this.visibility);
+  }
+
+  /** Allied victory (game command 5, src/tcommand.cpp:368-370, diplomacy.md §4): the sender's flag. */
+  private doCommandAlliedVictory(player: number, command: AlliedVictoryCommand): void {
+    this.diplomacy.alliedVictory[player] = command.on;
+  }
+
+  /**
+   * Tribute (`TRIBE_Command::do_command_give_attribute`, diplomacy.md §5). Port-side guards (the Diplomacy dialog's
+   * rows): only to another player, 1 and up, still playing; `giveAttribute` refuses a sender without an active Market.
+   */
+  private doCommandTribute(player: number, command: TributeCommand): void {
+    const to = command.player;
+    if (to < 1 || to >= this.players || to === player || this.victory.status[to] !== 0) return;
+    giveAttribute({ attributes: this.attributes, objectsOf: (p) => this.entities.ofPlayer(p) }, player, to, command.resource, command.amount);
+  }
+
+  /** `player`'s stance towards `other` (0 ally, 1 neutral, 3 enemy; diplomacy.md §1). For the client's dialogs. */
+  relation(player: number, other: number): number {
+    return relation(this, player, other);
+  }
+
+  /** `isAlly`: `other` is `player` itself or a player `player` calls an ally (one-sided; the chat's Allies button). */
+  isAlly(player: number, other: number): boolean {
+    return isAlly(this, player, other);
+  }
+
+  /** `isEnemy`: `other` is another player `player` calls an enemy (the chat's Enemies button). */
+  isEnemy(player: number, other: number): boolean {
+    return isEnemy(this, player, other);
+  }
+
+  /**
    * What `player` knows of tile (col, row) (`get_visible`): `TILE_VISIBLE` (0x0F) while seen, `TILE_FOGGED` (0x80) once
    * explored, `TILE_BLACK` (0) before. For the client's fog drawing and minimap.
    */
@@ -1024,6 +1096,7 @@ export class World {
     for (const f of this.fogUpdate) h.u32(f);
     this.visibility.hashInto(h);
     hashValue(h, this.victory);
+    hashValue(h, this.diplomacy);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -1038,7 +1111,7 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
-      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground') {
+      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute') {
         hashValue(h, q.command);
       }
     }
@@ -1047,7 +1120,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 12,
+      version: 13,
       players: this.players,
       turn: this.turn,
       granularity: this.granularity,
@@ -1076,11 +1149,12 @@ export class World {
       fogUpdate: [...this.fogUpdate],
       visibility: this.visibility.toJSON(),
       victory: copyVictory(this.victory),
+      diplomacy: copyDiplomacy(this.diplomacy),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 12) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 13) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -1112,6 +1186,7 @@ export class World {
     w.fogUpdate = [...s.fogUpdate];
     w.visibility = Visibility.fromJSON(s.visibility);
     w.victory = copyVictory(s.victory);
+    w.diplomacy = copyDiplomacy(s.diplomacy);
     return w;
   }
 }

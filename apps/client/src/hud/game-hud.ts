@@ -241,9 +241,8 @@ export class GameHud {
           const gone = o.game.dropped(p);
           return { player: p, name: o.game.names[p] ?? '', civ: civilizationName(o.provider, o.world.civs[p]!), out: gone || o.world.playerStatus(p) === STATUS_LOST, checkable: p !== o.player && !gone };
         }),
-      // No teams in a lobby game: every other player is an enemy.
-      isAlly: (p) => p === o.player,
-      isEnemy: (p) => p !== o.player,
+      isAlly: (p) => o.world.isAlly(o.player, p),
+      isEnemy: (p) => o.world.isEnemy(o.player, p),
       send: (text) => this.sendChat(text),
       click,
     });

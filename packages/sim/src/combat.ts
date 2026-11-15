@@ -5,6 +5,7 @@
  */
 import { isBuilding } from './buildings';
 import type { GameContext } from './context';
+import { isAlly } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, transform } from './gather';
 import { master, typeOf, type PlayerMasters } from './masters';
@@ -330,6 +331,13 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
       a.target = -1;
       setAttackState(ctx, e, a, ATTACK_TARGET_LOST);
       return ActionResult.TargetLost;
+    }
+    // A target whose owner the attacker's owner (not Gaia) now calls an ally is invalid (src/act_atak.cpp:282-290,
+    // diplomacy.md §2).
+    if (e.owner !== 0 && isAlly(ctx, e.owner, target.owner)) {
+      setAttackState(ctx, e, a, ATTACK_DONE);
+      if (!a.sub) notifyObject(ctx, e, e.id, NOTIFY_TARGET_INVALID, AI_ACTION_ATTACK);
+      return ActionResult.TargetInvalid;
     }
   }
   switch (a.state) {

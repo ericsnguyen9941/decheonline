@@ -160,6 +160,17 @@ Score formula location: **not pinned yet**. Candidates are the score panel in
 `src/scr_game.cpp` (`score_interval` :132) and player attributes; to locate in
 R3.
 
+## Diplomacy, tribute
+
+Spec: [diplomacy.md](diplomacy.md).
+
+| file | M/D/L/N | entry points | spec |
+| --- | --- | --- | --- |
+| `src/player.cpp` | 114/2/1/0 | `RGE_Player::set_relation` :1263 [M], `isAlly` :296 [M], `isEnemy` :288 [M], `win_game_now` :1037 [M], `check_victory` :1090 [M], `check_ally_group` :1061 [D] | diplomacy.md §1, §6 |
+| `src/tcommand.cpp` | 39/3/0/0 | `do_command_game` :365 (relation, allied victory), `do_command_give_attribute` :453 [M] | diplomacy.md §4, §5 |
+| `src/world.cpp` | 88/1/1/1 | `RGE_Game_World::update_mutual_allies` :3214 [M] | diplomacy.md §3 |
+| `src/dlg_dip.cpp` | 5/1/2/0 | `TribeDiplomacyDialog::action` :418 [L] (the dialog's conditions, the fee shown) | diplomacy.md §4, §5 |
+
 ## Random maps
 
 Spec: [random-maps.md](random-maps.md).

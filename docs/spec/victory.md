@@ -668,5 +668,8 @@ Not ported, for want of objects or systems the sim does not have yet:
 - The scenario and MP special conditions of §7 other than "victory points"
   (ruins, artifacts, discoveries, exploration, gold settings): none of their
   lobby settings exist yet.
-- Diplomacy and allied victory: the sim has none, so every team is one player.
-- Attributes fed by systems not in the sim: 41 conversions, 53 tribute.
+- Attribute 41 (conversions): the sim has no Priests.
+
+Diplomacy and allied victory (teams of mutual allies with allied victory in
+§5, §9, §10 and `win_game_now`) are ported with the stances and tribute
+(attribute 53) in [diplomacy.md](diplomacy.md) §6.

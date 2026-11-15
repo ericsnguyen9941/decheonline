@@ -7,6 +7,7 @@
 import { payObjCost } from './buildings';
 import { distanceToObject, turnTowards } from './combat';
 import type { GameContext } from './context';
+import { isAlly, type DiplomacyContext } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, getTask, transform, type WorkAction } from './gather';
 import { master, typeOf, type PlayerMasters } from './masters';
@@ -51,10 +52,11 @@ function object(ctx: GameContext, id: number): Entity | undefined {
 /**
  * The repair pass of `TRIBE_Task_List::get_target_task` (src/ttsk_lst.cpp:82-92): an own building short of hit points,
  * not dying and not a Farm, takes the first repair task of class -1 or 0, and nothing else; null when the pass does not
- * apply. Allies are not in the game, so only the unit's own buildings pass. The boat pass after it has no target here.
+ * apply. Its own or a building of a player its owner calls an ally (`isAlly`, src/ttsk_lst.cpp:82). The boat pass after it
+ * has no target here.
  */
-export function repairTaskFor(ctx: PlayerMasters, t: UnitType, e: Entity, target: Entity): number | null {
-  if (target.owner !== e.owner) return null;
+export function repairTaskFor(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entity, target: Entity): number | null {
+  if (!isAlly(ctx, e.owner, target.owner)) return null;
   const tt = typeOf(ctx, target);
   if (tt.masterType !== MASTER_TYPE_BUILDING || !(target.hp < f32(tt.hitPoints)) || target.state >= ObjectState.Dying || tt.id === FARM) return null;
   return (t.action?.tasks ?? []).findIndex((k) => k.actionType === ACTION_REPAIR && (k.group === -1 || k.group === 0));
@@ -163,13 +165,13 @@ function invalidTarget(ctx: GameContext, e: Entity, a: WorkAction): ActionResult
 
 /**
  * `TRIBE_Action_Repair::update` (src/tact_rep.cpp:167-314, status N; support-actions.md §6.2). A target that is gone,
- * not active, or not the unit's own ends the action.
+ * not active, or not the unit's own or a player's its owner calls an ally (`isAlly`, src/tact_rep.cpp:188) ends the action.
  */
 export function updateRepair(ctx: GameContext, e: Entity, a: WorkAction): ActionResult {
   if (a.target !== -1 && !object(ctx, a.target)) return invalidTarget(ctx, e, a);
   if (a.target2 !== -1 && !object(ctx, a.target2)) a.target2 = -1;
   const target = object(ctx, a.target);
-  if (target && (target.state !== ObjectState.Active || target.owner !== e.owner)) return invalidTarget(ctx, e, a);
+  if (target && (target.state !== ObjectState.Active || !isAlly(ctx, e.owner, target.owner))) return invalidTarget(ctx, e, a);
   switch (a.state) {
     case REPAIR_TO_POINT:
       switch (updateMover(ctx, e)) {

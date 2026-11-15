@@ -10,6 +10,7 @@ import { add32, div32, f32, i16, mul32, sub32, toInt, u8 } from './num';
 import type { PlayerMasters } from './masters';
 import type { CrtRand } from './rng';
 import { newSprite } from './sprites';
+import { ATTR_ALLIED_LOS } from './diplomacy';
 import { exploreObject, unexploreObject, type VisibilityContext } from './visibility';
 
 /** Tech states (`Tech_Player_Tree::state`, techs.md §2.3). */
@@ -49,6 +50,11 @@ export interface TechContext extends TechPlayers, VisibilityContext {
   objectsOf(owner: number): Entity[];
   /** Told before an effect changes the player's masters (the world caches their hash). */
   mastersChanged?(player: number): void;
+  /**
+   * `TRIBE_Player::add_attribute_num` on attribute 50 (src/tplayer.cpp:3664-3668, diplomacy.md §3): the player's allied
+   * line of sight turns on and the mutual-ally masks are recomputed.
+   */
+  alliedLosOn?(player: number): void;
 }
 
 export function newTechStates(): number[] {
@@ -264,6 +270,8 @@ export function doEffect(ctx: TechContext, player: number, id: number): void {
         const attributes = ctx.attributes[player]!;
         if (c.a < 0 || c.a >= attributes.length) break;
         attributes[c.a] = c.b === 0 ? f32(c.d) : add32(c.d, attributes[c.a]!);
+        // Mode 0 is `new_attribute_num`, a plain store; mode 1 goes through `add_attribute_num` (src/effects.cpp:183-193).
+        if (c.b !== 0 && c.a === ATTR_ALLIED_LOS) ctx.alliedLosOn?.(player);
         break;
       }
       case 2: {

@@ -9,6 +9,7 @@
  */
 import { combatAttack, distanceToObject } from './combat';
 import type { GameContext } from './context';
+import { isAlly, unitDiplomacy } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { aiWork, deleteActions, workMoveTo, ACTION_ATTACK, ACTION_GATHER, ACTION_HUNT, ACTION_MOVE } from './gather';
 import { ACTION_BUILD } from './build';
@@ -505,9 +506,15 @@ function canAttackUnit(ctx: PlayerMasters, ai: UnitAI, target: Entity): boolean 
   return true;
 }
 
+/**
+ * `canAttackUnitAtNeutrality` (diplomacy.md §2): civilians never attack a neutral player's objects (src/taiuaimd.cpp:533);
+ * soldiers leave its buildings, walls, civilians and fishing, trade and transport boats alone (:1681); towers the same
+ * but transport boats (:2203); the rest attack anything (src/aiuaimod.cpp:1728).
+ */
 function canAttackUnitAtNeutrality(ai: UnitAI, group: number): boolean {
   if (ai.kind === AiClass.Civilian) return false;
   if (ai.kind === AiClass.Soldier) return ![3, 27, 4, 21, 2, 20].includes(group);
+  if (ai.kind === AiClass.Tower) return ![3, 27, 4, 21, 2].includes(group);
   return true;
 }
 
@@ -599,17 +606,11 @@ interface Seen {
   distance: number;
 }
 
-/** Diplomacy buckets of `GetVisibleUnits`: 0 Gaia, 1 self, 2 ally, 3 neutral, 4 enemy. Every other player is an enemy. */
-function bucketOf(searcher: number, owner: number): number {
-  if (owner === 0) return 0;
-  return owner === searcher ? 1 : 4;
-}
-
 /**
  * `search` / `GetVisibleUnits` (unit-ai.md §3.2, visibility.md §4.2) around the unit's tile with radius (int) LOS (doubled
  * for the builder, clamped to 15): the searching player's visible-unit records of each important group, in group order
- * and list order, each at the tile and owner it had when the player started seeing it, bucketed by diplomacy, at most
- * 256 a bucket.
+ * and list order, each at the tile and owner it had when the player started seeing it, bucketed by the searching
+ * player's `unitDiplomacy` (diplomacy.md §2: 0 Gaia, 1 self, 2 ally, 3 neutral, 4 enemy), at most 256 a bucket.
  */
 function search(ctx: GameContext, e: Entity): Seen[][] {
   const buckets: Seen[][] = [[], [], [], [], []];
@@ -627,7 +628,7 @@ function search(ctx: GameContext, e: Entity): Seen[][] {
       if (r.x > cx + radius || r.x < cx - radius || r.y > cy + radius || r.y < cy - radius) continue;
       const d = VISIBLE_DISTANCE[Math.abs(r.y - cy) & 15]![Math.abs(r.x - cx) & 15]!;
       if (d > radius) continue;
-      const list = buckets[bucketOf(e.owner, r.owner)]!;
+      const list = buckets[unitDiplomacy(ctx, e.owner, r.owner)]!;
       if (list.length >= 0x100) continue;
       list.push({ id: r.id, owner: r.owner, distance: d });
     }
@@ -663,7 +664,8 @@ function baseDamageAbility(ctx: PlayerMasters, target: Entity, attacker: Entity)
 
 /**
  * `bestUnitToAttack(allowWalls, quickCheck)` (src/aiuaimod.cpp:1177, unit-ai.md §3.3) for a human or Gaia searcher
- * with no single-player difficulty. Returns an object id or -1.
+ * with no single-player difficulty: the enemy, neutral and ally buckets, skipping the objects of any player the
+ * searcher's owner calls an ally, itself included (`isAlly`, :1248, :1304, :1357). Returns an object id or -1.
  */
 export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolean, quickCheck: boolean): number {
   const ai = e.ai!;
@@ -675,7 +677,7 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
   const wallOk = !!current && typeOf(ctx, current).group === GROUP_WALL;
   const passes = (o: Entity | undefined, bucket: number): o is Entity => {
     if (!o || o.state > ObjectState.Active) return false;
-    if (o.owner === e.owner) return false;
+    if (isAlly(ctx, e.owner, o.owner)) return false;
     const g = typeOf(ctx, o).group;
     if (!(allowWalls && wallOk) && g === GROUP_WALL) return false;
     if (g === GROUP_BUILDING && o.hp <= 1 && CATAPULTS.includes(t.id)) return false;
@@ -712,7 +714,7 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
     const blocked =
       nonCurrent !== 0 &&
       (!tileVisible(ctx, e.owner, current) || (!inAttackRange(ctx, e, current) && !canPath(ctx, e, current, weaponRange(ctx, e))));
-    if (!blocked && current.state === ObjectState.Active && current.owner !== e.owner) {
+    if (!blocked && current.state === ObjectState.Active && !isAlly(ctx, e.owner, current.owner)) {
       if (current.type === 276) return current.id;
       best = current.id;
       let score = add32(mul32(baseDamageAbility(ctx, current, e), 100), mul32(damageCapability(ctx, current), 50));
@@ -1146,7 +1148,8 @@ function buildingNotify(ctx: GameContext, e: Entity, note: Note): number {
 }
 
 /**
- * `askForHelp` (src/aiuaimod.cpp:2494, unit-ai.md §4.4): idle armed units of the owner within 3 tiles of the victim, among
+ * `askForHelp` (src/aiuaimod.cpp:2494, unit-ai.md §4.4): idle armed units of the owner, or of a player that calls the
+ * owner an ally (src/aiuaimod.cpp:2515), within 3 tiles of the victim, among
  * its own search results, get an immediate attack order on the attacker (priority 50). The order's z is the attacker's
  * y, as in the original.
  */
@@ -1160,7 +1163,7 @@ function askForHelp(ctx: GameContext, e: Entity, attackerId: number): void {
       const o = ctx.entities.get(r.id);
       if (!o?.ai || o.state > ObjectState.Active) continue;
       if (NO_HELP_GROUPS.includes(typeOf(ctx, o).group)) continue;
-      if (o.owner !== e.owner) continue;
+      if (o.owner !== e.owner && !isAlly(ctx, o.owner, e.owner)) continue;
       if (distanceToObject(ctx, e, o) > 3) continue;
       if (o.ai.action !== -1 || o.ai.order !== -1 || o.ai.orders.length > 0) continue;
       aiOrder(ctx, o, o.owner, AI_ORDER_ATTACK, attackerId, attacker.owner, attacker.x, attacker.y, attacker.y, weaponRange(ctx, o), true, false, 50);

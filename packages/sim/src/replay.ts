@@ -3,7 +3,7 @@ import { CIV_RANDOM, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, type GameSettings
 import { MAP_HILLY, MAP_MEDIUM } from './rmm-controller';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
-import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
+import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, MARKET, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
 import { AGE_BRONZE, startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit, type WorldOptions } from './world';
 
@@ -149,6 +149,38 @@ export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
     populationLimit: 25,
   };
   return sampleRandomMapReplay(turns, seed, { randomSeed: 4244, settings, civs: [CIV_RANDOM, 10] });
+}
+
+/**
+ * `sampleReplay`'s game (with the skirmish) plus a built Market left of each Town Center, and from a fourth generator, so
+ * the other orders stay as they were, diplomacy (docs/spec/diplomacy.md): now and then a stance towards the other side
+ * (ally, neutral or enemy; rarely towards itself or Gaia, which is ignored), an allied-victory flag, and a tribute of
+ * 50-500 of a random resource, sometimes more than the sender has.
+ */
+export function sampleDiplomacyReplay(turns = 120, seed = 20261117): ReplayLog {
+  const log = sampleReplay(turns, seed);
+  const markets: StartUnit[] = log.units!.filter((u) => u.type === TOWN_CENTER).map((tc) => ({ owner: tc.owner, type: MARKET, x: tc.x - 4, y: tc.y }));
+  const talk = new CrtRand();
+  talk.srand(seed + 15485863);
+  const batches = [...log.batches];
+  for (let turn = 0; turn < turns; turn++) {
+    for (const player of [2, 1]) {
+      const commands: Command[] = [];
+      const other = 3 - player;
+      if (talk.rand() % 10 === 0) {
+        const roll = talk.rand() % 16;
+        commands.push({ type: 'relation', player: roll === 0 ? player : roll === 1 ? 0 : other, relation: [0, 1, 3][talk.rand() % 3]! });
+      }
+      if (talk.rand() % 30 === 0) commands.push({ type: 'allied-victory', on: talk.rand() % 2 === 0 });
+      if (talk.rand() % 8 === 0) commands.push({ type: 'tribute', player: other, resource: talk.rand() % 4, amount: 50 + (talk.rand() % 451) });
+      if (commands.length === 0) continue;
+      const batch = batches.find((b) => b.turn === turn && b.player === player);
+      if (batch) batch.commands = [...batch.commands, ...commands];
+      else batches.push({ turn, player, commands });
+    }
+  }
+  // Markets come after the other start objects, so those keep their ids.
+  return { ...log, units: [...log.units!, ...markets], batches };
 }
 
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */

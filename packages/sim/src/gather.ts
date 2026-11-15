@@ -7,6 +7,7 @@ import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } 
 import { ACTION_REPAIR, repairMoveTo, repairTaskFor, repairWork, startRepair, updateRepair } from './repair';
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
+import { isAlly, relation, RELATION_ALLY, type DiplomacyContext } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, currentSprite, endAction, facetOf, MOVE_RANGE, startMoveTo, updateMover } from './movement';
@@ -74,24 +75,26 @@ function object(ctx: GameContext, id: number): Entity | undefined {
   return id === -1 ? undefined : ctx.entities.get(id);
 }
 
-/** `RGE_Task_List::check_task` (src/task_lst.cpp:177) for players without diplomacy: all others are enemies. */
-function checkTask(ctx: PlayerMasters, task: Task, e: Entity, target: Entity): boolean {
+/** `RGE_Task_List::check_task` (src/task_lst.cpp:177), its owner types by stance (src/task_lst.cpp:186-226, diplomacy.md §2). */
+function checkTask(ctx: PlayerMasters & DiplomacyContext, task: Task, e: Entity, target: Entity): boolean {
   if (task.carryCheck === 1 && (target.heldType === -1 || target.heldAmount <= 0)) return false;
   switch (task.diplomacy) {
     case 1:
       if (target.owner !== e.owner) return false;
       break;
     case 2:
-      // Another player's object, for any relation but self: every other player is an enemy. Gaia's never passes.
-      if (target.owner === 0 || target.owner === e.owner) return false;
+      // Another player's object that the unit's owner does not call an ally. Gaia's never passes.
+      if (target.owner === 0 || target.owner === e.owner || relation(ctx, e.owner, target.owner) === RELATION_ALLY) return false;
       break;
     case 3:
       if (target.owner !== 0) return false;
       break;
     case 4:
-      return target.owner === e.owner;
+      // Its own, or a mutual ally's.
+      return target.owner === e.owner || (target.owner !== 0 && isAlly(ctx, e.owner, target.owner) && isAlly(ctx, target.owner, e.owner));
     case 5:
       if (target.owner === e.owner) return false;
+      if (target.owner !== 0 && relation(ctx, e.owner, target.owner) === RELATION_ALLY) return false;
       if (target.owner === 0 && typeOf(ctx, e).combatLevel === 0) return false;
       break;
   }
@@ -99,7 +102,7 @@ function checkTask(ctx: PlayerMasters, task: Task, e: Entity, target: Entity): b
 }
 
 /** `TRIBE_Task_List::get_target_task` then `RGE_Task_List::get_target_task` (src/task_lst.cpp:107): task index or -1. */
-function targetTask(ctx: PlayerMasters, t: UnitType, e: Entity, target: Entity | undefined): number {
+function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entity, target: Entity | undefined): number {
   const tasks = t.action?.tasks ?? [];
   if (!target || tasks.length === 0) return -1;
   const tt = typeOf(ctx, target);
@@ -663,7 +666,7 @@ function deposit(ctx: GameContext, e: Entity, task: Task, earned: boolean): void
 }
 
 /** For the client: the type a work order on `target` would make `e` (after any swap), or -1 when it has no task. */
-export function workTaskType(ctx: PlayerMasters, e: Entity, target: Entity): number {
+export function workTaskType(ctx: PlayerMasters & DiplomacyContext, e: Entity, target: Entity): number {
   const t = typeOf(ctx, e);
   if (targetTask(ctx, t, e, target) !== -1) return t.id;
   if (!t.action || t.action.taskSwapGroup === 0) return -1;

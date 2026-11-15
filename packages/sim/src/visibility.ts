@@ -131,6 +131,9 @@ export interface VisibilitySnapshot {
   explored: number[];
   /** `[player][group]` record lists in list order. */
   records: VisibleRecord[][][];
+  /** Per player, `mutualVisibleMask` and `mutualExploredMask`. */
+  mutualVisible: number[];
+  mutualExplored: number[];
 }
 
 /** The world's fog-of-war state. */
@@ -146,6 +149,12 @@ export class Visibility {
   readonly explored: number[];
   /** `Visible_Unit_Manager::PlayerDataPtrs`: per player, per object group, the records of what the player sees. */
   readonly records: VisibleRecord[][][];
+  /**
+   * Per player, `RGE_Player::mutualVisibleMask` / `mutualExploredMask` (diplomacy.md §3): the `unified` bits that count as
+   * its own, its own bit and those of the mutual allies it shares line of sight with (`updateMutualAllies`).
+   */
+  readonly mutualVisible: number[];
+  readonly mutualExplored: number[];
 
   constructor(width: number, height: number, players: number) {
     this.width = width;
@@ -155,6 +164,14 @@ export class Visibility {
     this.unified = new Uint32Array(width * height);
     this.explored = new Array<number>(players).fill(0);
     this.records = Array.from({ length: players }, () => []);
+    this.mutualVisible = Array.from({ length: players }, (_, p) => 1 << p);
+    this.mutualExplored = Array.from({ length: players }, (_, p) => (1 << (p + EXPLORED_SHIFT)) >>> 0);
+  }
+
+  /** Set `player`'s mutual masks (`update_mutual_allies`). */
+  setMutual(player: number, visible: number, explored: number): void {
+    this.mutualVisible[player] = visible >>> 0;
+    this.mutualExplored[player] = explored >>> 0;
   }
 
   /**
@@ -248,13 +265,13 @@ export class Visibility {
 
   /**
    * `RGE_Visible_Map::get_visible` (visibility.md §1.3): `TILE_VISIBLE` while one of the player's mutual allies sees the
-   * tile, `TILE_FOGGED` once one explored it, else `TILE_BLACK`. Every other player is an enemy and allied line of sight
-   * is off, so the mutual masks hold the player's own bits only.
+   * tile, `TILE_FOGGED` once one explored it, else `TILE_BLACK`. The masks hold the player's own bits, and its mutual
+   * allies' once it has allied line of sight (diplomacy.md §3).
    */
   get(player: number, col: number, row: number): number {
     const cell = this.unified[row * this.width + col]!;
-    if (cell & (1 << player)) return TILE_VISIBLE;
-    if (cell & (1 << (player + EXPLORED_SHIFT))) return TILE_FOGGED;
+    if (cell & this.mutualVisible[player]!) return TILE_VISIBLE;
+    if (cell & this.mutualExplored[player]!) return TILE_FOGGED;
     return TILE_BLACK;
   }
 
@@ -327,6 +344,7 @@ export class Visibility {
         for (const r of list ?? []) h.u32(r.id).u32(r.owner).u32(r.x).u32(r.y);
       }
     }
+    for (let p = 0; p < this.players; p++) h.u32(this.mutualVisible[p]!).u32(this.mutualExplored[p]!);
   }
 
   toJSON(): VisibilitySnapshot {
@@ -337,6 +355,8 @@ export class Visibility {
       unified: Array.from(this.unified),
       explored: [...this.explored],
       records: this.records.map((lists) => Array.from(lists, (list) => (list ?? []).map((r) => ({ ...r })))),
+      mutualVisible: [...this.mutualVisible],
+      mutualExplored: [...this.mutualExplored],
     };
   }
 
@@ -346,6 +366,7 @@ export class Visibility {
     v.unified.set(s.unified);
     s.explored.forEach((n, p) => (v.explored[p] = n));
     s.records.forEach((lists, p) => lists.forEach((list, g) => (v.records[p]![g] = list.map((r) => ({ ...r })))));
+    s.mutualVisible.forEach((m, p) => v.setMutual(p, m, s.mutualExplored[p]!));
     return v;
   }
 }
