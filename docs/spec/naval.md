@@ -6,9 +6,9 @@ version caveat and reference format). Numbers are the 1.0a `data2/empires.dat`'s
 is `movement.md`, the unit AI `unit-ai.md`, combat and blast `combat.md`,
 repair/heal/convert `support-actions.md`, tech effects `techs.md`.
 
-Transport (17/18, unload) and trade (15/16) boats are out of this document's
-port (ships S6, S7); where their rules sit next to the ones here they are named
-but not described.
+Trade boats (15/16) are out of this document's port (ship S7); where their
+rules sit next to the ones here they are named but not described. Transport
+boats (17/18), boarding and unload are §7.
 
 ## 1. Functions
 
@@ -27,6 +27,12 @@ but not described.
 | fishing ship unit AI | `src/taiuaimd.cpp:1510-1641` | reactions of a Fishing Boat (§5.2) |
 | `TRIBE_Action_Repair::meet_target` | `src/tact_rep.cpp:354-391` | calling the boat to the shore (§6.1) |
 | `TRIBE_Combat_Object::heal(float)` | `src/t_c_obj.cpp:982-999` | a boat's repair is paid (§6.2) |
+| `RGE_Action_Enter` (action 3) | `src/act_entr.cpp` | a unit walks to a transport and boards it (§7.2) |
+| `RGE_Static_Object::enter_obj`, `exit_obj`, `more_room` | `src/stat_obj.cpp:2068-2103`, `src/com_obj.cpp:413` | boarding, capacity (§7.3) |
+| `RGE_Action_Transport` (action 12) | `src/act_tran.cpp` | the transport's default task, moving and dropping (§7.4) |
+| `RGE_Static_Object::drop_held_objects`, `find_drop_location` | `src/stat_obj.cpp:2417-2534` | where the cargo lands (§7.5) |
+| `RGE_Combat_Object::unload`, `TRIBE_Command::do_command_unload` | `src/com_obj.cpp:821`, `src/tcommand.cpp:513` | the Unload command (§7.6) |
+| transport ship unit AI | `src/taiuaimd.cpp:1416-1480` | reactions of a transport (§7.7) |
 
 ## 2. Zone maps
 
@@ -243,7 +249,163 @@ healed. Buildings follow `support-actions.md` §6.
 a priest). §5: a priest never heals a boat (groups 2, 20, 21, 22 are in the
 heal filter).
 
-## 7. Port status
+## 7. Transport
+
+### 7.1 The boats
+
+Transport Boat 17 (Dock, 1.0a dat: hp 150, speed 1.4, 150 wood) and Transport
+Ship 18 (hp 200, speed 1.75; tech 8 Heavy Transport copies 18 into 17). A transport is a unit whose
+`unit_level` (dat `interfaceKind`) is 7; its capacity is `obj_max` (dat
+`garrisonCapacity`): 5 for 17, 10 for 18. Its task list holds task 0, action
+12 Transport, `isDefault` 1, terrain 2 (beach), and a search task (109). Its
+group is 20 and its unit AI the transport ship's (§7.7). No 1.0a tech changes
+`obj_max` (modify code 2).
+
+### 7.2 Boarding: the Enter action (3)
+
+Every land unit's task list has a task of action 3 (work range 1). The
+task-list pass that picks it (`TRIBE_Task_List::get_target_task`,
+`src/ttsk_lst.cpp:71-79`) runs after the own-foundation build pass and before
+the repair passes: a target of the unit's owner or of a mutual ally, below
+Dying, whose `unit_level` is 7, takes the unit's first Enter task, or no task
+at all (the search ends either way). So a right click on an own transport,
+damaged or not, boards it; a unit without an Enter task just walks there.
+
+Creating the action aims it at the boat's position, then:
+
+- when the boat's top action is in state 2 (idle) and has room (a human
+  player's unit), or is in state 11 with `target2ID` 0 (moving after a move
+  order): step from the unit's tile towards the boat's tile
+  (`firstTileAlongLine`, §6.1) for the first beach tile (terrain 2) the unit
+  may stand on. With one, the unit aims at its centre and the boat is ordered
+  `moveTo(tile x, tile y, 0.5, unconditional)` (the integer corner, not the
+  centre). Without one, the unit aims at the boat's position and the boat is
+  ordered to the unit's position (range 0.5);
+- otherwise, when the boat's top action is in state 11, the unit aims at that
+  action's target point; else at the boat's position.
+
+States (first in stack: 4):
+
+- **4** walk (`Move_To` sub-action to the aim point, the task's work range).
+  When the walk completes or is removed: if `distance_to_object(boat) - 1 >
+  work range`, go to state 2; else board (§7.3). A failed walk goes to state
+  2; an invalid target ends in state 13.
+- **2** wait 1 s, then if still out of reach: when the boat is idle (state 2),
+  re-aim along the line as above, but when the new tile equals the current
+  aim, aim at the boat's position instead and walk (state 4) without a boat
+  order; else order the boat to that tile with range 0 (or to the unit's
+  position, range 0.5, when no tile is found). When the boat is moving (state
+  11), aim at its target point. Then walk (state 4). In reach: board.
+- After boarding (whether or not there was room), the unit AI is told
+  ACTION_COMPLETED for action 0x269 (unless the action is a sub-action), and
+  the action goes to state 1 and returns completed. In state 1 its next update
+  removes it; that update only comes once the unit is outside again.
+- **13** tells the unit AI ACTION_FAILED and fails.
+- Every update first checks the target: missing, Dying or later, or no longer
+  of a player the unit's owner calls an ally → TARGET_INVALID, state 1.
+
+### 7.3 Inside a transport
+
+`enter_obj` does nothing unless the boat has room (`objects < obj_max`).
+Otherwise the unit leaves its tile (its line of sight is unexplored from
+there), leaves the obstruction map, goes to the head of the boat's object list
+and takes the boat's x/y. Its visible-unit records are forgotten
+(`com_obj.cpp:413`).
+
+While inside:
+
+- its actions are not updated (only targets pending removal are cleared); the
+  unit AI still runs;
+- its static update skips the hit-point and death logic and copies the boat's
+  object state whenever the boat's is past Active (`src/stat_obj.cpp:1233`):
+  the cargo dies with its ship, with no dying sprite, death sound draw or
+  corpse;
+- an attack treats a target that is inside as invalid (`src/act_atak.cpp:292`).
+
+A boat removed from the game exits every passenger (its destructor); a
+passenger that copied ReadyToRemove is then removed by its next update.
+
+### 7.4 The Transport action (12)
+
+An idle transport always holds a Transport action (its default task, started
+when it has no action). First in stack: state 11 when the action was made with
+a point (x, y ≥ 0), else state 2. Every state change drops the sub-action.
+
+- **2** idle: the standing sprite.
+- **11** move (`Move_To` the target point, range 0.3, the task's move sprite);
+  when it ends in any way, state 2.
+- **4** move (as 11); when it ends, state 6.
+- **6** drop: when the target point's zone (the boat's zone map) is not within
+  2 tiles of the boat's tile (`withinRangeOfZone`, §2.2), the owner is told
+  0x207 ("not close enough"). Otherwise, with passengers, if the boat is next
+  to drop-off terrain, `drop_held_objects(target zone)`: none dropped → 0x207;
+  some left aboard → 0x206 ("not enough room"). Not next to drop-off terrain:
+  0x207 unless the target tile is water (1) or deep water (22). Then state 2.
+- `move_to(x, y)` (a move order, or a unit calling the boat): target the point,
+  `target2ID` 0, state 11. `stop`: state 2.
+- `work(obj, x, y)`: `target2ID` 1. When the point's zone is within 2 tiles of
+  the boat and the point is at most 2 from the boat: target it, state 6 (drop
+  now). Else, for a point on the map: target it, state 4 when `obj` is the boat
+  itself (unload), else state 11 (move only).
+
+`next_to_drop_off_terrain`: true when the task's terrain is -1. Otherwise the
+tile box `(int)(x - radius - 1) .. (int)(x + radius + 1)` (each axis, the
+boat's radius, clamped to the map) must hold a tile of beach (2) or shallows
+(4) in the target point's zone (any zone when there is no target point).
+
+A targetless work order (a right click on the map) picks a task by the clicked
+tile's terrain (`RGE_Task_List::get_target_task`'s terrain pass,
+`src/task_lst.cpp:147-160`): a beach tile gives the transport task 0, so the
+boat's Transport action takes `work(none, x, y)`: drop now when the beach is
+within 2, else move there.
+
+### 7.5 Where the cargo lands
+
+`drop_held_objects(zone)` walks the passengers from the head of the list (the
+last to board first). It keeps up to 9 drop points, starting with the boat's
+position and twice the boat's radius; each passenger tries
+`find_drop_location` around drop point 0 only. A success places the passenger
+at the boat's position, exits it and teleports it to the spot, and appends the
+spot (with twice the passenger's radius) to the drop points. A failure drops
+the last drop point (the last one is copied over the one before it) and tries
+again; with no drop points left, the rest stay aboard. Returns the count
+dropped.
+
+`find_drop_location`: the ring radius is the given radius plus the
+passenger's; two rings (the second adds twice the passenger's radius), 50
+tries each. A try draws `rand() * 4 / 0x7fff` for the side (0 east `x + r`, 1
+west `x - r`, 2 south `y + r`, 3 north `y - r`; 4, when `rand()` is 32767,
+keeps the last spot) and one more `rand()` for the position along it,
+`value × 2r × (1/32767) - r` (float32). The spot must be on the map, in the
+drop zone (when it is not -1), pass the passenger's `check_placement` (as a
+unit is placed, other units ignored) and be passable for it.
+
+So the Unload command (§7.6), whose target is the boat's own position and
+zone, only drops onto shallows beside the boat (the land zone is not the
+water zone); a drop onto a beach takes a targetless work order on a beach tile
+within 2 tiles of the boat (verified against the 1.0a `Empiresx.exe`, not a
+beta difference).
+
+### 7.6 The Unload command
+
+`do_command_unload` gives each listed object a player AI order UNLOAD (0x2D1)
+at the command's point, range 1, immediate, priority 100. The unit AI runs
+`unload(unconditional, x, y)`: `RGE_Combat_Object::unload` gives a top
+Transport action `work(boat, boat's own position)` and ignores the point;
+without one it replaces every action with a new Transport action that takes
+`work(boat, x, y)`. On success the unit AI's action is 0x26D. The interface
+sends it for the selected units of `unit_level` 7. The port ignores objects of
+another player.
+
+### 7.7 Transport ship unit AI
+
+When hit (`ATTACKED`): a killing hit tells the owner 0x209 and clears the
+notes. Otherwise the alert on the first attacker, a help call for a new one,
+the attacker recorded (as the fishing ship, §5.2). With an order it keeps it
+(returns 2). With no action, or a top action in state 2, it runs from its
+attackers; returns 3. Every other note takes the base path.
+
+## 8. Port status
 
 Ported (`packages/sim`): zone maps (`zone-map.ts`, shared with the random map
 generator's `rmm-map.ts`), `canPath`'s zone pre-check (`unit-ai.ts`), the
