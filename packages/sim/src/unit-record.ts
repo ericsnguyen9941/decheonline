@@ -79,3 +79,22 @@ export interface SimCivRecord {
   /** By unit id: the civ's record fields that differ from `UNIT_RECORDS`. */
   diffs: Record<number, Partial<SimUnitRecord>>;
 }
+
+/** One random map type of the dat (`RGE_Map_Data_Entry`, include/rmm_dbct.h). */
+export interface SimRandomMap {
+  /** `map_edge_buffer`: the land walls' distance from the four map edges. */
+  edges: [number, number, number, number];
+  /** `map_edge_fade`. */
+  fade: number;
+  /** `land_placement_edge`. */
+  placementEdge: number;
+  baseTerrain: number;
+  /** `grown_land_percent`. */
+  landPercent: number;
+  /** `[land_id, terrain, avoidance tiles, base square radius, zone, placement type, x, y, percent, by player, radius, fade, clumpiness]`. */
+  lands: number[][];
+  /** `[percent, terrain, clumps, spacing, base terrain, clumpiness]`. */
+  terrains: number[][];
+  /** `[id, terrain, group flag, scale flag, per group, variance, groups, group area, player, land id, inner radius, outer radius]`. */
+  objects: number[][];
+}

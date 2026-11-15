@@ -30,5 +30,11 @@ const root = join(import.meta.dirname, '..');
 const { RuleSet, renderSimTables } = await import(pathToFileURL(join(root, 'packages', 'data', 'src', 'index.ts')).href);
 const rules = RuleSet.fromFile(readFileSync(join(dir, 'data2', 'empires.dat')));
 const out = join(root, 'packages', 'sim', 'src', 'unit-data.ts');
-writeFileSync(out, renderSimTables(rules, ROOTS));
+// What the random map generator places: every map's object rows, every terrain's objects, the cliffs (264-273,
+// rmm_clif.cpp) and the relics and ruins of TRIBE_World::new_game (159, 158). A type no civ has (364) is skipped.
+const mapIds = rules.dat.randomMaps.maps.flatMap((m) => m.units.map((u) => u.unit));
+const terrainIds = rules.dat.terrainBlock.terrains.flatMap((t) => t.terrainUnitIds.slice(0, t.terrainUnitsUsed));
+const cliffs = [264, 265, 266, 267, 268, 269, 270, 271, 272, 273];
+const placed = [...mapIds, ...terrainIds, ...cliffs, 158, 159].filter((id) => rules.findUnit(0, id) || rules.findUnit(1, id));
+writeFileSync(out, renderSimTables(rules, [...ROOTS, ...placed]));
 console.log(`wrote ${out}`);
