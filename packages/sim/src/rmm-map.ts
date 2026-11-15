@@ -373,9 +373,12 @@ export class RmmMap {
 
   // --- terrain objects ---------------------------------------------------------------------------------------------
 
-  /** True when `type` is in the object list of terrain `terrain` (the original also reads one slot past its end). */
+  /**
+   * True when `type` is in the object list of terrain `terrain`. The original's search starts one slot past the list's
+   * end (src/map.cpp:1666, :1745), and that slot holds 0 in every terrain of the dat, so type 0 always counts as listed.
+   */
   private inTerrainList(terrain: number, type: number): boolean {
-    return (TERRAIN_OBJECTS[terrain]?.[0] ?? []).includes(type);
+    return type === 0 || (TERRAIN_OBJECTS[terrain]?.[0] ?? []).includes(type);
   }
 
   /** The placement loop of `create_terrain_object` / `place_terrain_object` (fill flag 0), src/map.cpp:1679-1724. */
