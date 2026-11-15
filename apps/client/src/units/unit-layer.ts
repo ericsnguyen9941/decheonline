@@ -1021,7 +1021,7 @@ export class UnitLayer {
     const { col, row } = ground.pointAt(x + camera.x, y + camera.y);
     const { width, height } = this.o.world.map;
     if (col < 0 || row < 0 || col >= width || row >= height) return;
-    const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
+    const units = this.orderedUnits();
     if (units.length === 0) return;
     this.flashes.clear();
     this.o.issue({ type: 'move', units, x: col, y: row });
@@ -1206,6 +1206,17 @@ export class UnitLayer {
     return this.topmostAt(x, y, (e) => e.owner === 0 || (e.owner === this.o.player && !isUnit(e)));
   }
 
+  /**
+   * The selected own units an order goes to: `get_selected_objects_to_command` with the default select level 4
+   * (src/player.cpp:1648, 1663-1664), so an own ruin (3) is never ordered while a relic (4) is (victory.md §10.2).
+   */
+  private orderedUnits(): number[] {
+    return this.selectedOwn().filter((id) => {
+      const e = this.o.world.entities.get(id)!;
+      return isUnit(e) && this.selectLevel(e) >= SELECT_BOX;
+    });
+  }
+
   private selectedOwn(): number[] {
     return [...this.selected].filter((id) => this.o.world.entities.get(id)?.owner === this.o.player);
   }
@@ -1219,7 +1230,7 @@ export class UnitLayer {
    * map point (x, y). False when no own unit is selected.
    */
   moveSelectedTo(x: number, y: number): boolean {
-    const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
+    const units = this.orderedUnits();
     if (units.length === 0) return false;
     this.flashes.clear();
     this.o.issue({ type: 'move', units, x, y });
@@ -1231,7 +1242,7 @@ export class UnitLayer {
    * to the map point there.
    */
   private orderAt(x: number, y: number): void {
-    const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
+    const units = this.orderedUnits();
     if (units.length === 0) return;
     const { camera, ground } = this.o.view;
     const { col, row } = ground.pointAt(x + camera.x, y + camera.y);

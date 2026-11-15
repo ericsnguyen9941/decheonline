@@ -9,7 +9,7 @@ const LINES = 8;
 /** `score_interval`. */
 const REFRESH_MS = 3000;
 /** Text colour and second colour by colour table (scr_game.cpp:3398-3438), Windows COLORREFs (0x00BBGGRR). */
-const COLOURS: [number, number][] = [
+export const COLOURS: [number, number][] = [
   [0xff0000, 0xb3b3b3],
   [0x2139c6, 0],
   [0xffff, 0],
@@ -20,7 +20,7 @@ const COLOURS: [number, number][] = [
   [0xadad00, 0],
 ];
 
-const colorref = (c: number) => `rgb(${c & 0xff}, ${(c >> 8) & 0xff}, ${(c >> 16) & 0xff})`;
+export const colorref = (c: number) => `rgb(${c & 0xff}, ${(c >> 8) & 0xff}, ${(c >> 16) & 0xff})`;
 
 /** A line of the score display. */
 export interface ScoreLine {

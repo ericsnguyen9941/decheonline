@@ -3,6 +3,7 @@
  * `RGE_Action_Gather` (action 5) and `TRIBE_Action_Hunt` (action 110). Every float store is rounded to float32.
  * Only human players exist so far: the computer-player branches are not ported.
  */
+import { ACTION_ARTIFACT, artifactMoveTo, artifactWork, startArtifact, updateArtifact } from './artifact';
 import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } from './build';
 import { ACTION_REPAIR, repairMoveTo, repairTaskFor, repairWork, startRepair, updateRepair } from './repair';
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
@@ -210,12 +211,20 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
       repairWork(ctx, e, w, target, x, y);
       return w.type;
     }
+    if (w.type === ACTION_ARTIFACT) {
+      artifactWork(ctx, e, w, target, x, y);
+      return w.type;
+    }
     if (workRetarget(ctx, e, w, target, x, y)) return w.type;
   }
   if (e.attack && !e.work && target && e.attack.target === target.id && attackWork(ctx, e, target)) return ACTION_ATTACK;
   const kind = task === -1 ? -1 : t.action!.tasks[task]!.actionType;
   if (kind === ACTION_REPAIR) {
     startRepair(ctx, e, task, target, x, y);
+    return kind;
+  }
+  if (kind === ACTION_ARTIFACT) {
+    startArtifact(ctx, e, task, target, x, y);
     return kind;
   }
   deleteActions(ctx, e);
@@ -270,6 +279,10 @@ export function workMoveTo(ctx: GameContext, e: Entity, x: number, y: number): b
   }
   if (a.type === ACTION_REPAIR) {
     repairMoveTo(ctx, e, a, x, y);
+    return true;
+  }
+  if (a.type === ACTION_ARTIFACT) {
+    artifactMoveTo(ctx, e, a, x, y);
     return true;
   }
   a.x = f32(x);
@@ -488,6 +501,7 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
   if (!a) return ActionResult.Remove;
   if (a.type === ACTION_BUILD) return updateBuild(ctx, e, a);
   if (a.type === ACTION_REPAIR) return updateRepair(ctx, e, a);
+  if (a.type === ACTION_ARTIFACT) return updateArtifact(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   const live = (id: number) => {
     const o = object(ctx, id);

@@ -197,6 +197,13 @@ export interface MultiplayerOptions {
    * ask for the same N.
    */
   houses?: number;
+  /**
+   * Debug only (`?debug=net&relics=N`, `&ruins=N`): N Gaia relics in a row 2 tiles above player 1's first Villager, N
+   * ruins in a column 3 tiles left of it, counted in the game's relics and ruins, so player 1 takes them and, holding
+   * all, starts the countdown. Placed without a placement check: for the test map. Both clients must ask for the same N.
+   */
+  relics?: number;
+  ruins?: number;
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
   /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
@@ -213,12 +220,15 @@ export interface MultiplayerOptions {
 // Master ids (empires.dat): Villager, Bowman.
 const VILLAGER = 83;
 const BOWMAN = 4;
+/** The relic and the ruin (`Artifact1`, `Artifact_Ruins1`). */
+const RELIC = 159;
+const RUIN = 158;
 
 /** `PLAYER_ATTRIBUTE_CURRENT_AGE`. */
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -314,6 +324,13 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         const tc = [...game.world.entities.ofPlayer(p)].find((e) => e.type === TOWN_CENTER);
         for (let i = 0; tc && i < houses; i++) game.world.createUnit({ owner: p, type: HOUSE, x: Math.floor(tc.x) - 8, y: Math.floor(tc.y) - 6 + 2 * i });
       }
+    }
+    if (debug && (relics || ruins)) {
+      const villager = [...game.world.entities.ofPlayer(1)].find((e) => e.type === VILLAGER)!;
+      for (let i = 0; i < (relics ?? 0); i++) game.world.createUnit({ owner: 0, type: RELIC, x: villager.x + i, y: villager.y - 2 });
+      for (let i = 0; i < (ruins ?? 0); i++) game.world.createUnit({ owner: 0, type: RUIN, x: villager.x - 3, y: villager.y - 1 - 3 * i });
+      game.world.victory.artifactCount += relics ?? 0;
+      game.world.victory.ruinCount += ruins ?? 0;
     }
     setGameVisible(true);
     // The original keeps the game screen and says so there; the dialog is only for a game that has no screen yet.

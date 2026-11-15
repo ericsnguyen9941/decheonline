@@ -61,6 +61,8 @@ async function main(): Promise<void> {
   const resources = params.has('resources') ? Number(params.get('resources')) : undefined;
   const bowmen = Number(params.get('bowmen') ?? 0);
   const houses = Number(params.get('houses') ?? 0);
+  const relics = Number(params.get('relics') ?? 0);
+  const ruins = Number(params.get('ruins') ?? 0);
   await startMultiplayer(lobbyHost, app, {
     debug: params.get('debug') === 'net',
     speed: Number(params.get('speed') ?? 1) || 1,
@@ -68,6 +70,8 @@ async function main(): Promise<void> {
     bowmen: Number.isInteger(bowmen) && bowmen > 0 ? bowmen : undefined,
     market: params.get('market') === '1',
     houses: Number.isInteger(houses) && houses > 0 ? houses : undefined,
+    relics: Number.isInteger(relics) && relics > 0 ? relics : undefined,
+    ruins: Number.isInteger(ruins) && ruins > 0 ? ruins : undefined,
     testMap: params.get('map') === 'test',
     seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
     perturb: params.has('perturb') && Number.isInteger(Number(params.get('perturb'))) ? Number(params.get('perturb')) : undefined,

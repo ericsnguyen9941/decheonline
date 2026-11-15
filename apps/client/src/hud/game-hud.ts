@@ -12,6 +12,7 @@ import { AchievementsScreen } from './achievements';
 import { ChatEntry, STRING_CHAT } from './chat';
 import { DiplomacyDialog, diplomacyNotices, SOUND_TRIBUTE, type DueBatch } from './diplomacy';
 import { easyButton, FONT, GAME_DIALOG_INFO, lookOf } from './easy-panel';
+import { HeldDisplay } from './relics';
 import { ChatLines, formatName, GameOver, MESSAGE_NOT_RESPONDING, SOUND_CHAT, type GameOverSounds } from './game-over';
 import { MenuDialog, okPopup } from './menu';
 import { ScoreDisplay } from './score-display';
@@ -175,6 +176,8 @@ export class GameHud {
   readonly scores: ScoreDisplay;
   /** The end of the game. */
   readonly gameOver: GameOver;
+  /** All relics or all ruins held: the notifications and the countdown clocks. */
+  readonly held: HeldDisplay;
   private readonly scoreButton: HTMLButtonElement;
   private achievements: AchievementsScreen | null = null;
   /** `player_quit`: the player resigned from the menu. */
@@ -232,6 +235,14 @@ export class GameHud {
         o.game.onGameOver();
       },
       reveal: () => o.game.reveal(),
+    });
+    this.held = new HeldDisplay({
+      view: this.view,
+      provider: o.provider,
+      world: o.world,
+      player: o.player,
+      sound: (index) => sounds?.message(index),
+      message: (text) => this.chat.show(text),
     });
     for (let p = 1; p < o.world.players; p++) this.chatGroup.add(p);
     this.chatEntry = new ChatEntry({
@@ -479,6 +490,7 @@ export class GameHud {
   private update(): void {
     const { world, selection, player } = this.o;
     this.gameOver.update();
+    this.held.update();
     this.scores.update();
     this.minimapView?.update();
     this.age.textContent = ageName(this.o.provider, world.attributes[player]![ATTR_CURRENT_AGE]!);

@@ -48,6 +48,9 @@ export const SYNTHETIC = {
     9004: 'You are victorious!', 9005: 'You have been defeated!', 3013: '%s resigned.', 1217: 'Problem communicating with %s...',
     3016: '%s paid %d food in tribute to you.', 3026: '%s changed diplomatic stance with you to Ally.', 9851: 'Diplomacy',
     9856: 'Pay Tribute (cost %d%%)', 9863: 'You need a Market to pay tribute.',
+    3028: 'All Artifacts have been captured. Hold them for 2000 years to win!',
+    3029: 'All Artifacts have been captured. You will lose if they are held for 2000 years!', 3030: 'Control of the Artifacts was lost!',
+    11302: 'Artifacts: %d Years',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */

@@ -353,7 +353,8 @@ The held times start at −1 (`src/tplayer.cpp:206-207`); the game screen's
 timer panel shows a player's `artifact_held_time` / `ruin_held_time` while it
 is not −1 (`src/tpnl_tim.cpp:341-350`). Arming and losing also send
 `GAME_NOTIFY_ARTIFACTS_CAPTURED` / `_LOST` and `GAME_NOTIFY_RUINS_CAPTURED` /
-`_LOST` (`src/tworld.cpp:1013`, `:1031`, `:1054`, `:1072`), Standard only.
+`_LOST` (`src/tworld.cpp:1013`, `:1031`, `:1054`, `:1072`), Standard only;
+what each screen shows and plays is in hud.md "Relics and ruins".
 
 ### 10.1 Who holds a relic or ruin (capture)
 
@@ -361,12 +362,8 @@ Relics (159) and ruins (158) are group 1 (artifact) combat objects; random
 maps make them Gaia's (§3, `add_quick_obj` owner 0). Ownership changes only
 through their unit AI, `TribeArtifactUnitAIModule` (`initUnitAI`,
 `src/t_c_obj.cpp:692-698`: every group-1 master except 99 and the
-discovery). `TRIBE_Action_Artifact` (action 107, `src/tact_art.cpp`) has its
-own tile-scan capture rule (`check_ownership`, `:126-189`: one player with
-active non-artifact, non-flag objects on the tiles under it), but nothing
-starts it by itself: task 107 is not a default task in the dat (`default` 0
-for 158 and 159). Whether a player's order to an owned relic reaches it
-(`work`/`move_to`, `:196-216`) is unverified; it is not ported.
+discovery). `TRIBE_Action_Artifact` (action 107, §10.2) has its own
+tile-scan capture rule, but nothing in 1.0a starts it.
 
 - **When:** on every unit-AI update of the artifact (its owner's AI turn,
   unit-ai.md §1.3) through `processMisc` (`src/aiuaimod.cpp:563`,
@@ -403,6 +400,67 @@ for 158 and 159). Whether a player's order to an owned relic reaches it
   owner gets the sight and the flag 1/2 storages (+1). Then
   `notify(0x20B)` to itself, which the artifact AI ignores
   (`src/taiuaimd.cpp:2093-2111`), and `stopObject`.
+
+### 10.2 Action 107 and a player's orders to a relic
+
+`TRIBE_Action_Artifact` (`src/tact_art.cpp`) is task 0 of the relic (159)
+and the ruin (158) in the dat: action 107, unit −1, group −1, terrain −1,
+combat level 0, not a default task (`is_default` 0 on every task of both).
+Nothing in 1.0a starts it:
+
+- `create_task_action` (`src/tact_lst.cpp:79-82`) builds it only from a
+  task, and the callers find tasks by target: `work2`
+  (`src/act_obj.cpp:147-200`) and `get_command_master` through
+  `get_target_task` (`src/ttsk_lst.cpp:12-140`, then
+  `src/task_lst.cpp`): a task matches by the target's master id, its
+  group, a combat level > 0 or the clicked tile's terrain. Task 0 has none,
+  so it is never picked. The relic's other tasks: 1 (action 3, enter, group
+  20, own or allied) for a transport (`unit_level` 7), and 2 (action 109,
+  which the action list does not know).
+- `set_task` runs the default task (`src/act_obj.cpp:403-407`, none here);
+  `setTaskByTaskID` (`:333-345`) has no caller; `reset_owner`
+  (`src/tact_art.cpp:218-220`) has none either.
+
+So a player's order to an own relic is the plain one. The right click
+(`command_make_do` / `_move` / `_work`, `src/player.cpp:1768-1822`) orders
+the selected objects of select level 4 or more
+(`get_selected_objects_to_command`, `:1648`, −1 meaning 4): the relic is
+4, the ruin 3, so a ruin is never ordered. The relic (speed 1) then walks:
+on the ground `do_command_order` → `do_command` → `work2` with no task →
+`move_to` (`src/act_obj.cpp:104-138`, range 0.4; the relic's command and
+move sounds are both 198); on an object the same walk to it. Only its owner can order it (the commands'
+units are the sender's own). Its unit AI keeps running while it walks, so
+it is taken as §10.1 says wherever it goes. Stop deletes the walk.
+
+The action, as ported (`packages/sim/src/artifact.ts`; tests
+`artifact.test.ts`):
+
+- Start (`first_in_stack`, `:36-49`): an object → state 5, else a point with
+  both coordinates set → 4, else 6.
+- `set_state` (`:51-86`): 4 replaces the sub-action with a walk to the point
+  (range 0, the task's move sprite) and goes to 6; 5 takes the object's
+  current position, forgets the object, and does the same; 10 sets a 3 s
+  timer.
+- `update` (`:88-124`): the walk first, dropped once it ends (completed,
+  removed or failed). State 10 counts the timer down by the step's seconds
+  and goes to 6 once it is no longer above 0
+  (`g_artifact_timer_threshold`). State 6 runs `check_ownership`: a player
+  → the walk is dropped and the object changes owner (§10.1's change of
+  owner, which deletes the action); none → 10. State 100 gives it to Gaia.
+  So the check runs on the first update and every 3 s after, while walking
+  too, for as long as the action lasts.
+- `check_ownership` (`:126-189`): the tiles from `(int)(x − 1 − radius_x)`
+  to `(int)(x + radius_x + 1)` (each axis; the globals
+  `g_artifact_scan_lower_adjustment` 1, `_upper_adjustment` −1), clamped to
+  the map; every active object on them whose group is not 1 (artifact), 11
+  (flag) or 30 counts for its owner. When exactly one player 1 and up has
+  any, and it is not the object's owner, it is the new owner. Unlike the
+  unit AI this reads the map, not visible-unit records, and counts
+  buildings.
+- `move_to` / `work` (`:196-216`) re-aim a running action (states 4 / 5);
+  `stop` (`:191-194`) would go back to 6, but every artifact has a unit AI,
+  whose `stopObject` deletes the actions (`src/com_obj.cpp:103-111`,
+  `:843-847`).
 
 ## 11. Score
 
@@ -655,8 +713,13 @@ Ported, with vectors in `victory.test.ts`:
   including a seeded Standard game won by holding the 5 relics. Client read
   API: an object's `owner`; `World.victory.artifactHeld[p]` /
   `ruinHeld[p]` (−1, or the countdown from 2000), `artifactCount` /
-  `ruinCount`; attributes 7, 14, 54, 55. The capture/lost notifications are
-  not sent: the client derives them from the held times.
+  `ruinCount`; attributes 7, 14, 54, 55. The captured/lost notifications
+  are not sent: the client derives them from the held times
+  (`apps/client/src/hud/relics.ts`, hud.md "Relics and ruins").
+- Action 107 and a player's orders to a relic (§10.2): `artifact.ts`, run
+  from `gather.ts` like the other task actions; the relic walks on a move or
+  work order and the ruin (select level 3) is never ordered (the client's
+  `UnitLayer.orderedUnits`). Vectors in `artifact.test.ts`.
 - Victory types 0 Standard, 1 Conquest, 2 time limit, 3 Score (world option
   `victory`, default Standard). Type 4 is accepted with no condition: conquest
   off, the game never ends (the sim's tests of other rules use it).
