@@ -389,8 +389,8 @@ the obstruction map until it is actually removed (the sim's fuzz test
 checks overlap among live objects only).
 
 Placement visibility (reason 5) is ported for the build command and trained
-units (visibility.md §5). Not ported: slope (3, the map has no tile shapes yet) and per-master tile requirements (1; no type in
-the table has any).
+units (visibility.md §5). The per-master centre and side tile requirements (1; the Dock's water centre and beach
+beside it) are ported, naval.md §3.1. Not ported: slope (3; no type in the table that needs it).
 
 ### 4.7 Farms
 

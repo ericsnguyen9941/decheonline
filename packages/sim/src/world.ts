@@ -301,6 +301,11 @@ export interface Snapshot {
 
 const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17 };
 
+/** `command_flag += 1` (src/act_obj.cpp:107, :135, :143): a player's command reached the unit; a byte. */
+function countCommand(e: Entity): void {
+  e.commandFlag = ((e.commandFlag ?? 0) + 1) & 0xff;
+}
+
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
  * `runStep` at a time), each step following `RGE_Game_World::update` (src/world.cpp:1206) on its multiplayer path.
@@ -461,6 +466,8 @@ export class World {
     this.randomMapSeed = rng.rand();
     const nomad = options.startingAge === AGE_NOMAD;
     mapGenerate2(m, this.randomMapSeed, { type, players: this.players - 1, fixedPositions: true, nomad, allied: () => false });
+    // The game's zone maps are made over the finished terrain.
+    this.pathing.zones.clear();
     rng.rand();
     rng.rand();
     const ctx = this.gameContext();
@@ -943,6 +950,7 @@ export class World {
       if (!workMoveTo(this.gameContext(), e, tx, ty)) {
         e.attack = null;
         orderMove(this.gameContext(), e, tx, ty);
+        countCommand(e);
       }
       setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, -1, tx, ty, 0);
     });
@@ -964,6 +972,7 @@ export class World {
       e.mover.group = ids.filter((_, other) => other !== index);
       e.mover.waitingToMove = true;
       orderWork(ctx, e, target, command.x, command.y);
+      if (target !== e) countCommand(e);
     });
   }
 
@@ -996,6 +1005,7 @@ export class World {
       if (!e?.mover || e.owner !== player || e.state !== ObjectState.Active) continue;
       e.mover.group = [];
       orderWork(ctx, e, building, x, y);
+      countCommand(e);
     }
   }
 

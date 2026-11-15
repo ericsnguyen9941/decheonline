@@ -2,7 +2,7 @@
  * The Priest's actions (docs/spec/support-actions.md §4, §5): `TRIBE_Action_Convert` (action 104) with faith, the roll
  * and martyrdom, and `TRIBE_Action_Heal` (action 105). Both share the gather action's record (`WorkAction`, `range` the
  * convert's `requiredRange`); `gather.ts` routes orders and updates of these types here. The game notifications
- * (`GAME_NOTIFY_CONVERSION_*`) and the work sound are the client's; boats are not in the sim.
+ * (`GAME_NOTIFY_CONVERSION_*`) and the work sound are the client's.
  */
 import { distanceToObject, turnTowards } from './combat';
 import type { GameContext } from './context';

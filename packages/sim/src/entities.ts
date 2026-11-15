@@ -76,6 +76,11 @@ export interface Entity {
    * src/t_c_obj.cpp:269-272), which `typeOf` reads instead of the owner's; the owner's techs do not reach it. A transform drops it.
    */
   ownMaster?: UnitType | null;
+  /**
+   * `command_flag`: a byte counting the player's commands to the unit (`do_command`, `work`, `move_to`,
+   * src/act_obj.cpp:103-145); a repairer that called a boat only calls it again while it is unchanged (naval.md §6.1).
+   */
+  commandFlag?: number;
 }
 
 export type EntityInit = Pick<Entity, 'owner' | 'type' | 'x' | 'y' | 'z' | 'hp'> & Partial<Omit<Entity, 'id'>>;

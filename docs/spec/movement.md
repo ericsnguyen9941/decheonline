@@ -493,6 +493,10 @@ one-level slope of type 8).
   zones differ and this fails (`src/move_obj.cpp:1432-1447`).
 - Movement itself (`findPath`, `doMove`) does not consult zones except for
   the 3-tile extra range (§8.1 step 5).
+- Port: `packages/sim/src/zone-map.ts` (`ZoneMaps` on `PathingSystem`, built
+  on first use per pattern, not hashed: they follow from the map), used by
+  `canPath` (`unit-ai.ts`), the drop-site search (`gather.ts`) and the 3-tile
+  extra range (`movement.ts`); the uses are naval.md §2.2.
 
 ## 11. RNG calls, in order
 

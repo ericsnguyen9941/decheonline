@@ -2,13 +2,13 @@ import { expect, test } from 'vitest';
 import { BARRACKS, BUILDER, checkPlacement, CLUBMAN, GRANARY, HOUSE, master, ObjectState, startingObjects, STORAGE_PIT, TECH_DISABLED, TOOL_AGE, TOWN_CENTER, unitType, VILLAGER, World, type Entity } from '@aoe/sim';
 import { buttonSlot, bySlot, canBuild, commandButtons, constructionProgress, itemsMadeAt, researchStatus, techsAt, trainingStatus, type CommandContext } from './commands';
 
-// Archery Range, Stable, Bowman, Scout.
+// Archery Range, Stable, Bowman, Scout; 45 is the Dock.
 const RANGE = 87;
 const STABLE = 101;
 const BOWMAN = 4;
 const SCOUT = 299;
 // `button_location` of these masters in data2/empires.dat (npm run dat:dump -- unit <id>).
-const BUTTONS: Record<number, number> = { [HOUSE]: 1, [BARRACKS]: 2, [GRANARY]: 3, [STORAGE_PIT]: 4, [TOWN_CENTER]: 14, [VILLAGER]: 1, [CLUBMAN]: 1, [RANGE]: 6, [STABLE]: 7, [BOWMAN]: 1, [SCOUT]: 1 };
+const BUTTONS: Record<number, number> = { [HOUSE]: 1, [BARRACKS]: 2, [GRANARY]: 3, [STORAGE_PIT]: 4, 45: 5, [TOWN_CENTER]: 14, [VILLAGER]: 1, [CLUBMAN]: 1, [RANGE]: 6, [STABLE]: 7, [BOWMAN]: 1, [SCOUT]: 1 };
 // and of the Tool Age (npm run dat:dump -- tech 101).
 const TECH_BUTTONS: Record<number, number> = { [TOOL_AGE]: 6 };
 
@@ -46,15 +46,15 @@ test('a villager gets Build, Repair and Unselect; its build menu the start build
     { kind: 'repair', slot: 1 },
     { kind: 'unselect', slot: 11 },
   ]);
-  // Stone Age start techs enable the House, Barracks, Granary and Storage Pit; the Town Center needs a player with none.
-  expect(itemsMadeAt(world, 1, BUILDER)).toEqual([BARRACKS, GRANARY, HOUSE, STORAGE_PIT]);
+  // Stone Age start techs enable the House, Barracks, Dock (45), Granary and Storage Pit; the Town Center needs a player with none.
+  expect(itemsMadeAt(world, 1, BUILDER)).toEqual([BARRACKS, 45, GRANARY, HOUSE, STORAGE_PIT]);
   const slots = bySlot(commandButtons(context(villager.id, 'build-menu')));
   expect(slots.map((b) => (b && 'unit' in b ? b.unit : b?.kind))).toEqual([
     HOUSE,
     BARRACKS,
     GRANARY,
     STORAGE_PIT,
-    undefined,
+    45,
     undefined,
     undefined,
     undefined,
@@ -111,7 +111,7 @@ test('without the dat button locations the list order fills the grid', () => {
   const { world, context } = game();
   const villager = own(world, VILLAGER);
   const c = { ...context(villager.id, 'build-menu'), buttonOf: () => null };
-  expect(commandButtons(c).map((b) => b.slot)).toEqual([0, 1, 2, 3, 11]);
+  expect(commandButtons(c).map((b) => b.slot)).toEqual([0, 1, 2, 3, 4, 11]);
 });
 
 test('several selected units get Group and Ungroup; one in a group Ungroup alone; mixed levels Build and Cancel', () => {

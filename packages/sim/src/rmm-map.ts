@@ -12,6 +12,9 @@ import { add32, f32, sub32 } from './num';
 import type { CrtRand } from './rng';
 import { TERRAIN_OBJECTS, TERRAIN_IMPASSABLE } from './unit-data';
 import type { UnitType } from './units';
+import { passability, ZoneMap } from './zone-map';
+
+export { ZoneMap };
 
 /** What the generator needs from the world: masters, and creating and removing objects. */
 export interface RmmWorld {
@@ -105,53 +108,6 @@ function cliffTable(): CliffType[] {
 /** `TRIBE_Map::water`: water, shallows and deep water. */
 export function isWater(terrain: number): boolean {
   return terrain === 1 || terrain === 4 || terrain === 22;
-}
-
-/** `RGE_Zone_Map` (src/zone_map.cpp:70-160): 4-connected areas of tiles of one passability, numbered in row order. */
-export class ZoneMap {
-  readonly zones: Uint8Array;
-
-  constructor(m: RmmMap, readonly passable: readonly boolean[]) {
-    const w = m.w;
-    const h = m.h;
-    this.zones = new Uint8Array(w * h).fill(0xff);
-    let counter = 0;
-    const queue: number[] = [];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (this.zones[y * w + x] !== 0xff) continue;
-        if (counter >= 255) counter = 0;
-        const group = this.pass(m.terrain[y * w + x]!);
-        this.zones[y * w + x] = counter;
-        queue.length = 0;
-        queue.push(y * w + x);
-        while (queue.length > 0) {
-          const i = queue.pop()!;
-          const cx = i % w;
-          const cy = (i - cx) / w;
-          const visit = (j: number) => {
-            if (this.zones[j] === 0xff && this.pass(m.terrain[j]!) === group) {
-              this.zones[j] = counter;
-              queue.push(j);
-            }
-          };
-          if (cx > 0) visit(i - 1);
-          if (cy > 0) visit(i - w);
-          if (cx < w - 1) visit(i + 1);
-          if (cy < h - 1) visit(i + w);
-        }
-        counter++;
-      }
-    }
-  }
-
-  private pass(terrain: number): boolean {
-    return this.passable[terrain] ?? false;
-  }
-
-  at(w: number, x: number, y: number): number {
-    return this.zones[y * w + x]!;
-  }
 }
 
 export class RmmMap {
@@ -719,9 +675,9 @@ export class RmmMap {
 
   /** `RGE_Zone_Map_List::get_zone_map` (src/zone_map.cpp:429): reuse a map of the same passability, else make one. */
   zoneMap(terrainTable: readonly number[]): ZoneMap {
-    const passable = Array.from({ length: 32 }, (_, i) => (terrainTable[i] ?? 0) > 0);
+    const passable = passability(terrainTable);
     for (const z of this.zoneMaps) if (z.passable.length === 32 && z.passable.every((p, i) => p === passable[i])) return z;
-    const z = new ZoneMap(this, passable);
+    const z = new ZoneMap(this.w, this.h, this.terrain, passable);
     this.zoneMaps.push(z);
     return z;
   }
@@ -732,7 +688,9 @@ export class RmmMap {
    */
   terrainZoneMap(): ZoneMap {
     const z = new ZoneMap(
-      this,
+      this.w,
+      this.h,
+      this.terrain,
       Array.from({ length: 99 }, (_, i) => i > 0),
     );
     this.zoneMaps.push(z);

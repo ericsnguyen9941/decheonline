@@ -74,7 +74,7 @@ Spec: [movement.md](movement.md).
 | `src/move_obj.cpp` | 47/2/2/0 | `RGE_Moving_Object::findPath` :557 [M] (48 `RGE_Moving_Object` methods) | R2 |
 | `src/pathsys.cpp` | 16/1/2/1 | `PathingSystem::findTilePath` :210 [L], `passable` [L], `checksum` :1172 [M], `decrementObstruction` [N] | R2 |
 | `src/Path.cpp` | 30/0/0/0 | `Path` waypoint container | R2 |
-| `src/zone_map.cpp` | 21/1/0/0 | `RGE_Zone_Map::do_zone_map` :109 [D] (connectivity zones) | R2 |
+| `src/zone_map.cpp` | 21/1/0/0 | `RGE_Zone_Map::do_zone_map` :109 [D] (connectivity zones), `withinRange` :243 | naval.md §2 |
 | `src/act_move.cpp` | 8/1/0/0 | `RGE_Action_Move_To::update` :120 [D] | R2 |
 | `src/m_mo_obj.cpp` | 14/0/0/0 | master (type) data for moving units | R2 |
 
@@ -135,6 +135,20 @@ Spec: [support-actions.md](support-actions.md).
 | `src/tact_trd.cpp` | 11/0/1/0 | `TRIBE_Action_Trade::update` :186 [L] | R3 |
 | `src/t_c_obj.cpp` | 38/0/1/0 | `TRIBE_Combat_Object::convert` :525, `heal` :552, `repair` :579, `trade` :638 (all [M]) | R3 |
 | `src/tact_art.cpp`, `tact_dar.cpp`, `tact_wnd.cpp` | 11/0/0/0, 8/0/0/0, 6/0/0/0 | artifact capture (action 107: [victory.md](victory.md) §10.2), discovery, wonder (action 120: [victory.md](victory.md) §8, `wonder.ts`) | R3 |
+
+## Naval: Dock, boats, fishing, ship AI, boat repair
+
+Spec: [naval.md](naval.md) (zone maps and their uses §2, Dock placement and
+boat spawn §3, war ships §4, fishing and the fishing ship AI §5, boat repair
+§6).
+
+| file | entry points | spec |
+| --- | --- | --- |
+| `src/m_s_obj.cpp` | `RGE_Master_Static_Object::check_placement` :843 (centre and side tile requirements) | naval.md §3.1 |
+| `src/move_obj.cpp` | `RGE_Moving_Object::canPath` :1468, `firstTileAlongLine` :1866 | naval.md §2.2, §6.1 |
+| `src/taiuaimd.cpp` | fishing ship unit AI :1510-1641 | naval.md §5.2 |
+| `src/tact_rep.cpp` | `TRIBE_Action_Repair::meet_target` :354 | naval.md §6.1 |
+| `src/t_c_obj.cpp` | `useSameZoneDropsite` :685, `heal(float)` :982 | naval.md §2.2, §6.2 |
 
 ## Game setup (lobby)
 

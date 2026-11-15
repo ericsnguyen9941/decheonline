@@ -12,8 +12,8 @@ import type { GameContext } from './context';
 import { isAlly, relation, RELATION_ALLY, type DiplomacyContext } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { typeOf, type PlayerMasters } from './masters';
-import { ActionResult, currentSprite, endAction, facetOf, MOVE_RANGE, startMoveTo, updateMover } from './movement';
-import { add32, div32, f32, mul32, sub32 } from './num';
+import { ActionResult, currentSprite, endAction, facetOf, lookupZone, MOVE_RANGE, startMoveTo, updateMover } from './movement';
+import { add32, div32, f32, mul32, sub32, toInt } from './num';
 import { dropResearch } from './research';
 import { newSprite } from './sprites';
 import { AI_ACTION_GATHER, AI_ACTION_HUNT, aiStateForAction, NOTIFY_REQUEST_TASK, notifyObject, setAiState } from './unit-ai';
@@ -60,6 +60,8 @@ export interface WorkAction {
   targetType?: number;
   /** Convert: `requiredRange`, the approach range (1 for a building, else the priest's weapon range). */
   range?: number;
+  /** Repair: `save_target_command_flag`, the boat's command count when the repairer called it (naval.md §6.1). */
+  commandFlag?: number;
 }
 
 /** `g_gather_dropoff_distance_threshold` / `g_hunt_drop_distance_threshold`, compared squared. */
@@ -71,6 +73,11 @@ const ATTR_GOLD_EARNED = 49;
 const TOWN_CENTER = 109;
 const STORAGE_PIT = 103;
 const GRANARY = 68;
+/** `MASTER_OBJECT_DOCK_1`: the fishing boat's drop site in the task pass. */
+const DOCK = 45;
+const GROUP_CIVILIAN = 4;
+const GROUP_TRADE_BOAT = 2;
+const GROUP_FISHING_BOAT = 21;
 
 function taskOf(ctx: PlayerMasters, e: Entity, a: WorkAction): Task {
   return typeOf(ctx, e).action!.tasks[a.task]!;
@@ -112,10 +119,14 @@ function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entit
   if (!target || tasks.length === 0) return -1;
   const tt = typeOf(ctx, target);
   const self = typeOf(ctx, e);
-  if (e.heldType !== -1 && e.heldAmount > 0 && target.state === ObjectState.Active && self.group === 4 && target.owner === e.owner) {
+  const carrier = self.group === GROUP_CIVILIAN || self.group === GROUP_FISHING_BOAT;
+  if (e.heldType !== -1 && e.heldAmount > 0 && target.state === ObjectState.Active && carrier && target.owner === e.owner) {
     let site = -1;
     let alternate = -1;
-    if ([1, 2, 3, 15, 17].includes(e.heldType)) [site, alternate] = [TOWN_CENTER, STORAGE_PIT];
+    if (self.group === GROUP_FISHING_BOAT) {
+      // A fishing boat holding trade goods (9) or fish (17) delivers to a Dock (src/ttsk_lst.cpp:44-46).
+      if (e.heldType === 9 || e.heldType === 17) site = DOCK;
+    } else if ([1, 2, 3, 15, 17].includes(e.heldType)) [site, alternate] = [TOWN_CENTER, STORAGE_PIT];
     else if (e.heldType === 16) [site, alternate] = [TOWN_CENTER, GRANARY];
     if (target.type === site || target.type === alternate) {
       const i = tasks.findIndex((k) => k.resourceIn === e.heldType && (k.actionType === ACTION_GATHER || k.actionType === ACTION_HUNT || k.actionType === 111));
@@ -490,16 +501,21 @@ function keepsWorker(target: Entity): boolean {
 }
 
 /**
- * `find_by_master_ids(drop_site, backup, x, y, 1, active, …)` (src/obj_list.cpp:452) over the owner's object list:
- * the active drop site with the smallest squared centre distance; ties keep the earlier object in the list.
+ * `find_by_master_ids(drop_site, backup, x, y, 1, active, zone_obj)` (src/obj_list.cpp:452) over the owner's object list:
+ * the active drop site with the smallest squared centre distance; ties keep the earlier object in the list. A land
+ * gatherer passes itself as the zone object, so only a drop site whose tile is in its own zone counts; fishing and trade
+ * boats pass none (`useSameZoneDropsite`, src/t_c_obj.cpp:685-690, src/act_gath.cpp:173; naval.md §2.2).
  */
 function findDropSite(ctx: GameContext, e: Entity): Entity | undefined {
-  const [site, backup] = typeOf(ctx, e).action!.dropSites;
+  const t = typeOf(ctx, e);
+  const [site, backup] = t.action!.dropSites;
   if (site === -1) return undefined;
+  const zone = t.group === GROUP_FISHING_BOAT || t.group === GROUP_TRADE_BOAT ? -1 : lookupZone(ctx, e, toInt(e.x), toInt(e.y));
   let best: Entity | undefined;
   let bestDistance = 0;
   for (const o of ctx.objectsOf(e.owner)) {
     if ((o.type !== site && o.type !== backup) || o.state !== ObjectState.Active) continue;
+    if (zone !== -1 && lookupZone(ctx, e, toInt(o.x), toInt(o.y)) !== zone) continue;
     const dx = sub32(o.x, e.x);
     const dy = sub32(o.y, e.y);
     const d = add32(mul32(dx, dx), mul32(dy, dy));

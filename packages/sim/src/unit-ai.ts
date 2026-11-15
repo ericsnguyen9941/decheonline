@@ -110,6 +110,8 @@ const IMPORTANT: Partial<Record<number, readonly number[]>> = {
   [AiClass.Tower]: SOLDIER_GROUPS,
   [AiClass.Building]: SOLDIER_GROUPS,
   [AiClass.Civilian]: [3, 7, 8, 9, 10, 15, 17, 18, 32, 33, 27],
+  // `TribeFishingShipUnitAIModule` (src/taiuaimd.cpp:1510-1524): buildings, the boats, fish (5) and the groups 31, 33.
+  [AiClass.FishingShip]: [3, 22, 20, 2, 21, 5, 31, 33],
   [AiClass.Priest]: [3, 0, 4, 26, 24, 6, 25, 17, 10, 12, 35, 23, 36, 28, 18, 13, 39],
   [AiClass.Hunted]: [0, 4, 26, 24, 6, 25, 17, 10, 12, 35, 23, 36, 28, 18, 13, 39],
   [AiClass.Predator]: [29, 9, 0, 4, 26, 24, 6, 25, 17, 13, 12, 35, 23, 36, 28, 18, 39],
@@ -502,12 +504,21 @@ function inAttackRange(ctx: PlayerMasters, e: Entity, target: Entity): boolean {
 }
 
 /**
- * `canPath(targetID, range)` (src/move_obj.cpp:1468): a tile path search towards the target's tile. The zone pre-check
- * is not ported (zones are not), so a target in another zone costs a full search instead of an early no.
+ * `canPath(targetID, range)` (src/move_obj.cpp:1468): no when the target's tile is in another zone of the unit's zone
+ * map and no tile of the unit's zone lies within `range` of it (`withinRange`, naval.md §2.2); else a tile path search
+ * towards the target's tile.
  */
 function canPath(ctx: GameContext, e: Entity, target: Entity, range: number): boolean {
   if (!e.mover) return false;
-  return ctx.pathing.findTilePath(e, typeOf(ctx, e), toInt(e.x), toInt(e.y), toInt(target.x), toInt(target.y), range, target.id).found;
+  const t = typeOf(ctx, e);
+  const sx = toInt(e.x);
+  const sy = toInt(e.y);
+  const gx = toInt(target.x);
+  const gy = toInt(target.y);
+  const zones = ctx.pathing.zones.of(t);
+  const w = ctx.map.width;
+  if (zones.at(w, gx, gy) !== zones.at(w, sx, sy) && !zones.withinRange(sx, sy, gx, gy, range)) return false;
+  return ctx.pathing.findTilePath(e, t, sx, sy, gx, gy, range, target.id).found;
 }
 
 /** `canAttackUnit`: a priest's is `canConvert`. */
@@ -567,7 +578,7 @@ export function attackObject(ctx: GameContext, e: Entity, targetId: number, unco
  * `RGE_Combat_Object::moveTo(x, y, z, range)` (src/com_obj.cpp:648): the current gather/hunt/build action takes the walk
  * when it can; otherwise a fresh move replaces every action.
  */
-function objectMoveTo(ctx: GameContext, e: Entity, x: number, y: number, z: number, range: number, unconditional: boolean): boolean {
+export function objectMoveTo(ctx: GameContext, e: Entity, x: number, y: number, z: number, range: number, unconditional: boolean): boolean {
   const m = e.mover;
   if (!m) return false;
   const top = m.action && !e.work && !e.attack ? m.action : null;
@@ -956,10 +967,36 @@ function processNotify(ctx: GameContext, e: Entity, note: Note): number {
       return animalNotify(ctx, e, note);
     case AiClass.Lion:
       return lionNotify(ctx, e, note);
+    case AiClass.FishingShip:
+      return fishingShipNotify(ctx, e, note);
     default:
-      // The ship and artifact reactions are not ported yet.
+      // The trade and transport ships (no such units yet) and the artifact reactions are not ported.
       return NOTE_DONE;
   }
+}
+
+/**
+ * `TribeFishingShipUnitAIModule::processNotify` (src/taiuaimd.cpp:1539-1616, naval.md §5.2): when hit, the alert on the
+ * first attacker and a help call for a new one, the attacker recorded; a human player's boat with an order keeps it;
+ * otherwise, unless it is already moving, its order is queued again and it stops, then it runs from its attackers. Every
+ * other note takes the base path.
+ */
+function fishingShipNotify(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  if (note.type !== NOTIFY_ATTACKED) return baseNotify(ctx, e, note);
+  if (note.p2 <= 0) {
+    playerNotify(ctx, e.owner, NOTIFY_KILLED, note.caller);
+    ai.notes = [];
+    return NOTE_DIED;
+  }
+  alertAndAskForHelp(ctx, e, note);
+  if (ai.order !== -1) return NOTE_DONE;
+  if (ai.action !== AI_ACTION_MOVE) {
+    aiOrder(ctx, e, e.id, ai.order, ai.target, -1, ai.targetX, ai.targetY, ai.targetZ, ai.desiredDistance, false, false, ai.priority);
+    stopObject(ctx, e, true);
+  }
+  runAwayFromAttackers(ctx, e);
+  return NOTE_STOP;
 }
 
 /**

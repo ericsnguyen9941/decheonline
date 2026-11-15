@@ -1,6 +1,7 @@
 import type { Command } from './commands';
 import { CIV_RANDOM, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, type GameSettings } from './game-settings';
 import { MAP_HILLY, MAP_MEDIUM } from './rmm-controller';
+import { TileMap } from './map';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, MARKET, SMALL_WALL, TOWN_CENTER, VILLAGER } from './units';
@@ -13,6 +14,8 @@ export interface ReplayLog {
   randomSeed: number;
   /** Objects placed before the first step. */
   units?: StartUnit[];
+  /** A hand-made map (`TileMap` terrain, row by row); default the fixed test map. */
+  terrain?: { width: number; height: number; tiles: number[] };
   /** A random map game: the map and the start objects come from the seed (`units` is not used). */
   randomMap?: RandomMapOptions;
   /** Each player's civ, Gaia's included; default Egyptian. */
@@ -36,6 +39,7 @@ export function runReplay(
     players: log.players,
     randomSeed: log.randomSeed,
     units: log.units,
+    ...(log.terrain ? { map: new TileMap(log.terrain.width, log.terrain.height, log.terrain.tiles) } : {}),
     ...(log.randomMap ? { randomMap: log.randomMap } : {}),
     ...(log.civs ? { civs: log.civs } : {}),
     ...(log.victory ? { victory: log.victory } : {}),
@@ -262,6 +266,115 @@ export function samplePriestReplay(turns = 120, seed = 20261116): ReplayLog {
   }
   // The priests come after the other start objects, so those keep their ids.
   return { ...log, units: [...log.units!, ...PRIESTS], batches, civs: [0, 3, 1], start: { startingAge: AGE_IRON } };
+}
+
+/**
+ * The naval sample's 40×40 map: columns 0-14 grass (player 1's land), 15 beach, 16-27 water (21-22 deep water), 28 beach,
+ * 29-39 grass (player 2's island). Land units of one side cannot reach the other's land.
+ */
+export function navalTerrain(): { width: number; height: number; tiles: number[] } {
+  const tiles: number[] = [];
+  for (let y = 0; y < 40; y++) {
+    for (let x = 0; x < 40; x++) tiles.push(x === 15 || x === 28 ? 2 : x >= 16 && x <= 27 ? (x === 21 || x === 22 ? 22 : 1) : 0);
+  }
+  return { width: 40, height: 40, tiles };
+}
+
+/**
+ * Each side's Dock, Villagers and Fishing Boats at its end of the sea, its war ships facing the other's in the middle,
+ * then Gaia's fish (two off each side's Dock), for `sampleNavalReplay`.
+ */
+const NAVAL: readonly StartUnit[] = [
+  { owner: 1, type: 45, x: 16.5, y: 10.5 },
+  { owner: 1, type: VILLAGER, x: 12.5, y: 9.5 },
+  { owner: 1, type: VILLAGER, x: 12.5, y: 12.5 },
+  { owner: 1, type: 13, x: 18.5, y: 8.5 },
+  { owner: 1, type: 13, x: 18.5, y: 12.5 },
+  { owner: 1, type: 19, x: 17.5, y: 19.5 },
+  { owner: 1, type: 250, x: 17.5, y: 21.5 },
+  { owner: 1, type: 360, x: 18.5, y: 20.5 },
+  { owner: 2, type: 45, x: 27.5, y: 30.5 },
+  { owner: 2, type: VILLAGER, x: 31.5, y: 29.5 },
+  { owner: 2, type: VILLAGER, x: 31.5, y: 32.5 },
+  { owner: 2, type: 13, x: 25.5, y: 28.5 },
+  { owner: 2, type: 13, x: 25.5, y: 32.5 },
+  { owner: 2, type: 19, x: 26.5, y: 20.5 },
+  { owner: 2, type: 250, x: 26.5, y: 18.5 },
+  { owner: 2, type: 360, x: 25.5, y: 19.5 },
+  { owner: 0, type: 53, x: 19.5, y: 4.5 },
+  { owner: 0, type: 53, x: 18.5, y: 13.5 },
+  { owner: 0, type: 53, x: 25.5, y: 27.5 },
+  { owner: 0, type: 53, x: 24.5, y: 36.5 },
+];
+
+/** The boats a Dock order queues and the Dock techs it researches in `sampleNavalReplay`. */
+const NAVAL_QUEUE = [13, 19, 250, 360];
+const NAVAL_TECHS = [4, 5, 7, 9, 25];
+
+/**
+ * A sea game on `navalTerrain` in the Iron Age with Death Match stockpiles, Minoan against Phoenician (both have ship
+ * bonuses): each side's Dock, two Villagers, two Fishing Boats, and a Scout Ship (a War Galley), a Catapult Trireme and a
+ * Fire Galley facing the other side's mid-sea (`NAVAL`). Now and then, from one generator, a side orders: its
+ * Fishing Boats onto a fish, mostly one off its own Dock; its war ships to attack one of the other side's war ships or to move to a point of the sea; its Villagers onto one
+ * of its own boats (a repair when it is damaged); a boat queued at its Dock or a Dock tech; and sometimes the other
+ * side's objects, which is ignored. Fishing, drop-offs, missiles, blasts, ship reactions and boat repair in every engine.
+ */
+export function sampleNavalReplay(turns = 160, seed = 20261119): ReplayLog {
+  const ids = (owner: number, types: number[]) => NAVAL.flatMap((u, i) => (u.owner === owner && types.includes(u.type) ? [i + 1] : []));
+  const fish = ids(0, [53]);
+  const sea = new CrtRand();
+  sea.srand(seed);
+  const batches: ReplayLog['batches'] = [];
+  for (let turn = 0; turn < turns; turn++) {
+    for (const player of [1, 2]) {
+      if (sea.rand() % 4 !== 0) continue;
+      const side = sea.rand() % 8 === 0 ? 3 - player : player;
+      const enemy = 3 - side;
+      const commands: Command[] = [];
+      switch (sea.rand() % 7) {
+        case 0:
+        case 1: {
+          // Mostly one of the two fish off its own Dock.
+          const target = sea.rand() % 4 === 0 ? fish[sea.rand() % fish.length]! : fish[2 * (side - 1) + (sea.rand() % 2)]!;
+          const at = NAVAL[target - 1]!;
+          commands.push({ type: 'work', units: ids(side, [13]), target, x: at.x, y: at.y });
+          break;
+        }
+        case 2: {
+          const boats = ids(enemy, [19, 250, 360]);
+          commands.push({ type: 'attack', units: ids(side, [19, 250, 360]), target: boats[sea.rand() % boats.length]! });
+          break;
+        }
+        case 3:
+          commands.push({ type: 'move', units: ids(side, [19, 250, 360]), x: 17 + (sea.rand() % 1000) / 100, y: 2 + (sea.rand() % 3600) / 100 });
+          break;
+        case 4: {
+          const boats = ids(side, [13, 19, 250, 360]);
+          const target = boats[sea.rand() % boats.length]!;
+          const at = NAVAL[target - 1]!;
+          commands.push({ type: 'work', units: ids(side, [VILLAGER]), target, x: at.x, y: at.y });
+          break;
+        }
+        default: {
+          const dock = ids(side, [45])[0]!;
+          if (sea.rand() % 2 === 0) commands.push({ type: 'queue', building: dock, unit: NAVAL_QUEUE[sea.rand() % NAVAL_QUEUE.length]!, count: 1 });
+          else commands.push({ type: 'research', building: dock, tech: NAVAL_TECHS[sea.rand() % NAVAL_TECHS.length]! });
+        }
+      }
+      batches.push({ turn, player, commands });
+    }
+  }
+  return {
+    players: 3,
+    randomSeed: 4343,
+    terrain: navalTerrain(),
+    units: [...NAVAL],
+    civs: [0, 7, 9],
+    turns,
+    batches,
+    speeds: sampleSpeeds(turns),
+    start: { startingAge: AGE_IRON, deathMatch: true },
+  };
 }
 
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */

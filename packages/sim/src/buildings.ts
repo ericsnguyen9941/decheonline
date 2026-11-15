@@ -86,10 +86,10 @@ function searchBox(ctx: GameContext, col: number, row: number): [number, number,
 
 /**
  * `RGE_Master_Static_Object::check_placement` (`src/m_s_obj.cpp:843`): 0 when `t` fits at (col, row), else the
- * reason: 7 off the map, 2 terrain, 5 not seen, 6 an object in the way. `construction` uses the construction radius;
- * `builtOn` ignores objects that can be built on. With `visibleTo` (`check_vis`, visibility.md §5) one tile under the
- * object must be explored or seen by that player. Slope (3) is not checked: the map has no tile shapes yet, so every
- * tile counts as flat. No type in the sim's table has tile requirements (1).
+ * reason: 7 off the map, 1 tile requirement (the Dock's shore, `tileRequirements`), 2 terrain, 5 not seen, 6 an object
+ * in the way. `construction` uses the construction radius; `builtOn` ignores objects that can be built on. With
+ * `visibleTo` (`check_vis`, visibility.md §5) one tile under the object must be explored or seen by that player. Slope
+ * (3) is not checked yet: every tile counts as flat.
  */
 export function checkPlacement(
   ctx: GameContext,
@@ -107,6 +107,7 @@ export function checkPlacement(
   const minY = sub32(row, ry);
   const maxY = sub32(add32(row, ry), COORDINATE_EPSILON);
   if (!(minX >= 0) || !(maxX < ctx.map.width) || !(minY >= 0) || !(maxY < ctx.map.height)) return 7;
+  if (!tileRequirements(ctx, t, col, row, minX, maxX, minY, maxY)) return 1;
   let seen = false;
   for (let x = Math.trunc(minX); x <= Math.trunc(maxX); x++) {
     for (let y = Math.trunc(minY); y <= Math.trunc(maxY); y++) {
@@ -129,6 +130,41 @@ export function checkPlacement(
     if (!(dx >= add32(ot.radiusX, rx)) && !(dy >= add32(ot.radiusY, ry))) return 6;
   }
   return 0;
+}
+
+/**
+ * The tile requirements of `check_placement` (src/m_s_obj.cpp:880-956, naval.md §3.1): with a centre requirement
+ * (`center_tile_req1/2`, the dat's placement terrain) the centre tile must be one of the two terrains, and the ring below
+ * shrinks to the centre tile; with a side requirement (`tile_req1/2`) some tile of the ring just outside the footprint (its
+ * four sides, the corners not included, off-map sides skipped) must be one of those terrains. The Dock (45) needs water or
+ * shallows at its centre and a beach beside the centre tile.
+ */
+function tileRequirements(ctx: GameContext, t: UnitType, col: number, row: number, minX: number, maxX: number, minY: number, maxY: number): boolean {
+  let x1 = Math.trunc(minX);
+  let x2 = Math.trunc(maxX);
+  let y1 = Math.trunc(minY);
+  let y2 = Math.trunc(maxY);
+  const [c1, c2] = t.placementTerrain;
+  if (c1 >= 0 || c2 >= 0) {
+    const cx = Math.trunc(col);
+    const cy = Math.trunc(row);
+    const center = ctx.map.terrainAt(cx, cy);
+    if (center !== c1 && center !== c2) return false;
+    x1 = x2 = cx;
+    y1 = y2 = cy;
+  }
+  const [r1, r2] = t.placementSideTerrain;
+  if (r1 < 0 && r2 < 0) return true;
+  const { width, height } = ctx.map;
+  const is = (x: number, y: number) => {
+    const terrain = ctx.map.terrainAt(x, y);
+    return terrain === r1 || terrain === r2;
+  };
+  for (let x = x1; y1 - 1 >= 0 && x <= x2; x++) if (is(x, y1 - 1)) return true;
+  for (let y = y1; x2 + 1 < width && y <= y2; y++) if (is(x2 + 1, y)) return true;
+  for (let x = x2; y2 + 1 < height && x >= x1; x--) if (is(x, y2 + 1)) return true;
+  for (let y = y2; x1 - 1 >= 0 && y >= y1; y--) if (is(x1 - 1, y)) return true;
+  return false;
 }
 
 /**

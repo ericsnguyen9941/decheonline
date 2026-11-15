@@ -9,6 +9,7 @@ import type { Hasher } from './hash';
 import type { TileMap } from './map';
 import { add32, f32, mul32, sub32, toInt } from './num';
 import type { UnitType } from './units';
+import { ZoneMaps } from './zone-map';
 
 /** Obstruction cells per tile along each axis (movement.md §3). */
 export const CELLS_PER_TILE = 4;
@@ -152,6 +153,8 @@ export class PathingSystem {
   readonly cellsY: number;
   /** Budget per search (`numberPathingIterations`). */
   iterations = DEFAULT_PATHING_ITERATIONS;
+  /** The map's zone maps (`map_zones`), one per passability pattern; derived from the terrain, not hashed. */
+  readonly zones: ZoneMaps;
 
   private readonly cost: Int32Array;
   private readonly facet: Uint8Array;
@@ -173,6 +176,7 @@ export class PathingSystem {
     this.cost = new Int32Array(tiles);
     this.facet = new Uint8Array(tiles);
     this.visited = new Uint32Array(tiles);
+    this.zones = new ZoneMaps(map);
   }
 
   obstruction(cx: number, cy: number): number {

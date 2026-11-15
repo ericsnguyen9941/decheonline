@@ -1,8 +1,8 @@
 /**
  * `TRIBE_Action_Repair` (action 106, docs/spec/support-actions.md §6): walk to an own building, face it, heal it each
  * step, paying half its build cost over a full bar. It shares the gather action's record (`WorkAction`); `gather.ts`
- * routes orders and updates of type 106 here. Boats are not in the sim, so the boat rendezvous (`meet_target`, the
- * state 10 boat order) is not ported.
+ * routes orders and updates of type 106 here. A boat (own or a mutual ally's) is repaired too: the boat is called to the
+ * shore (`meet_target`, the state 10 boat order; naval.md §6) and pays for its repair as a building does.
  */
 import { payObjCost } from './buildings';
 import { distanceToObject, turnTowards } from './combat';
@@ -11,10 +11,10 @@ import { isAlly, type DiplomacyContext } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, getTask, transform, type WorkAction } from './gather';
 import { master, typeOf, type PlayerMasters } from './masters';
-import { ActionResult, endAction, startMoveTo, updateMover } from './movement';
-import { add32, div32, f32, mul32, sub32 } from './num';
+import { ActionResult, endAction, firstTileAlongLine, startMoveTo, updateMover } from './movement';
+import { add32, div32, f32, mul32, sub32, toInt } from './num';
 import { newSprite } from './sprites';
-import { AI_ACTION_REPAIR, AI_ORDER_REPAIR, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_TARGET_INVALID, notifyObject, setAiState } from './unit-ai';
+import { AI_ACTION_REPAIR, AI_ORDER_REPAIR, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_TARGET_INVALID, notifyObject, objectMoveTo, setAiState } from './unit-ai';
 import type { Task, UnitType } from './units';
 
 export const ACTION_REPAIR = 106;
@@ -40,6 +40,15 @@ const REPAIR_WAIT = f32(1);
 const MASTER_TYPE_BUILDING = 80;
 /** `MASTER_OBJECT_FARM`: never repaired by a right click (src/ttsk_lst.cpp:85). */
 const FARM = 50;
+/** Trade, transport, fishing and war boats (`OBJECT_GROUP_*_BOAT`). */
+export const BOAT_GROUPS = [2, 20, 21, 22];
+/** `TERRAIN_BEACH`: the repairer calls a boat to the first beach tile towards it (src/tact_rep.cpp:384). */
+const TERRAIN_BEACH = 2;
+
+/** A boat: the groups the repair, heal and conversion code single out. */
+export function isBoat(t: UnitType): boolean {
+  return BOAT_GROUPS.includes(t.group);
+}
 
 function taskOf(ctx: PlayerMasters, e: Entity, a: WorkAction): Task {
   return typeOf(ctx, e).action!.tasks[a.task]!;
@@ -50,16 +59,56 @@ function object(ctx: GameContext, id: number): Entity | undefined {
 }
 
 /**
- * The repair pass of `TRIBE_Task_List::get_target_task` (src/ttsk_lst.cpp:82-92): an own building short of hit points,
- * not dying and not a Farm, takes the first repair task of class -1 or 0, and nothing else; null when the pass does not
- * apply. Its own or a building of a player its owner calls an ally (`isAlly`, src/ttsk_lst.cpp:82). The boat pass after it
- * has no target here.
+ * The repair passes of `TRIBE_Task_List::get_target_task` (src/ttsk_lst.cpp:82-107): a building of its owner or of a
+ * player its owner calls an ally (`isAlly`, src/ttsk_lst.cpp:82), short of hit points, not dying and not a Farm, takes the
+ * first repair task of class -1 or 0, and nothing else; then a boat of its owner or of a mutual ally, short of hit points
+ * and not dying, takes the first repair task of the boat's class, and nothing else. Null when neither pass applies.
  */
 export function repairTaskFor(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entity, target: Entity): number | null {
-  if (!isAlly(ctx, e.owner, target.owner)) return null;
+  const tasks = t.action?.tasks ?? [];
   const tt = typeOf(ctx, target);
-  if (tt.masterType !== MASTER_TYPE_BUILDING || !(target.hp < f32(tt.hitPoints)) || target.state >= ObjectState.Dying || tt.id === FARM) return null;
-  return (t.action?.tasks ?? []).findIndex((k) => k.actionType === ACTION_REPAIR && (k.group === -1 || k.group === 0));
+  if (isAlly(ctx, e.owner, target.owner)) {
+    if (tt.masterType === MASTER_TYPE_BUILDING && target.hp < f32(tt.hitPoints) && target.state < ObjectState.Dying && tt.id !== FARM) {
+      return tasks.findIndex((k) => k.actionType === ACTION_REPAIR && (k.group === -1 || k.group === 0));
+    }
+  }
+  if (target.owner === e.owner || (isAlly(ctx, e.owner, target.owner) && isAlly(ctx, target.owner, e.owner))) {
+    if (isBoat(tt) && target.hp < f32(tt.hitPoints) && target.state < ObjectState.Dying) {
+      return tasks.findIndex((k) => k.actionType === ACTION_REPAIR && k.group === tt.group);
+    }
+  }
+  return null;
+}
+
+/** The top action's target and state (`get_target_obj`, `actionState`, src/act_obj.cpp:443, :485); state 0 without one. */
+function topAction(e: Entity): { target: number; state: number; x: number; y: number } {
+  const a = e.work ?? e.attack ?? e.mover?.action ?? null;
+  return a ? { target: a.target, state: a.state, x: a.x, y: a.y } : { target: -1, state: 0, x: 0, y: 0 };
+}
+
+/**
+ * `TRIBE_Action_Repair::meet_target` (src/tact_rep.cpp:354-391, naval.md §6.1): for a boat, when another of the owner's
+ * Repair_Men works on it, take that rendezvous (the boat's move point while its action is in state 11, else where it is);
+ * otherwise call the boat (`moveTo(x, y, z, 0, 1)`) to the first beach tile the repairer can stand on along the line
+ * from the repairer's tile to the boat's, and remember the boat's command count.
+ */
+function meetTarget(ctx: GameContext, e: Entity, a: WorkAction, target: Entity): void {
+  if (!isBoat(typeOf(ctx, target))) return;
+  for (const o of ctx.objectsOf(e.owner)) {
+    if (o === e || o.type !== REPAIR_MAN) continue;
+    const top = topAction(o);
+    if (top.target !== target.id || top.state === REPAIR_IDLE) continue;
+    const boat = topAction(target);
+    a.x = boat.state === 11 ? boat.x : target.x;
+    a.y = boat.state === 11 ? boat.y : target.y;
+    return;
+  }
+  const tile = firstTileAlongLine(ctx, e, toInt(e.x), toInt(e.y), toInt(target.x), toInt(target.y), TERRAIN_BEACH, TERRAIN_BEACH);
+  if (!tile) return;
+  a.x = f32(tile[0] + 0.5);
+  a.y = f32(tile[1] + 0.5);
+  objectMoveTo(ctx, target, a.x, a.y, target.z, 0, true);
+  a.commandFlag = target.commandFlag ?? 0;
 }
 
 /** A new repair action on `target` (`TRIBE_Action_Repair(obj, task, target)` then `first_in_stack(1)`), the only one. */
@@ -72,6 +121,7 @@ export function startRepair(ctx: GameContext, e: Entity, task: number, target: E
     a.z = target.z;
   }
   e.work = a;
+  if (target) meetTarget(ctx, e, a, target);
   setState(ctx, e, a, target ? REPAIR_TO_TARGET : REPAIR_WAITING);
 }
 
@@ -99,10 +149,15 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
       startMoveTo(e, target ?? null, a.x, a.y, a.z, t.combat?.range ?? 0, task.moving, true, ctx);
       return;
     }
-    case REPAIR_OUT_OF_REACH:
+    case REPAIR_OUT_OF_REACH: {
       newSprite(ctx, e, t.standing);
       a.timer = REPAIR_WAIT;
+      // A boat not given another command since `meet_target` is called to the repairer (src/tact_rep.cpp:122-133).
+      const target = object(ctx, a.target);
+      if (!target || !isBoat(typeOf(ctx, target)) || (target.commandFlag ?? 0) !== (a.commandFlag ?? 0)) return;
+      objectMoveTo(ctx, target, e.x, e.y, e.z, 0, true);
       return;
+    }
     case REPAIR_TURNING: {
       const target = object(ctx, a.target);
       if (target) {
@@ -136,6 +191,7 @@ export function repairWork(ctx: GameContext, e: Entity, a: WorkAction, target: E
     a.x = target.x;
     a.y = target.y;
     a.z = target.z;
+    meetTarget(ctx, e, a, target);
     setState(ctx, e, a, REPAIR_TO_TARGET);
     return;
   }
@@ -252,19 +308,21 @@ export const HEAL_FULL = 1;
 export const HEAL_UNPAID = 2;
 
 /**
- * `TRIBE_Building_Object::heal` (src/t_b_obj.cpp:215, support-actions.md §6.3): a building scales the amount by hit
- * points over build points, clamps it to the missing hit points and pays `healing / (2 * hp)` of its cost; then
- * `RGE_Static_Object::heal` (src/stat_obj.cpp:2224) adds it. Other objects (no boats in the sim) heal for free. The
+ * `TRIBE_Building_Object::heal` (src/t_b_obj.cpp:215) and `TRIBE_Combat_Object::heal` (src/t_c_obj.cpp:982-999;
+ * support-actions.md §6.3): a building or a boat scales the amount by hit points over build points (its train time),
+ * clamps it to the missing hit points and pays `healing / (2 * hp)` of its cost (a boat ignoring the population
+ * headroom row); then `RGE_Static_Object::heal` (src/stat_obj.cpp:2224) adds it. Other objects heal for free. The
  * priest's heal (`priest.ts`) calls it too.
  */
 export function heal(ctx: GameContext, target: Entity, amount: number): number {
   const t = typeOf(ctx, target);
   let healing = amount;
-  if (t.masterType === MASTER_TYPE_BUILDING) {
+  const building = t.masterType === MASTER_TYPE_BUILDING;
+  if (building || isBoat(t)) {
     const maxHp = f32(t.hitPoints);
     healing = div32(mul32(healing, maxHp), f32(t.creatable!.trainTime));
     if (add32(healing, target.hp) > maxHp) healing = sub32(maxHp, target.hp);
-    if (!payObjCost(ctx, target.owner, t.id, div32(healing, f32(t.hitPoints * 2)), false)) return HEAL_UNPAID;
+    if (!payObjCost(ctx, target.owner, t.id, div32(healing, f32(t.hitPoints * 2)), !building)) return HEAL_UNPAID;
   }
   target.hp = add32(healing, target.hp);
   if (healing < 0 && target.hp < 1) target.hp = f32(1);

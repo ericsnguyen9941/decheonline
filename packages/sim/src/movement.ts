@@ -23,6 +23,8 @@ const ANGLE_TOLERANCE = 0.1;
 const WAIT_STEP = f32(0.1);
 const HALF = f32(0.5);
 const SNAP_CLOSE = f32(0.25);
+/** `g_move_waypoint_distance_threshold` (src/game_globals.cpp:259). */
+const WAYPOINT_DISTANCE_THRESHOLD = f32(4);
 const RANGE_SLACK = f32(-0.3);
 const CLIMB = f32(0.9);
 const DESCEND = f32(1.03);
@@ -149,6 +151,46 @@ export interface MoveContext extends PlayerMasters, VisibilityContext {
   deltaSeconds: number;
   /** Path searches the owner has started this step (reset per player update). */
   attempts: number;
+}
+
+/**
+ * `RGE_Static_Object::lookupZone(x, y)` (src/stat_obj.cpp:2994): the zone of tile (x, y) in the zone map of the object's
+ * terrain restriction; 0 for a negative tile.
+ */
+export function lookupZone(ctx: Pick<MoveContext, 'pathing' | 'masters'>, e: Entity, x: number, y: number): number {
+  if (x < 0 || y < 0) return 0;
+  return ctx.pathing.zones.of(typeOf(ctx, e)).at(ctx.pathing.map.width, x, y);
+}
+
+/**
+ * `RGE_Moving_Object::firstTileAlongLine(s, d, r, t1, t2, 1)` (src/move_obj.cpp:1866): in twice as many half steps as
+ * the longer axis has tiles, from tile s towards tile d, the first new tile of terrain t1 or t2 the object could stand on
+ * (at the stepped point); null when there is none or s is d.
+ */
+export function firstTileAlongLine(ctx: MoveContext, e: Entity, sx: number, sy: number, dx: number, dy: number, t1: number, t2: number): [number, number] | null {
+  const xDistance = f32(dx - sx);
+  const yDistance = f32(dy - sy);
+  if (xDistance === 0 && yDistance === 0) return null;
+  const numSteps = Math.abs(yDistance) > Math.abs(xDistance) ? Math.abs(toInt(yDistance)) * 2 : Math.abs(toInt(xDistance)) * 2;
+  const xStep = div32(xDistance, numSteps);
+  const yStep = div32(yDistance, numSteps);
+  const t = typeOf(ctx, e);
+  let xTile = f32(sx);
+  let yTile = f32(sy);
+  let lastX = -999;
+  let lastY = -999;
+  for (let i = 0; i < numSteps; i++) {
+    xTile = add32(xTile, xStep);
+    yTile = add32(yTile, yStep);
+    const tx = toInt(xTile);
+    const ty = toInt(yTile);
+    if (tx === lastX && ty === lastY) continue;
+    lastX = tx;
+    lastY = ty;
+    const terrain = ctx.map.terrainAt(tx, ty);
+    if ((terrain === t1 || terrain === t2) && ctx.pathing.passable(e, t, xTile, yTile)) return [tx, ty];
+  }
+  return null;
 }
 
 /** Wrap into [0, 2pi] and, unless `facets` is -1, snap to the facet grid (`boundAngle`, movement.md §9). */
@@ -569,8 +611,12 @@ function doMove(ctx: MoveContext, e: Entity, t: UnitType, m: Mover): number {
     more = nextWaypoint(m);
     m.closestDistanceToWaypoint = FAR;
   }
-  // The 3-tile extra range needs two user waypoints in one zone; zones are not ported and no order gives two yet.
-  const extra = 0;
+  // Two user waypoints in one zone add 3 tiles to the arrival range (src/move_obj.cpp:763-770).
+  let extra = 0;
+  if (m.userWaypoints.length > 1 && distanceToGoal > WAYPOINT_DISTANCE_THRESHOLD) {
+    const [first, second] = m.userWaypoints;
+    if (lookupZone(ctx, e, toInt(first!.x), toInt(first!.y)) === lookupZone(ctx, e, toInt(second!.x), toInt(second!.y))) extra = 3;
+  }
   if (!more) {
     if (distanceToGoal <= add32(add32(extra, radiusDistance), m.actionRange)) {
       m.speed = 0;

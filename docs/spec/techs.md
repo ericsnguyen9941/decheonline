@@ -714,8 +714,16 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
   37 copies 329 into 34 and 205 into 204), and the Temple's Priest 125
   (Dead_Priest 222 with it; the Temple techs 18-24, 119, 120 and the civ
   effects that touch 125 or attributes 27, 28, 35, 56, 57 now act;
-  support-actions.md §4.7). Not in the table yet: boats and the Dock.
-  Blast and melee splash
+  support-actions.md §4.7), and the Dock 45 (Dock_2 133, Dock_Destruction
+  238) with its boats: Fishing Boat 13 / Fishing Ship 14 (tech 4), Scout
+  Ship 19 with War Galley 20 (5) and Trireme 21 (7) copied into it,
+  Catapult Trireme 250 (9) with Juggernaught 277 (25) copied into it, Fire
+  Galley 360 (118) and the boat stone 368, so the Dock techs 3-9, 25, 118 and
+  the civ ship bonuses act (naval.md §3.3; Merchant Ship 6 and Heavy
+  Transport 8 copy into the trade and transport boats, not in the table,
+  and do nothing). Not in the table yet: the Transport 17/18 and the Trade
+  Boat 15/16. Blast and melee splash
   (combat.md §4.3-§4.4) are ported. Tests: `land-units.test.ts` (training,
   the upgrade techs), `siege.test.ts` (Alchemy, Engineering, Ballistics),
-  `priests.test.ts` (the Temple techs).
+  `priests.test.ts` (the Temple techs), `naval.test.ts` (the Dock techs,
+  the civ ship bonuses).

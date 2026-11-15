@@ -106,8 +106,8 @@ Port-side guards: a missing target is skipped (the original would crash);
 units not of the Repair_Man's group are skipped. Attribute 30 (the Town
 Center's cost row, support-actions.md §6.3) is 500 from `new_game`
 (`world.ts` `NEW_GAME_ATTRIBUTES`), so it never blocks a repair.
-Boat targets (`meet_target`, the state 10 boat order) are not ported: the
-sim has no boats.
+Boat targets (`meet_target`, the state 10 boat order, the paid boat heal)
+are ported: naval.md §6.
 
 ## 5. Attack Ground
 
@@ -185,4 +185,4 @@ original. The client's button, cursor and click mode are not ported yet
 
 | command | original | why |
 | --- | --- | --- |
-| Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | no boats in the sim |
+| Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | no transport boats in the sim |

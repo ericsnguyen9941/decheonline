@@ -310,15 +310,16 @@ e2e.
 - No `rand()` call anywhere in the heal path.
 - Port status: ported in `packages/sim/src/priest.ts` (`updateHeal`, the
   free `heal` of `repair.ts`); the paid boat and building heals are not
-  reached (a priest's heal task never takes a building, boats are not in
-  the sim). Tests: `priests.test.ts` "§5" (Example C, a walking target,
+  reached from a priest (its heal task never takes a building or a boat;
+  the boat start above sets no state). They are the repairer's, §6.3. Tests: `priests.test.ts` "§5" (Example C, a walking target,
   buildings and enemies).
 
 ## 6. Repair (`src/tact_rep.cpp`, `update` is N)
 
 Port status: ported in `packages/sim/src/repair.ts` (the command and its
-other ways in: commands.md §4), boats excepted. Convert and heal: §4.7,
-§5. Trade is not ported (no boats in the sim).
+other ways in: commands.md §4), boats included (`meet_target`, the state 10
+boat order, the paid boat heal: naval.md §6). Convert and heal: §4.7,
+§5. Trade is not ported (no trade boats in the sim).
 
 ### 6.1 Start
 
