@@ -17,7 +17,7 @@ const FOGGED = 0x80;
 
 async function open(browser: Browser): Promise<Page> {
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
-  await page.goto('/?debug=net&speed=5&bowmen=1');
+  await page.goto('/?debug=net&map=test&speed=5&bowmen=1');
   return page;
 }
 

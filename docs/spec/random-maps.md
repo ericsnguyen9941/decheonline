@@ -242,8 +242,11 @@ version first). Then the cliff decision (§4.5).
    odd lands zone 1 or own index; then `add_shallows_module` (one logged
    draw, `:443`). Else, AllLand (4): all zones 0 and **base terrain 0**
    (no water at all); else type ≥ 5: all zones 0 (`:166-196`).
-9. Continental / Isthmas: closed walls move to `edge` from the border
-   (edge 20; width < 100: 15 if ≥ 80 else 10), and every land's size
+9. Continental / Isthmas: on a map under 100 tiles the closed walls move
+   to `edge` from the border (15 if the width is ≥ 80, else 10); a wider map
+   keeps its walls and only uses edge 20 for the size below
+   (`src/rmm_tdbc.cpp:196-216`: the wall moves sit inside `if (width < 100)`).
+   Every land's size
    becomes `trunc((W−2·edge)(H−2·edge) × 0.8) / land_num`
    (`src/rmm_tdbc.cpp:194-224`, factor `g_rmm_terrain_land_area_factor`,
    `src/game_globals.cpp:296`).
@@ -869,3 +872,66 @@ TRIBE brushes. Input: `CliffsInfo` (the §4.5 numbers, hot spots). Tests:
 `rmm-cliffs.test.ts` (direction wrap, pieces from the cliff table at cell
 centres on cliff terrain, determinism, spacing from water and hot spots).
 All cliff functions are M; nothing unverified beyond the shared operations.
+
+### 12.8 Controller (`packages/sim/src/rmm-controller.ts`)
+
+Ported: `TRIBE`/`RGE init` (`RmmController.init`: `add_land_module` with
+`calc_land_start` and the team re-ordering, walls, zones and the shallows
+decision; `add_terrain_module` with hot spots, clump scaling and the forest
+variant; `add_object_module` with land points, nomad rows, the lake, islands
+and the TRIBE exclusion zones; `add_elevation_module` with the random scale;
+the cliffs decision), `generate` (land, shallows, elevation, cliffs, terrain,
+objects with terrain objects; a logged draw before the first module and after
+each; terrain 16 → 0) and `map_generate2` (`mapGenerate2`: `srand(seed)` twice,
+init, `srand(seed)`, generate, one logged draw). Tests:
+`rmm-controller.test.ts` (§9.2 tables and the 22 init draws, the §9.1 map
+seed through the World, all nine map types on a Tiny map).
+
+Checked against the decomp:
+
+- The modules made in `init` (shallows, cliffs) copy their info then; the four
+  made in `generate` copy theirs after all of `init`. So the shallows module
+  sees the land centres before a lake shifts them, and the elevation hot spots
+  (computed after the object module) index the shifted lands on a lake map.
+- The object module's land points are built before the lake and islands; the
+  islands add their own points (ids from the land count, player 0).
+- AllLand (4) gets base terrain 0 only on the "no shallows" branch: a draw
+  `< 0x3FFF` makes shallows and keeps the dat's base terrain.
+- Floats: `terrain_size` keeps the x87 product (7371 for §9.4's 7372 × 100 %,
+  §10); the elevation scale is computed in double and rounded to float once
+  (stored in a `float`), then `trunc(size × scale)`. Both are **unverified**
+  against the retail exe; §9.2's sizes (906, 724, 543, 361) come out either way.
+- `place_cluster` can place nothing when its snapped start position overlaps an
+  object (the land row's start test used the unsnapped one): a start may lack
+  its near stone or gold pile while the far one is there (seed 79190, player 1,
+  Large Mostly Land). Kept: it is the decomp's logic.
+
+### 12.9 World option (`World({ randomMap })`, `packages/sim/src/world.ts`)
+
+`randomMap: { type, size }` (default `DEFAULT_RANDOM_MAP`: Large 144, Mostly
+Land, the multiplayer screen's defaults, `src/scr_mps.cpp:436-450`, with
+positions fixed and the Default age) runs `new_game` for a random game from the
+game seed: the players' `fog_update` draws (before the seed, the project's
+decision, visibility.md §6), `srand(seed)`, draws after the seed, `new_map`,
+Gaia and the players (`src/world.cpp:995-1009`), one before the map (`:1153`),
+the map seed (`map_generate2` with seed −1, so the 6th draw: §9.1 holds),
+the map on a `new_map` grid (terrain 0, height 1), two draws (`:1160`, `:1163`),
+three rounds of every player's update with a zero delta (objects, conditions,
+the AI fence), one draw (`:1182`), then the world's `random_seed` (`:1083`).
+`random_start` draws nothing (every player has objects; its fallback Town
+Center for an empty player is not ported). Then `TRIBE_World::new_game`:
+relics and ruins (`placeRelicsAndRuins`, drawing after the seed was kept, so
+they change the objects but not `random_seed`), the civ effects and the
+new-game attributes. Objects are made through `World.createObject` (its draws:
+setup, sprite, facing, unit AI). The special victories' wanted artifacts,
+discoveries and ruins are 0 (those victories are not ported). Not covered:
+alliances (none in a 2-player room), randomized positions, Nomad, the
+resource levels.
+
+The client builds every game this way (`apps/client/src/lockstep/lockstep.ts`);
+`?debug=net&map=test` keeps the fixed test map (`createTestMap`,
+`startingObjects`) for the e2e that need fixed layouts. The camera starts on
+the player's Town Center (`random_start`'s view). Tests:
+`random-game.test.ts` (seeds, sameness, start ranges, a replay and its
+snapshot), the `sampleRandomMapReplay` in the determinism e2e, and
+`e2e/tests/random-map.spec.ts`.

@@ -1,4 +1,4 @@
-import { COMMAND_DELAY_TURNS, SINGLE_STEP_TURNS, startingObjects, World, type Command } from '@aoe/sim';
+import { COMMAND_DELAY_TURNS, DEFAULT_RANDOM_MAP, SINGLE_STEP_TURNS, startingObjects, World, type Command } from '@aoe/sim';
 import type { ClientMessage, EndReason, SpeedChange, TurnBatch } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
@@ -9,6 +9,11 @@ export interface LockstepStart {
   playerCount: number;
   /** Room, slot and token to take the slot back with after a broken socket; without it a broken link ends the game. */
   rejoin?: { code: string; slot: number; token: string };
+  /**
+   * Debug only (`?debug=net&map=test`): the fixed test map and its start objects instead of the random map the seed
+   * makes. Both clients must ask for it.
+   */
+  testMap?: boolean;
 }
 
 /** How the game ended for this client: the server's reason, or `lost` when the link broke for good (`rejoin` refused). */
@@ -101,7 +106,11 @@ export class Lockstep {
     this.frameMs = frameMs;
     this.paceScale = 1 / speed;
     const players = start.playerCount + 1;
-    this.world = new World({ players, randomSeed: start.seed, units: startingObjects(players) });
+    // A random map game at the original's multiplayer defaults (Large, Mostly Land): both peers build the same map and
+    // start objects from the shared seed (docs/spec/random-maps.md).
+    this.world = start.testMap
+      ? new World({ players, randomSeed: start.seed, units: startingObjects(players) })
+      : new World({ players, randomSeed: start.seed, randomMap: DEFAULT_RANDOM_MAP });
     this.unsubscribe = link.onMessage((m) => {
       if (this.stopped) return;
       if (m.t === 'turn') {

@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster; resources=2000 starts every player with 2000 of each resource (both
 // clients ask for it, so their games stay the same), enough for two buildings, the Tool Age and an Archery Range.
-const URL = '/?debug=net&speed=20&resources=2000';
+const URL = '/?debug=net&map=test&speed=20&resources=2000';
 
 // Master ids (empires.dat): Villager, Builder, Town Center, Barracks, Granary, Archery Range, Bowman; tech 101 the Tool Age.
 const VILLAGER = 83;

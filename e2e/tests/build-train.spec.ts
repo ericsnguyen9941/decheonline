@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster, so building a House and training a Villager take seconds.
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 
 // Master ids (empires.dat): Villager, the Builder it turns into while building, House, Town Center.
 const VILLAGER = 83;

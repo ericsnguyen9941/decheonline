@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, type Command, type GameResult, type Score, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { SoundPlayer } from './audio/sound-player';
@@ -172,6 +172,8 @@ export interface MultiplayerOptions {
    * attack (and its flare) without building an Archery Range first. Both clients must ask for the same N.
    */
   bowmen?: number;
+  /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
+  testMap?: boolean;
   /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
   setGameVisible(visible: boolean): void;
 }
@@ -184,7 +186,7 @@ const BOWMAN = 4;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, testMap, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -233,7 +235,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       link,
       speed,
       // A broken socket comes back to the same room and slot (docs/spec/turn-timing.md §9).
-      start: { seed: start.seed, commandDelay: start.commandDelay, playerCount: start.players.length, rejoin: { code: session.state.code, slot: you, token: start.token } },
+      start: { seed: start.seed, commandDelay: start.commandDelay, playerCount: start.players.length, rejoin: { code: session.state.code, slot: you, token: start.token }, testMap: debug && testMap },
       frameMs: () => frames.average(),
     });
     // Player names by player number (slot + 1), as the score and the achievements show them.
@@ -321,10 +323,11 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
           reveal: () => layer.revealMap(),
         },
       });
-      // Start looking at this player's town centre spot.
-      const own = units.ownUnits()[0];
-      if (own) {
-        const p = tileCoordsToPixel(own.x, own.y, game.world.map.width);
+      // Start looking at this player's Town Center, else its newest object (`TRIBE_Player::random_start`'s view).
+      const own = [...game.world.entities.ofPlayer(player)];
+      const start = own.find((e) => e.type === TOWN_CENTER) ?? own.at(-1);
+      if (start) {
+        const p = tileCoordsToPixel(start.x, start.y, game.world.map.width);
         view.centerOn(p.x, p.y);
       }
       if (debug) exposeMapDebug(view);

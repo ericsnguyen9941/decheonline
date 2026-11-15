@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster, so a walk and a load of wood take seconds.
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 
 // Master ids (empires.dat): villager types, forage bush, Tree01/Tree08/Tree10.
 const VILLAGER = 83;

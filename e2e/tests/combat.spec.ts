@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster, so building a Barracks, training a Clubman and the fight take seconds.
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 
 // Master ids (empires.dat): Villager, Barracks, Clubman, and the body a Villager leaves (`dead_unit`).
 const VILLAGER = 83;

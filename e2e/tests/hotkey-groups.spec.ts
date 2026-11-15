@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster; bowmen=1 gives each player a Bowman above its Villagers.
-const URL = '/?debug=net&speed=20&bowmen=1';
+const URL = '/?debug=net&map=test&speed=20&bowmen=1';
 
 // Master ids (empires.dat): Villager, Bowman.
 const VILLAGER = 83;

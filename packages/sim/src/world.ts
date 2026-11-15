@@ -23,6 +23,10 @@ import { initialFacing, newMover, orderMove, teleport } from './movement';
 import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { orderResearch, stopBuilding } from './research';
+import { MapStack } from './rmm-base';
+import { MAP_LARGE, MAP_MOSTLY_LAND, mapGenerate2 } from './rmm-controller';
+import { RmmMap, type RmmWorld } from './rmm-map';
+import { placeRelicsAndRuins } from './rmm-objects';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
 import { checkForNewTech, doEffect, newResearchDone, newTechStates } from './techs';
@@ -86,7 +90,23 @@ export interface WorldOptions {
   civs?: readonly number[];
   /** The lobby's victory setting (victory.md §2); default Standard. */
   victory?: VictorySettings;
+  /**
+   * A random map game (docs/spec/random-maps.md): the map and every start object come from `randomSeed` through the
+   * original's `new_game` chain; `map` and `units` are not used.
+   */
+  randomMap?: RandomMapOptions;
 }
+
+/** The lobby's random map settings. */
+export interface RandomMapOptions {
+  /** Map type (`MAP_*` in rmm-controller.ts), the dat's random map index; default Mostly Land. */
+  type?: number;
+  /** Map side in tiles (`MAP_TINY` .. `MAP_HUMONGOUS`); default Large (144). */
+  size?: number;
+}
+
+/** The original's multiplayer game defaults (src/scr_mps.cpp:436-450): Large, Mostly Land, fixed positions. */
+export const DEFAULT_RANDOM_MAP: Required<RandomMapOptions> = { type: MAP_MOSTLY_LAND, size: MAP_LARGE };
 
 /** How the game ended (`game_end_condition`) and who won, once it is over. */
 export interface GameResult {
@@ -280,6 +300,8 @@ export class World {
   visibility: Visibility;
   /** Game statuses, score lists and the time-limit countdown (docs/spec/victory.md). */
   victory: VictoryState;
+  /** `save_random_map_seed`: the map seed a random map game drew, -1 otherwise. Not state: nothing reads it. */
+  randomMapSeed = -1;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
   private mastersDigest: (number | undefined)[] = [];
   private queue = new CommandQueue();
@@ -288,7 +310,9 @@ export class World {
   constructor(options: WorldOptions) {
     this.players = options.players;
     this.randomSeed = options.randomSeed ?? DEFAULT_RANDOM_SEED;
-    this.map = options.map ?? createTestMap();
+    const randomMap = options.randomMap && { ...DEFAULT_RANDOM_MAP, ...options.randomMap };
+    // `new_map` (src/map.cpp:275-280): terrain 0, height 1 until the generator runs.
+    this.map = randomMap ? new TileMap(randomMap.size, randomMap.size, null, new Array<number>(randomMap.size * randomMap.size).fill(1)) : (options.map ?? createTestMap());
     this.playerTimeDelta = new Array<number>(this.players).fill(0);
     this.playerUpdateTime = new Array<number>(this.players).fill(0);
     this.alertCooldown = new Array<number>(this.players).fill(0);
@@ -306,21 +330,77 @@ export class World {
     this.techs = Array.from({ length: this.players }, () => newTechStates());
     this.researchDone = Array.from({ length: this.players }, () => newResearchDone());
     for (let p = 0; p < this.players; p++) checkForNewTech(this.gameContext(), p);
-    // Game setup draws from the stored seed and stores a fresh one afterwards (docs/spec/core.md §4.2).
-    const setup = (options.units?.length ?? 0) > 0;
-    if (setup) this.rng.srand(this.randomSeed);
-    for (const u of options.units ?? []) this.createUnit(u);
-    // `new_game` (src/tworld.cpp:793-805, techs.md §4.6): after the objects, each player but Gaia gets its civ's effect.
+    // The victory type and each player's score table (victory.md §2, §11); no RNG. The original's players have their
+    // conditions from creation on, and the random game's player updates read them.
+    this.victory = newVictory(this.players, options.victory);
+    if (randomMap) {
+      this.newRandomGame(randomMap.type);
+    } else {
+      // Game setup draws from the stored seed and stores a fresh one afterwards (docs/spec/core.md §4.2).
+      const setup = (options.units?.length ?? 0) > 0;
+      if (setup) this.rng.srand(this.randomSeed);
+      for (const u of options.units ?? []) this.createUnit(u);
+      this.civEffects();
+      if (setup) this.randomSeed = this.rng.rand();
+    }
+    for (let p = 1; p < this.players; p++) {
+      for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
+    }
+  }
+
+  /** `new_game` (src/tworld.cpp:793-805, techs.md §4.6): after the objects, each player but Gaia gets its civ's effect. */
+  private civEffects(): void {
     for (let p = 1; p < this.players; p++) {
       const effect = CIVS[this.civs[p]!]!.effect;
       if (effect >= 0) doEffect(this.gameContext(), p, effect);
     }
-    if (setup) this.randomSeed = this.rng.rand();
-    for (let p = 1; p < this.players; p++) {
-      for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
-    }
-    // Then the victory type and each player's score table (victory.md §2, §11); no RNG.
-    this.victory = newVictory(this.players, options.victory);
+  }
+
+  /**
+   * A random map game's `new_game` (`RGE_Game_World::new_game` src/world.cpp:983-1083, `new_random_game` :1143-1185,
+   * `TRIBE_World::new_game` src/tworld.cpp:394; docs/spec/random-maps.md §6): seeded with the game seed, a draw after
+   * the seed, the map, Gaia and the players; one before the map, whose seed is the next draw (`map_generate2`); two
+   * after it; three rounds of every player's update; one more; then the world keeps a last draw as its seed. With
+   * TRIBE's part: relics and ruins, drawn after the world took its seed, and the civ effects. The players' `fog_update`
+   * draws stay before the seed (visibility.md §6). No player is left without objects on the dat's maps, so
+   * `random_start` draws nothing (its stand-in Town Center for an empty player is not ported).
+   */
+  private newRandomGame(type: number): void {
+    const rng = this.rng;
+    rng.srand(this.randomSeed);
+    for (let i = 0; i < 5; i++) rng.rand();
+    const m = new RmmMap(this.map, rng, this.rmmWorld());
+    // Multiplayer defaults: positions fixed, Default age; no alliances in a 2-player room.
+    this.randomMapSeed = rng.rand();
+    mapGenerate2(m, this.randomMapSeed, { type, players: this.players - 1, fixedPositions: true, nomad: false, allied: () => false });
+    rng.rand();
+    rng.rand();
+    const ctx = this.gameContext();
+    for (let round = 0; round < 3; round++) for (let p = 0; p < this.players; p++) this.updatePlayer(ctx, p);
+    rng.rand();
+    this.randomSeed = rng.rand();
+    const { w, h } = m;
+    placeRelicsAndRuins(m, new MapStack(w, h), new Uint8Array(w * h), {
+      victoryType: this.victory.type,
+      // The special victories (ruins, artifacts, discoveries) are not ported (victory.md §2): none is wanted.
+      artifacts: 0,
+      discoveries: 0,
+      ruins: 0,
+      owned: (types) => [...this.entities.all()].filter((e) => types.includes(e.type)).length,
+    });
+    this.civEffects();
+  }
+
+  /** The generator's view of the world: masters, and objects made and removed as the game makes them. */
+  private rmmWorld(): RmmWorld {
+    return {
+      master: (owner, type) => (hasMaster(this, owner, type) ? master(this, owner, type) : null),
+      create: (owner, type, x, y) => this.createObject(owner, type, x, y, 0),
+      destroy: (e) => this.destroyObject(e),
+      remove: (e) => this.removeObject(e),
+      complete: (e) => void build(this.gameContext(), e, f32(10000)),
+      typeOf: (e) => typeOf(this, e),
+    };
   }
 
   /**
@@ -513,33 +593,7 @@ export class World {
       const ctx = this.gameContext();
       for (let i = 0; i < this.players; i++) {
         this.playerTimeDelta[i] = u32(this.playerTimeDelta[i]! + delta);
-        // `TRIBE_Player::update`: once a game second, before its objects, the alert cooldown runs down (Gaia's has none).
-        if (i > 0) {
-          this.playerUpdateTime[i] = add32(this.playerUpdateTime[i]!, this.deltaSeconds);
-          while (this.playerUpdateTime[i]! > 1) {
-            this.playerUpdateTime[i] = sub32(this.playerUpdateTime[i]!, 1);
-            if (this.alertCooldown[i]! > 0) this.alertCooldown[i]!--;
-            perSecond(this.victory, i, {
-              attributes: this.attributes[i]!,
-              exploredTiles: this.visibility.explored[i]!,
-              totalTiles: this.map.width * this.map.height,
-              objects: ctx.objectsOf(i),
-              groupOf: (e) => typeOf(this, e).group,
-            });
-          }
-        }
-        // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates
-        // from its head. Objects created or woken during the walk go in front of it and wait for the next step.
-        ctx.attempts = 0;
-        for (const id of [...this.awake[i]!]) {
-          const e = this.entities.get(id);
-          if (e && updateObject(ctx, e)) this.removeObject(e);
-        }
-        // Then the player's victory points and conditions (`RGE_Player::update`, victory.md §4).
-        updateConditions(this.victory, i, this.attributes);
-        // `TRIBE_Player::update` ends by fencing its computer-player AI off the stream (src/tplayer.cpp:607-631): one
-        // draw becomes the seed. Gaia's update (`TRIBE_Gaia::update`) has no fence.
-        if (i > 0) rng.srand(rng.rand());
+        this.updatePlayer(ctx, i);
       }
       // Fog ghost updates draw from the RNG on each peer's local view; the original fences them so the
       // stream afterwards depends only on this draw (src/world.cpp:1283-1294).
@@ -549,6 +603,41 @@ export class World {
       checkGameState(this.victory, this.deltaSeconds);
     }
     this.randomSeed = rng.rand();
+  }
+
+  /**
+   * `TRIBE_Player::update` / `TRIBE_Gaia::update` over `RGE_Player::update` for player `i`, with the context's delta;
+   * the world step runs it for every player, and a random game's `new_game` three times before the first step.
+   */
+  private updatePlayer(ctx: GameContext, i: number): void {
+    const rng = this.rng;
+    // `TRIBE_Player::update`: once a game second, before its objects, the alert cooldown runs down (Gaia's has none).
+    if (i > 0) {
+      this.playerUpdateTime[i] = add32(this.playerUpdateTime[i]!, this.deltaSeconds);
+      while (this.playerUpdateTime[i]! > 1) {
+        this.playerUpdateTime[i] = sub32(this.playerUpdateTime[i]!, 1);
+        if (this.alertCooldown[i]! > 0) this.alertCooldown[i]!--;
+        perSecond(this.victory, i, {
+          attributes: this.attributes[i]!,
+          exploredTiles: this.visibility.explored[i]!,
+          totalTiles: this.map.width * this.map.height,
+          objects: ctx.objectsOf(i),
+          groupOf: (e) => typeOf(this, e).group,
+        });
+      }
+    }
+    // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates
+    // from its head. Objects created or woken during the walk go in front of it and wait for the next step.
+    ctx.attempts = 0;
+    for (const id of [...this.awake[i]!]) {
+      const e = this.entities.get(id);
+      if (e && updateObject(ctx, e)) this.removeObject(e);
+    }
+    // Then the player's victory points and conditions (`RGE_Player::update`, victory.md §4).
+    updateConditions(this.victory, i, this.attributes);
+    // `TRIBE_Player::update` ends by fencing its computer-player AI off the stream (src/tplayer.cpp:607-631): one
+    // draw becomes the seed. Gaia's update (`TRIBE_Gaia::update`) has no fence.
+    if (i > 0) rng.srand(rng.rand());
   }
 
   private execute({ player, command }: QueuedCommand): void {

@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 /** How long the guest's socket stays broken: past the 25 s after which the original says who it waits for. */
 const AWAY_MS = 27_000;
 

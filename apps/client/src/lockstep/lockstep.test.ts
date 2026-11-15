@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { ClientMessage, Command, ServerMessage, SpeedChange } from '@aoe/protocol';
-import { startingObjects, World } from '@aoe/sim';
+import { DEFAULT_RANDOM_MAP, World } from '@aoe/sim';
 import type { Link } from '../net/link';
 import { Lockstep, NOT_RESPONDING_MS, type Timers } from './lockstep';
 
@@ -132,7 +132,7 @@ describe('lockstep', () => {
 
   test('applies both batches and the agreed speed like a World fed the same input', () => {
     const { link, timers, lockstep } = setup();
-    const reference = new World({ players: 3, randomSeed: start.seed, units: startingObjects(3) });
+    const reference = new World({ players: 3, randomSeed: start.seed, randomMap: DEFAULT_RANDOM_MAP });
     const test = { type: 'test', x: 5, y: 6 } as const;
     const speed = { turn: 12, granularity: 30, frames: 9 };
     for (let turn = 0; turn < 20; turn++) {

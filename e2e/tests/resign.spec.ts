@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 /** `game_status`: won, lost. */
 const WON = 1;
 const LOST = 2;

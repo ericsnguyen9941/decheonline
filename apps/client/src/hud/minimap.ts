@@ -123,30 +123,41 @@ export class Minimap {
   private exploreTiles(): void {
     const { world } = this.o;
     const { width, height } = world.map;
+    const fresh: number[] = [];
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const i = row * width + col;
         if (this.explored[i] || this.visibility(col, row) === TILE_BLACK) continue;
         this.explored[i] = 1;
-        this.drawTile(col, row);
+        fresh.push(i);
       }
     }
+    if (fresh.length === 0) return;
+    // The `map_draw_level` 4 objects' colour by tile they are on or next to, the last object winning, as a scan of
+    // every object per tile finds it (a random map has thousands of objects).
+    const tileColours = new Map<number, number>();
+    for (const e of world.entities.all()) {
+      const m = this.art?.unitMinimap(e.type);
+      if (m?.[0] !== LEVEL_TILE) continue;
+      const ex = Math.floor(e.x);
+      const ey = Math.floor(e.y);
+      for (let row = ey - 1; row <= ey + 1; row++) {
+        for (let col = ex - 1; col <= ex + 1; col++) if (col >= 0 && row >= 0 && col < width && row < height) tileColours.set(row * width + col, m[1]);
+      }
+    }
+    for (const i of fresh) this.drawTile(i % width, Math.trunc(i / width), tileColours.get(i));
   }
 
   /**
    * `draw_tile` (src/diam_map.cpp:459): the flat tile's `map_med_color`, or the `map_color` of a `map_draw_level` 4
    * object on it or next to it.
    */
-  private drawTile(col: number, row: number): void {
+  private drawTile(col: number, row: number, objectColour: number | undefined): void {
     const r = tileRect(this.geometry, col, row);
     if (!r) return;
     const { world } = this.o;
     let colour = this.art ? this.index(this.art.terrainColours(world.map.terrainAt(col, row))?.[1] ?? BACKGROUND) : FALLBACK_TERRAIN;
-    for (const e of world.entities.all()) {
-      if (Math.abs(Math.floor(e.x) - col) > 1 || Math.abs(Math.floor(e.y) - row) > 1) continue;
-      const m = this.art?.unitMinimap(e.type);
-      if (m?.[0] === LEVEL_TILE) colour = this.index(m[1]);
-    }
+    if (objectColour !== undefined) colour = this.index(objectColour);
     const rgba = this.rgba(colour);
     const w = this.canvas.width;
     for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (x < w && y < this.canvas.height) this.terrain[y * w + x] = rgba;

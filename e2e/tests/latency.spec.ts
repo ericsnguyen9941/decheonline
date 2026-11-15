@@ -61,7 +61,7 @@ async function clickToAction(page: Page, id: number, col: number, row: number): 
 
 test('click-to-action at the original pace drops to the LAN range once the step size is tuned', async ({ browser }) => {
   test.setTimeout(90_000);
-  const [host] = await startGame(browser, '/?debug=net');
+  const [host] = await startGame(browser, '/?debug=net&map=test');
   // Turns 7-24 run at the defaults, about 15 s of wall time.
   await host.waitForFunction(() => window.__game!.net().granularity !== 90, undefined, { timeout: 45_000, polling: 100 });
   const speed = await net(host);
@@ -87,7 +87,7 @@ test('click-to-action at the original pace drops to the LAN range once the step 
 
 test('both clients stay in sync while a longer round trip changes the step size and buffer frames', async ({ browser }) => {
   test.setTimeout(90_000);
-  const [host, guest] = await startGame(browser, '/?debug=net&speed=20');
+  const [host, guest] = await startGame(browser, '/?debug=net&map=test&speed=20');
   const order = (page: Page, x: number, y: number) =>
     page.evaluate(
       ([x, y]) => {

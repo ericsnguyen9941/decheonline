@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster so 50 turns take a few seconds.
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 
 async function open(browser: Browser, url = URL): Promise<Page> {
   const page = await (await browser.newContext()).newPage();

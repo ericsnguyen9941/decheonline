@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // speed=20 runs the lockstep clock 20x faster; 500 of each resource pays for Villagers.
-const URL = '/?debug=net&speed=20&resources=500';
+const URL = '/?debug=net&map=test&speed=20&resources=500';
 
 // Master ids (empires.dat): Villager, Town Center.
 const VILLAGER = 83;

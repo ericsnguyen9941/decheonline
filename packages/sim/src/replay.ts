@@ -2,7 +2,7 @@ import type { Command } from './commands';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
-import { startingObjects, World, type SpeedChange, type StartUnit } from './world';
+import { startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit } from './world';
 
 /** Everything needed to rerun a game: start state plus every batch, keyed by the turn it was issued on. */
 export interface ReplayLog {
@@ -10,6 +10,8 @@ export interface ReplayLog {
   randomSeed: number;
   /** Objects placed before the first step. */
   units?: StartUnit[];
+  /** A random map game: the map and the start objects come from the seed (`units` is not used). */
+  randomMap?: RandomMapOptions;
   turns: number;
   batches: { turn: number; player: number; commands: Command[] }[];
   /** Step size and buffer frame changes, each given to the world on the turn it was agreed for (turn-timing.md §8.7). */
@@ -19,7 +21,7 @@ export interface ReplayLog {
 /** Run a log from the start; returns the state hash after every turn. */
 export function runReplay(
   log: ReplayLog,
-  world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units }),
+  world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units, ...(log.randomMap ? { randomMap: log.randomMap } : {}) }),
 ): number[] {
   const hashes: number[] = [];
   while (world.turn < log.turns) {
@@ -73,16 +75,57 @@ const SKIRMISH: readonly StartUnit[] = [
 export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLog {
   const players = 3;
   const units = war ? [...startingObjects(players), ...SKIRMISH] : startingObjects(players);
+  // Starting objects get ids 1.. in `units` order.
+  const start: ReplayStart = {
+    count: units.length,
+    villagers: units.flatMap((u, i) => (u.type === VILLAGER ? [{ id: i + 1, owner: u.owner }] : [])),
+    centers: units.flatMap((u, i) => (u.type === TOWN_CENTER ? [{ id: i + 1, owner: u.owner, x: u.x, y: u.y }] : [])),
+    resources: units.flatMap((u, i) => (u.owner === 0 ? [{ id: i + 1, x: u.x, y: u.y }] : [])),
+    at: (id) => units[id - 1],
+  };
+  return { players, randomSeed: 4242, units, turns, batches: sampleBatches(start, turns, seed, war), speeds: sampleSpeeds(turns) };
+}
+
+/**
+ * The same kind of log on a random map game (Large, Mostly Land, the multiplayer default) without the skirmish: the
+ * orders aim at the start objects the seed placed (each side's Villagers and Town Center, the resources near it).
+ */
+export function sampleRandomMapReplay(turns = 60, seed = 20261115): ReplayLog {
+  const players = 3;
+  const randomSeed = 4243;
+  const randomMap: RandomMapOptions = {};
+  const world = new World({ players, randomSeed, randomMap });
+  const objects = [...world.entities.all()];
+  const start: ReplayStart = {
+    count: Math.max(...objects.map((e) => e.id)),
+    villagers: objects.flatMap((e) => (e.type === VILLAGER ? [{ id: e.id, owner: e.owner }] : [])),
+    centers: objects.flatMap((e) => (e.type === TOWN_CENTER ? [{ id: e.id, owner: e.owner, x: e.x, y: e.y }] : [])),
+    resources: objects.flatMap((e) => (e.owner === 0 && e.heldAmount > 0 ? [{ id: e.id, x: e.x, y: e.y }] : [])),
+    at: (id) => world.entities.get(id),
+  };
+  return { players, randomSeed, randomMap, turns, batches: sampleBatches(start, turns, seed, false), speeds: sampleSpeeds(turns) };
+}
+
+/** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */
+interface ReplayStart {
+  count: number;
+  villagers: { id: number; owner: number }[];
+  centers: { id: number; owner: number; x: number; y: number }[];
+  resources: { id: number; x: number; y: number }[];
+  at(id: number): { x: number; y: number } | undefined;
+}
+
+function sampleSpeeds(turns: number): SpeedChange[] {
+  return SAMPLE_SPEEDS.filter((c) => c.turn < turns).map((c) => ({ ...c }));
+}
+
+function sampleBatches({ count, villagers, centers, resources, at: startAt }: ReplayStart, turns: number, seed: number, war: boolean): ReplayLog['batches'] {
   const gen = new CrtRand();
   gen.srand(seed);
   const fight = new CrtRand();
   fight.srand(seed + 7919);
   const study = new CrtRand();
   study.srand(seed + 104729);
-  // Starting objects get ids 1.. in `units` order.
-  const villagers = units.flatMap((u, i) => (u.type === VILLAGER ? [{ id: i + 1, owner: u.owner }] : []));
-  const centers = units.flatMap((u, i) => (u.type === TOWN_CENTER ? [{ id: i + 1, owner: u.owner, x: u.x, y: u.y }] : []));
-  const resources = units.flatMap((u, i) => (u.owner === 0 ? [{ id: i + 1, x: u.x, y: u.y }] : []));
   const pick = (player: number) => villagers.flatMap((v) => ((v.owner === player || gen.rand() % 8 === 0) && gen.rand() % 3 !== 0 ? [v.id] : []));
   const fraction = () => gen.rand() / 32768;
   const batches: ReplayLog['batches'] = [];
@@ -100,8 +143,8 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
       if (gen.rand() % 32 === 0) {
         const ids = pick(player);
         const near = resources.filter((r) => Math.abs(r.x - own.x) < 12 && Math.abs(r.y - own.y) < 12);
-        const target = gen.rand() % 4 !== 0 ? near[gen.rand() % near.length]!.id : (gen.rand() % (units.length + 4)) + 1;
-        const at = units[target - 1] ?? { x: gen.rand() / 682.66, y: gen.rand() / 682.66 };
+        const target = gen.rand() % 4 !== 0 ? near[gen.rand() % near.length]!.id : (gen.rand() % (count + 4)) + 1;
+        const at = startAt(target) ?? { x: gen.rand() / 682.66, y: gen.rand() / 682.66 };
         if (ids.length > 0) commands.push({ type: 'work', units: ids, target, x: at.x, y: at.y });
       }
       if (gen.rand() % 48 === 0) {
@@ -118,28 +161,28 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
         commands.push({ type: 'queue', building, unit, count });
       }
       if (war && fight.rand() % 24 === 0) {
-        const made = Array.from({ length: 1 + (fight.rand() % 6) }, () => units.length + 1 + (fight.rand() % 40));
+        const made = Array.from({ length: 1 + (fight.rand() % 6) }, () => count + 1 + (fight.rand() % 40));
         const ids = [...new Set([...villagers.filter((v) => v.owner === player && fight.rand() % 3 === 0).map((v) => v.id), ...made])];
         const enemies = villagers.filter((v) => v.owner !== player);
         const roll = fight.rand() % 8;
         const target =
-          roll < 5 ? enemies[fight.rand() % enemies.length]!.id : roll < 6 ? centers.find((c) => c.owner !== player)!.id : units.length + 1 + (fight.rand() % 40);
+          roll < 5 ? enemies[fight.rand() % enemies.length]!.id : roll < 6 ? centers.find((c) => c.owner !== player)!.id : count + 1 + (fight.rand() % 40);
         commands.push({ type: 'attack', units: ids, target });
       }
-      if (gen.rand() % 60 === 0) commands.push({ type: 'cancel', target: units.length + 1 + (gen.rand() % 40) });
+      if (gen.rand() % 60 === 0) commands.push({ type: 'cancel', target: count + 1 + (gen.rand() % 40) });
       if (study.rand() % 20 === 0) {
         const roll = study.rand() % 8;
-        const building = roll < 6 ? own.id : roll < 7 ? centers.find((c) => c.owner !== player)!.id : units.length + 1 + (study.rand() % 40);
+        const building = roll < 6 ? own.id : roll < 7 ? centers.find((c) => c.owner !== player)!.id : count + 1 + (study.rand() % 40);
         const techs = [10, 39, 62, TOOL_AGE, TOOL_AGE, study.rand() % 130];
         commands.push({ type: 'research', building, tech: techs[study.rand() % techs.length]! });
       }
       if (study.rand() % 150 === 0) commands.push({ type: 'stop', objects: [own.id] });
       // Ids so far: the start objects, at most 3 probes per player per turn, and what the game made (well under 2 a turn).
       if (war && player === 2 && turn === turns - 20) {
-        for (let id = 1; id <= units.length + 8 * turn; id++) commands.push({ type: 'cancel', target: id });
+        for (let id = 1; id <= count + 8 * turn; id++) commands.push({ type: 'cancel', target: id });
       }
       if (commands.length > 0) batches.push({ turn, player, commands });
     }
   }
-  return { players, randomSeed: 4242, units, turns, batches, speeds: SAMPLE_SPEEDS.filter((c) => c.turn < turns).map((c) => ({ ...c })) };
+  return batches;
 }

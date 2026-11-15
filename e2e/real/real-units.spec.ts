@@ -10,7 +10,7 @@ test.skip(!dir, 'set AOE1_DIR (and run npm run assets:import first)');
 
 async function open(browser: Browser): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
-  await page.goto('/?debug=net');
+  await page.goto('/?debug=net&map=test');
   return page;
 }
 

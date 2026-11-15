@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // Fog of war and the minimap (docs/spec/hud.md "Fog of war", "Minimap"). speed=20 runs the lockstep clock 20x faster.
-const URL = '/?debug=net&speed=20';
+const URL = '/?debug=net&map=test&speed=20';
 const VISIBLE = 0x0f;
 const FOGGED = 0x80;
 const BLACK = 0;

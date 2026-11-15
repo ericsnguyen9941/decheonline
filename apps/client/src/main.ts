@@ -65,6 +65,7 @@ async function main(): Promise<void> {
     speed: Number(params.get('speed') ?? 1) || 1,
     resources: resources !== undefined && Number.isFinite(resources) ? resources : undefined,
     bowmen: Number.isInteger(bowmen) && bowmen > 0 ? bowmen : undefined,
+    testMap: params.get('map') === 'test',
     setGameVisible,
   });
 }
