@@ -88,6 +88,9 @@ test("a Clubman trained at a Barracks kills the other player's Villager; both cl
   // Scroll to one of the guest's villagers: over it the pointer is the attack cursor (no work hand), and a right click
   // orders an attack on it.
   const prey = (await host.evaluate(() => window.__game!.units())).find((u) => u.owner === 2 && u.type === VILLAGER)!;
+  // It is in the fog until the Clubman walks up to it (docs/spec/hud.md "Fog of war").
+  await host.evaluate(([id, x, y]) => window.__game!.issueMove([id], x - 2, y), [clubman.id, prey.x, prey.y] as const);
+  await host.waitForFunction(([col, row]) => window.__game!.tileVisibility(col, row) === 0x0f, [prey.col, prey.row] as const, { timeout: 60_000 });
   await host.evaluate(([col, row]) => window.__map!.centerOnTile(col, row), [prey.col, prey.row] as const);
   await host.evaluate(() => new Promise(requestAnimationFrame));
   const preyAt = (await host.evaluate((id) => window.__game!.objectScreenPos(id), prey.id))!;
