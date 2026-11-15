@@ -47,6 +47,7 @@ test('debug view falls back to debug shapes when the server has no pack', async 
   await page.goto(`/?debug=assets&unit=${SYNTHETIC.unitId}`);
   const view = await report(page);
   expect(view.source).toBe('debug');
-  expect(view.terrainFrames).toBe(1);
+  // One debug diamond per tile type (flat and the 16 slopes, docs/spec/hud.md "Elevation").
+  expect(view.terrainFrames).toBe(17);
   expect(view.unitRect).not.toBeNull();
 });
