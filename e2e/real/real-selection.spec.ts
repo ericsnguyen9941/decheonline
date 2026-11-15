@@ -89,7 +89,7 @@ test('the top strip shows the age and buttons in the original strings; a wood ca
   await host.mouse.up();
   await expect.poll(async () => ((await host.evaluate(() => window.__game!.selection())) ?? []).sort()).toEqual(rest.map((u) => u.id).sort());
   await expect(host.getByTestId('object-name')).toHaveText('Villager');
-  expect(await slots(host)).toEqual(['build', 'group', 'ungroup', 'unselect']);
+  expect(await slots(host)).toEqual(['build', 'repair', 'group', 'ungroup', 'unselect']);
   await away();
   await host.screenshot({ path: join(shots, 'selection-multi.png') });
 
