@@ -898,9 +898,12 @@ Checked against the decomp:
 - AllLand (4) gets base terrain 0 only on the "no shallows" branch: a draw
   `< 0x3FFF` makes shallows and keeps the dat's base terrain.
 - Floats: `terrain_size` keeps the x87 product (7371 for §9.4's 7372 × 100 %,
-  §10); the elevation scale is computed in double and rounded to float once
-  (stored in a `float`), then `trunc(size × scale)`. Both are **unverified**
-  against the retail exe; §9.2's sizes (906, 724, 543, 361) come out either way.
+  §10), **unverified** against the retail exe. The elevation scale is checked
+  there (`Empiresx.exe` 0x4740b7-0x4740ee): `fild rand; fmul -0.0018311106f;
+  fsubr 70f; fmul 0.01f` (Hilly: `fmul 5f`) stays on the x87 stack and each
+  size is `ftol(fild size × scale)`; the decomp's `float scale` is never
+  stored. At the CRT's 53-bit precision control that is double math, as ported.
+  §9.2's sizes (906, 724, 543, 361) come out either way.
 - `place_cluster` can place nothing when its snapped start position overlaps an
   object (the land row's start test used the unsnapped one): a start may lack
   its near stone or gold pile while the far one is there (seed 79190, player 1,

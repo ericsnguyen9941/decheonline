@@ -564,8 +564,10 @@ export class RmmController {
     this.elevation.hotSpots = this.hotSpots();
     const rng = this.m.rng;
     const r = rng.rand();
-    let scale = f32(f32(f32(70) - f32(f32(r) * f32(-0.0018311106))) * f32(0.01));
-    if (this.settings.type === MAP_HILLY) scale = f32(scale * f32(5));
+    // The retail exe keeps the scale on the x87 stack and never stores it as the decomp's `float` (Empiresx.exe
+    // 0x4740b7-0x4740ee); at the CRT's 53-bit precision that is double math over the float constants.
+    let scale = (70 - r * f32(-0.0018311106)) * f32(0.01);
+    if (this.settings.type === MAP_HILLY) scale *= 5;
     for (const l of this.elevation.levels) l.size = Math.trunc(l.size * scale);
     rng.rand();
   }
