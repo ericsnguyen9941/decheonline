@@ -31,6 +31,8 @@ Two of the eight per-step state machines here are not byte-proven:
 | `TRIBE_Action_Trade::set_state` | `src/tact_trd.cpp:71` | M | |
 | `TRIBE_Action_Trade::update` | `src/tact_trd.cpp:186` | **L** | load, deliver, gold formula |
 | `TRIBE_Action_Trade::work`, `move_to` | `src/tact_trd.cpp:470`, `:447` | M | |
+| `TRIBE_Command::do_command_trade_attribute` | `src/tcommand.cpp:489` | M | cargo choice (§7.6) |
+| `TribeTradeShipUnitAIModule::processNotify` | `src/taiuaimd.cpp:1232` | M | §7.5 |
 | `TRIBE_Combat_Object::update` | `src/t_c_obj.cpp:146` | M | faith recharge |
 | `TRIBE_Combat_Object::die_die_die` | `src/t_c_obj.cpp:202` | M | martyrdom trigger |
 | `TRIBE_Combat_Object::change_ownership` | `src/t_c_obj.cpp:240` | M | conversion result |
@@ -405,8 +407,12 @@ move-to sub-actions draw as `movement.md` §11 describes.
 ### 7.1 Start and retarget
 
 - Cargo type: if the boat's held attribute is not food, wood or stone it is
-  set to wood (`:56-59`, again at `:307-310`). How the player picks the
-  resource is outside these files.
+  set to wood (`:56-59`, again at `:307-310`). The player picks it with the
+  trade-attribute command (§7.6).
+- An idle trade boat holds a Trade action: the trade task (task 0, action
+  111 on unit 45, `is_default` 1) is its master's `default_task`, which an
+  active object with no action starts (`src/act_obj.cpp:403-407`) through
+  the point constructor: no target, so state 2.
 - `work(obj)`: own drop-site (dock 45) → it becomes the home dock, state 8;
   another object → trade target, state 4; a point → state 11 (`:470-498`).
   `move_to` treats an own dock the same way (`:447-468`).
@@ -465,6 +471,61 @@ step they become > 0.
 Each player update adds the step's seconds to `update_time`; for each whole
 second passed (`while update_time > 1.0`), `attr 9 += attr 10` (1 in real
 data), capped at 100. This runs for every player, with or without a dock.
+Every civ starts with attr 9 at 0 and attr 10 at 1 (dat), so a Dock's owner
+has no goods for the first seconds and at most 100 after 100 s.
+
+### 7.5 Orders and the trade ship unit AI
+
+- A right click (`work2`, `economy.md` §3.1) on a Dock 45, any owner's,
+  picks the trade task through the task list's id pass (task 0 names unit
+  45 with owner type 0). The idle boat's Trade action runs the same task,
+  so it takes `work(dock)` (§7.1): another player's Dock is the target
+  (state 4), an own Dock the home Dock (state 8). A Dock of another id
+  (Dock_2 133 only ever exists as an upgrade of 45's master) is not matched.
+- A move order is the action's `move_to` (state 11).
+- `TRIBE_Combat_Object::trade(id, unconditional)` (`src/t_c_obj.cpp:638-662`,
+  M): a Trade action already on that target is kept unless unconditional;
+  a Trade action takes `work(target)`; else `getTask` and a new Trade action
+  replace every action.
+- `TribeTradeShipUnitAIModule` (`src/taiuaimd.cpp:1219-1401`): ATTACKED is
+  the fishing ship's reaction (naval.md §5.2, same code: alert, help call,
+  a human boat with an order keeps it, else re-queue its order unless it
+  moves, stop, run away). REQUEST_TASK (state 3's entry) while its current
+  action is TRADE: the closest active Dock 45 in its search results, self
+  or ally first (`closestObject(-1, 0, …)`), then neutral (`…1…`); the first
+  found is traded with (`tradeWithObject(id, 1)`: `trade(id, 1)`, then action
+  TRADE and the target recorded). Not found, or another action: drop the
+  target and `stopObject(1)`. An own Dock found this way only becomes the
+  home Dock: an empty boat with no target then cycles 8 → 3 every step and
+  asks again (decomp as read; harmless). The explore branch and
+  `processIdle` act for computer players only.
+
+### 7.6 The trade-attribute command (`src/tcommand.cpp:489`, `:904`, M)
+
+`TRIBE_Command_Trade_Attribute` (command 0x6D): a unit count, the unit ids
+and `attribute` (a long). The receiver sets each listed object's
+`attribute_type_held` to `(short) attribute`, nothing else: the held amount
+is kept, and no owner check. The sender (`TRIBE_Player::command_trade_attribute`,
+`src/tplayer.cpp:942`) lists its selected active objects of select level ≥ 4
+and `unit_level` 5 (only the trade boats 15/16 in the 1.0a dat); the trade
+panel's three buttons send food 0, wood 1, stone 2 (`src/scr_game.cpp:2057-2063`).
+
+### 7.7 Port status (trade)
+
+Ported (`packages/sim/src/trade.ts`): the Trade Boat 15 and Merchant Ship 16
+(tech 6 copies 16 into 15: 250 hp, speed 2.5), the Trade action as §7.1-§7.3
+(states 1-4, 6-8, 11, 13, the −0.5 s retries, the pick-up point on
+`WorkAction.pickUpX/Y`, the gold formula `tradeGold`, gold earned attr 49),
+the default task (`objects.ts`), orders (`gather.ts`: `startTask`,
+`workMoveTo`, `updateWork`), the trade goods regrowth (`world.ts`
+`updatePlayer`, `regrowTradeGoods`), the trade ship AI (`unit-ai.ts`
+`tradeShipNotify`), `trade(id, unconditional)` (`aiTrade`) and the command
+`{ type: 'trade-attribute', units, attribute }` (`commands.ts`, `world.ts`
+`doCommandTradeAttribute`, hash id 19; port-side guards: the sender's
+active objects of `unit_level` 5, `attribute` 0-2). Tests `trade.test.ts`;
+replay `sampleTradeReplay` in the determinism e2e. Not ported: the work
+and deposit sounds (the client's), the computer-player branches, the trade
+panel's buttons and cursor in the client (C5).
 
 ## 8. RNG calls, in order
 
@@ -604,7 +665,9 @@ capped to **75**.
   were not byte-proven; §6.2, §6.3's call site and §7.2 rest on them.
 - Beta vs retail 1.0a: all constants and the hard-coded civ rules
   (Macedonian ×4, Palmyran ×2) are beta code; `beta-only?` until a retail
-  recording confirms.
+  recording confirms. The trade constants are in the 1.0a exe's data side
+  by side as in the beta's globals: float 0.00025125628, 0.7, 0.35 and the
+  double 0.35 at file offsets 0x14beb0-0x14bec0 of `Empiresx.exe`.
 - x87 precision: float stores assumed at each local (`core.md` §3); the
   examples' last digits depend on it, the convert thresholds do not.
 - Whether attr 30 can block building repair in normal play (§6.3).
@@ -612,5 +675,4 @@ capped to **75**.
   the exact step count for 4 → 6 → 7 between attempts.
 - Which objects the Priest heal task accepts: settled, §4.7 (the task
   list's priest pass never gives a building or a boat the heal task).
-- How the trade cargo resource is chosen by the player (UI command) — not in
-  these files.
+- How the trade cargo resource is chosen: settled, §7.6.

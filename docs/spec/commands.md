@@ -186,3 +186,4 @@ original. The client's button and click mode: hud.md "Command buttons"
 | command | original | why |
 | --- | --- | --- |
 | Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | ported in the sim (command `unload`, naval.md §7.6); the client's button is not (C5) |
+| Trade attribute | `TRIBE_Player::command_trade_attribute` (`src/tplayer.cpp:942`) | ported in the sim (command `trade-attribute`, support-actions.md §7.6); the client's trade buttons are not (C5) |

@@ -721,8 +721,8 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
   Galley 360 (118), the boat stone 368 and Transport Boat 17 with Transport
   Ship 18 (8, Heavy Transport) copied into it (`obj_max` 5 → 10, naval.md
   §7.1), so the Dock techs 3-5, 7-9, 25, 118 and the civ ship bonuses act
-  (naval.md §3.3; Merchant Ship 6 copies into the trade boat, not in the
-  table, and does nothing). Not in the table yet: the Trade Boat 15/16.
+  (naval.md §3.3), and Trade Boat 15 with Merchant Ship 16 (6) copied into
+  it (support-actions.md §7.7).
   Modify code 2 (`obj_max`) is not handled; no 1.0a tech uses it. Blast and melee splash
   (combat.md §4.3-§4.4) are ported. Tests: `land-units.test.ts` (training,
   the upgrade techs), `siege.test.ts` (Alchemy, Engineering, Ballistics),

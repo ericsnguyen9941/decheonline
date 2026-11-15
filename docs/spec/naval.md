@@ -6,9 +6,9 @@ version caveat and reference format). Numbers are the 1.0a `data2/empires.dat`'s
 is `movement.md`, the unit AI `unit-ai.md`, combat and blast `combat.md`,
 repair/heal/convert `support-actions.md`, tech effects `techs.md`.
 
-Trade boats (15/16) are out of this document's port (ship S7); where their
-rules sit next to the ones here they are named but not described. Transport
-boats (17/18), boarding and unload are §7.
+Trade boats (15/16) and the trade action are `support-actions.md` §7; where
+their rules sit next to the ones here they are named but not described.
+Transport boats (17/18), boarding and unload are §7.
 
 ## 1. Functions
 
@@ -134,7 +134,7 @@ Techs (requirements; all at the Dock):
 
 - 4 Fishing Ship (0, 102);
 - 5 War Galley (0, 102);
-- 6 Merchant Ship (copies 15 into 16, trade);
+- 6 Merchant Ship (0, 102; copies 16 into 15, trade: 250 hp, speed 2.5);
 - 7 Trireme (5, 103);
 - 8 Heavy Transport (copies 17 into 18, transport);
 - 9 Catapult Trireme (7, 103);
@@ -202,7 +202,8 @@ the gather task that takes what it holds, i.e. it delivers there.
 
 `processIdle` does nothing for a human player; `REQUEST_TASK` goes to the
 base, which does nothing, so an idle human Fishing Boat is not sent back to
-fish. Trade and transport boats have their own modules (S6, S7).
+fish. Trade and transport boats have their own modules (`support-actions.md`
+§7.5, §7.7 here).
 
 ## 6. Boat repair
 
@@ -435,11 +436,16 @@ inside check (`combat.ts`), the `unload` command (`commands.ts`, `world.ts`
 `doCommandUnload`, `unit-ai.ts` `orderUnload`/AI order 0x2D1), the transport
 ship AI (`transportShipNotify`), and the water maps in the lobby (lobby.md
 §6). Tests `transport.test.ts`; replay `sampleTransportReplay` (in the
+determinism e2e). Trade (`support-actions.md` §7.7, `trade.ts`): the Trade
+Boat 15 and Merchant Ship 16 (tech 6), the Trade action as the boat's
+default task, the trade goods, the trade ship AI and the `trade-attribute`
+command. Tests `trade.test.ts`; replay `sampleTradeReplay` (in the
 determinism e2e).
 
-Not ported: the slope check (placement return 3, no Dock needs it), trade
-boats and their AI, computer-player branches (the Enter constructor's
+Not ported: the slope check (placement return 3, no Dock needs it),
+computer-player branches (the Enter constructor's
 computer branch, unload without the stop), the unit AI's ENTER/TRANSPORT
 orders in `processOrder` (a re-issued Enter order is dropped), the passengers'
 own actions' pending-removal target clearing while inside. The client (C5)
-does not yet hide passengers (`Entity.inside`), send `unload`, or show cargo.
+does not yet hide passengers (`Entity.inside`), send `unload`, or show cargo;
+nor show the trade buttons or send `trade-attribute`.

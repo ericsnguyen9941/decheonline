@@ -225,7 +225,7 @@ says `accepted_logic`). Steps in order:
 | priest | nothing for humans | `src/taiuaimd.cpp:1131`, M |
 | building (non-tower) | nothing | `src/taiuaimd.cpp:2282`, M |
 | elephant | nothing | `src/taiuaimd.cpp:227`, M |
-| ships (fishing, trade, transport) | nothing for humans; the fishing ship's ATTACKED reaction (run away unless it has an order) is naval.md §5.2, ported (`fishingShipNotify`); the transport ship's (run away when idle) is naval.md §7.7, ported (`transportShipNotify`); trade boats are not in the sim | `src/taiuaimd.cpp:1379`, `:1483`, `:1618`, M |
+| ships (fishing, trade, transport) | nothing for humans; the fishing ship's ATTACKED reaction (run away unless it has an order) is naval.md §5.2, ported (`fishingShipNotify`); the transport ship's (run away when idle) is naval.md §7.7, ported (`transportShipNotify`); the trade ship's (the fishing ship's ATTACKED, a Dock found on REQUEST_TASK) is support-actions.md §7.5, ported (`tradeShipNotify`) | `src/taiuaimd.cpp:1379`, `:1483`, `:1618`, M |
 | hunted animal | flee from the closest visible important object (§5.1) | `src/taiuaimd.cpp:89-109`, M |
 | lion | attack the closest visible important object within 2 × LOS (§5.3) | `src/taiuaimd.cpp:320-351`, M |
 | artifact | change owner to the closest object's owner when only one player is in view (also every update via `processMisc`); victory.md §10.1, ported (`artifactIdle`) | `src/taiuaimd.cpp:2128-2162`, M |
