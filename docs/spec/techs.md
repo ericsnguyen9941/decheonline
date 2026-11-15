@@ -696,3 +696,19 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
 - **Golden tests:** use §7 numbers as unit vectors (research step counts,
   cost/refund, armour packing, hp scaling); confirm §3.7 and the
   damage-sprite draws with a retail recording.
+- **Port status, which masters the sim has:** a tech whose master is
+  missing is a silent no-op (§4.2, §4.5, `make_available`), so the sim's
+  table (`tools/gen-sim-tables.mjs` ROOTS) carries every land unit of the
+  Barracks (Clubman 73, Short/Broad/Long Swordsman 75/76/77, Legion 282),
+  Archery Range (Bowman 4, Improved/Composite Bowman 5/6, Chariot Archer
+  41, Horse Archer 39, Heavy Horse Archer 281, Elephant Archer 25),
+  Stable (Scout 299, Cavalry 37, Heavy Cavalry 38, Cataphract 283,
+  Chariot 40, Scythe Chariot 339, Camel Rider 338, War/Armored Elephant
+  46/345) and Academy (Hoplite 93, Phalanx 94, Centurion 291), and the
+  Academy 0, Government Center 82, Temple 104 and Siege Workshop 49. A
+  line's upgrades are `copy_obj` into the button's type (75, 5, 39, 37,
+  40, 46, 93). Not in the table yet: siege units, Priest, boats and the
+  Dock, so the Siege Workshop and Temple train nothing and their unit
+  upgrades (Heavy Catapult, …) change no master; the elephants' and the
+  Scythe Chariot's blast damage is not ported (`combat.ts` `do_attack`
+  without blast). Tests: `land-units.test.ts`.

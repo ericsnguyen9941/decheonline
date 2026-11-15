@@ -811,10 +811,11 @@ export class World {
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
-        this.entities.create({ owner: player, type: 0, x: tx, y: ty, z: 0, hp: 1 + (this.rng.rand() % 100) });
+        // Type -1: no table has it (type 0 is the Academy).
+        this.entities.create({ owner: player, type: -1, x: tx, y: ty, z: 0, hp: 1 + (this.rng.rand() % 100) });
         for (const e of this.entities.ofPlayer(player)) {
           // Only the probe's own objects: game objects move only through orders.
-          if (e.type !== 0) continue;
+          if (e.type !== -1) continue;
           const dx = sub32(tx, e.x);
           const dy = sub32(ty, e.y);
           const len = sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));

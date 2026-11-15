@@ -9,7 +9,7 @@ export interface NoopCommand {
 }
 
 /**
- * Determinism probe, not a game rule: spawns an entity owned by the sender at (x, y) with hit points
+ * Determinism probe, not a game rule: spawns an entity of type -1 (no master) owned by the sender at (x, y) with hit points
  * drawn from the RNG, then moves each of the sender's non-unit entities one float32 unit step toward (x, y).
  */
 export interface TestCommand {
