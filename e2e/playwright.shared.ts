@@ -20,7 +20,9 @@ export const shared: PlaywrightTestConfig = {
   expect: { timeout: 60_000 },
   use: { baseURL },
   webServer: {
-    command: 'npm run dev',
+    // The built bundles, not `npm run dev`: a page then loads a few files instead of hundreds of modules the dev server
+    // transforms on request, which is what made every test minutes long on a loaded machine.
+    command: 'npm run build && npx concurrently -k -n server,client "npm start -w @aoe/server" "npm run preview -w @aoe/client"',
     cwd: '..',
     url: baseURL,
     env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir },

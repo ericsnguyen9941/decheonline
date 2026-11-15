@@ -9,6 +9,8 @@ const proxy = {
 };
 
 export default defineConfig({
+  // Not the default `assets`: that path belongs to the game server's pack (proxied above), also under `vite preview`.
+  build: { assetsDir: 'bundle' },
   server: { port, strictPort: true, proxy },
   preview: { port, strictPort: true, proxy },
 });
