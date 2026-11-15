@@ -472,6 +472,91 @@ export function sampleTransportReplay(turns = 200, seed = 20261116): ReplayLog {
   };
 }
 
+/** `navalTerrain`'s columns on a 64 × 64 map, for `sampleTradeReplay`: Docks at either end trade above the minimum. */
+export function tradeTerrain(): { width: number; height: number; tiles: number[] } {
+  const tiles: number[] = [];
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) tiles.push(x === 15 || x === 28 ? 2 : x >= 16 && x <= 27 ? (x === 21 || x === 22 ? 22 : 1) : 0);
+  }
+  return { width: 64, height: 64, tiles };
+}
+
+/** Each side's Town Center and Dock at its end of `tradeTerrain`, two Trade Boats off it and a Scout Ship, for `sampleTradeReplay`. */
+const TRADE: readonly StartUnit[] = [
+  { owner: 1, type: TOWN_CENTER, x: 6.5, y: 6.5 },
+  { owner: 1, type: 45, x: 16.5, y: 4.5 },
+  { owner: 1, type: 15, x: 18.5, y: 7.5 },
+  { owner: 1, type: 15, x: 19.5, y: 10.5 },
+  { owner: 1, type: 19, x: 20.5, y: 30.5 },
+  { owner: 2, type: TOWN_CENTER, x: 34.5, y: 58.5 },
+  { owner: 2, type: 45, x: 27.5, y: 58.5 },
+  { owner: 2, type: 15, x: 25.5, y: 55.5 },
+  { owner: 2, type: 15, x: 24.5, y: 52.5 },
+  { owner: 2, type: 19, x: 23.5, y: 34.5 },
+];
+
+/**
+ * A trade game on `tradeTerrain` in the Bronze Age with Death Match stockpiles, Egyptian against Palmyran (twice the gold;
+ * `TRADE`). Now and then, from one generator, a side orders: its Trade Boats at the other side's Dock (now and then its
+ * own); a cargo for them (food, wood or stone); a boat to a point of the sea; its Scout Ship at the other side's boats; a
+ * Trade Boat queued or Merchant Ship (6) researched at its Dock; and sometimes the other side's objects, which is
+ * ignored. Loading against regrowing trade goods, the gold by distance, the trade ship's reactions in every engine.
+ */
+export function sampleTradeReplay(turns = 300, seed = 20261120): ReplayLog {
+  const ids = (owner: number, types: number[]) => TRADE.flatMap((u, i) => (u.owner === owner && types.includes(u.type) ? [i + 1] : []));
+  const gen = new CrtRand();
+  gen.srand(seed);
+  const batches: ReplayLog['batches'] = [];
+  for (let turn = 0; turn < turns; turn++) {
+    for (const player of [1, 2]) {
+      if (gen.rand() % 4 !== 0) continue;
+      const side = gen.rand() % 8 === 0 ? 3 - player : player;
+      const enemy = 3 - side;
+      const boats = ids(side, [15]);
+      const boat = boats[gen.rand() % boats.length]!;
+      const commands: Command[] = [];
+      switch (gen.rand() % 8) {
+        case 0:
+        case 1:
+        case 2: {
+          const dock = ids(gen.rand() % 6 === 0 ? side : enemy, [45])[0]!;
+          const at = TRADE[dock - 1]!;
+          commands.push({ type: 'work', units: gen.rand() % 2 === 0 ? boats : [boat], target: dock, x: at.x, y: at.y });
+          break;
+        }
+        case 3:
+          commands.push({ type: 'trade-attribute', units: boats, attribute: gen.rand() % 3 });
+          break;
+        case 4:
+          commands.push({ type: 'move', units: [boat], x: 17 + (gen.rand() % 1000) / 100, y: 2 + (gen.rand() % 6000) / 100 });
+          break;
+        case 5: {
+          const targets = ids(enemy, [15]);
+          commands.push({ type: 'attack', units: ids(side, [19]), target: targets[gen.rand() % targets.length]! });
+          break;
+        }
+        default: {
+          const dock = ids(side, [45])[0]!;
+          if (gen.rand() % 3 === 0) commands.push({ type: 'research', building: dock, tech: 6 });
+          else commands.push({ type: 'queue', building: dock, unit: 15, count: 1 });
+        }
+      }
+      batches.push({ turn, player, commands });
+    }
+  }
+  return {
+    players: 3,
+    randomSeed: 6262,
+    terrain: tradeTerrain(),
+    units: [...TRADE],
+    civs: [0, 1, 15],
+    turns,
+    batches,
+    speeds: sampleSpeeds(turns),
+    start: { startingAge: AGE_BRONZE, deathMatch: true },
+  };
+}
+
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */
 interface ReplayStart {
   count: number;

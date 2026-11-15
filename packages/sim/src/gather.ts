@@ -8,6 +8,7 @@ import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } 
 import { ACTION_REPAIR, repairMoveTo, repairTaskFor, repairWork, startRepair, updateRepair } from './repair';
 import { ACTION_CONVERT, ACTION_HEAL, GROUP_PRIEST, priestWork, startPriestAction, updateConvert, updateHeal } from './priest';
 import { ACTION_ENTER, ACTION_TRANSPORT, enterTaskFor, startEnter, startTransport, transportMoveTo, transportWork, updateEnter, updateTransport } from './transport';
+import { ACTION_TRADE, startTrade, tradeMoveTo, tradeWork, updateTrade } from './trade';
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
 import type { TileMap } from './map';
@@ -64,6 +65,9 @@ export interface WorkAction {
   range?: number;
   /** Repair: `save_target_command_flag`, the boat's command count when the repairer called it (naval.md §6.1). */
   commandFlag?: number;
+  /** Trade: `pick_up_x`, `pick_up_y`, where the cargo was loaded (-1 none; support-actions.md §7.2). */
+  pickUpX?: number;
+  pickUpY?: number;
 }
 
 /** `g_gather_dropoff_distance_threshold` / `g_hunt_drop_distance_threshold`, compared squared. */
@@ -132,7 +136,7 @@ function targetTask(ctx: PlayerMasters & DiplomacyContext & { readonly map?: Til
     } else if ([1, 2, 3, 15, 17].includes(e.heldType)) [site, alternate] = [TOWN_CENTER, STORAGE_PIT];
     else if (e.heldType === 16) [site, alternate] = [TOWN_CENTER, GRANARY];
     if (target.type === site || target.type === alternate) {
-      const i = tasks.findIndex((k) => k.resourceIn === e.heldType && (k.actionType === ACTION_GATHER || k.actionType === ACTION_HUNT || k.actionType === 111));
+      const i = tasks.findIndex((k) => k.resourceIn === e.heldType && (k.actionType === ACTION_GATHER || k.actionType === ACTION_HUNT || k.actionType === ACTION_TRADE));
       if (i !== -1) return i;
     }
   }
@@ -273,6 +277,10 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
       transportWork(ctx, e, w, target, x, y);
       return w.type;
     }
+    if (w.type === ACTION_TRADE) {
+      tradeWork(ctx, e, w, target, x, y);
+      return w.type;
+    }
     if (w.type === ACTION_CONVERT || w.type === ACTION_HEAL) {
       if (priestWork(ctx, e, w, target)) return w.type;
     } else if (workRetarget(ctx, e, w, target, x, y)) return w.type;
@@ -297,6 +305,10 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
   }
   if (kind === ACTION_TRANSPORT) {
     startTransport(ctx, e, task, x, y);
+    return kind;
+  }
+  if (kind === ACTION_TRADE) {
+    startTrade(ctx, e, task, target, x, y);
     return kind;
   }
   deleteActions(ctx, e);
@@ -359,6 +371,10 @@ export function workMoveTo(ctx: GameContext, e: Entity, x: number, y: number): b
   }
   if (a.type === ACTION_TRANSPORT) {
     transportMoveTo(ctx, e, a, x, y);
+    return true;
+  }
+  if (a.type === ACTION_TRADE) {
+    tradeMoveTo(ctx, e, a, x, y);
     return true;
   }
   // `RGE_Action::move_to`: the convert, the heal and the enter do not take a walk.
@@ -529,7 +545,7 @@ function requestTask(ctx: GameContext, e: Entity, a: WorkAction): void {
 }
 
 /** `keepGatheringWhenObjectIsOut` (src/t_c_obj.cpp:665): farms (50) and docks (45). */
-function keepsWorker(target: Entity): boolean {
+export function keepsWorker(target: Entity): boolean {
   return target.type === 50 || target.type === 45;
 }
 
@@ -539,7 +555,7 @@ function keepsWorker(target: Entity): boolean {
  * gatherer passes itself as the zone object, so only a drop site whose tile is in its own zone counts; fishing and trade
  * boats pass none (`useSameZoneDropsite`, src/t_c_obj.cpp:685-690, src/act_gath.cpp:173; naval.md §2.2).
  */
-function findDropSite(ctx: GameContext, e: Entity): Entity | undefined {
+export function findDropSite(ctx: GameContext, e: Entity): Entity | undefined {
   const t = typeOf(ctx, e);
   const [site, backup] = t.action!.dropSites;
   if (site === -1) return undefined;
@@ -589,6 +605,7 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
   if (a.type === ACTION_HEAL) return updateHeal(ctx, e, a);
   if (a.type === ACTION_ENTER) return updateEnter(ctx, e, a);
   if (a.type === ACTION_TRANSPORT) return updateTransport(ctx, e, a);
+  if (a.type === ACTION_TRADE) return updateTrade(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   const live = (id: number) => {
     const o = object(ctx, id);

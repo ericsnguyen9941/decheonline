@@ -19,6 +19,7 @@ import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
 import { AI_ACTION_MOVE, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_TARGET_INVALID, notifyObject, updateUnitAI } from './unit-ai';
 import { defaultTransportTask, startTransport } from './transport';
+import { defaultTradeTask, startTrade } from './trade';
 import { refreshSighting, stateChanged } from './visibility';
 import { defaultWonderTask, startWonder, updateWonder } from './wonder';
 import { spriteInfo, type UnitType } from './units';
@@ -139,6 +140,7 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     if (task !== -1) startMake(ctx, e, task);
     else if (defaultWonderTask(t) !== -1) startWonder(ctx, e);
     else if (defaultTransportTask(t) !== -1) startTransport(ctx, e, defaultTransportTask(t), -1, -1);
+    else if (defaultTradeTask(t) !== -1) startTrade(ctx, e, defaultTradeTask(t), undefined, -1, -1);
   }
   // `RGE_Combat_Object::update` refreshes the object's visible-unit records, then ends with the unit AI, on the owner's
   // turn only, with the owner's accumulated time.

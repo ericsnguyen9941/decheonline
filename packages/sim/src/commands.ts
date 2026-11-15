@@ -156,6 +156,17 @@ export interface UnloadCommand {
   y: number;
 }
 
+/**
+ * Trade cargo (`TRIBE_Command::do_command_trade_attribute`, command 0x6D, src/tcommand.cpp:489, support-actions.md §7.6):
+ * each listed trade boat of the sender will carry `attribute` (0 food, 1 wood, 2 stone; the trade panel's three buttons,
+ * src/scr_game.cpp:2057-2063).
+ */
+export interface TradeAttributeCommand {
+  type: 'trade-attribute';
+  units: number[];
+  attribute: number;
+}
+
 /** Resign (`RGE_Command::do_command_resign`, victory.md §4): the sender loses. */
 export interface ResignCommand {
   type: 'resign';
@@ -208,6 +219,7 @@ export type Command =
   | StandGroundCommand
   | AttackGroundCommand
   | UnloadCommand
+  | TradeAttributeCommand
   | RelationCommand
   | AlliedVictoryCommand
   | TributeCommand;
@@ -323,6 +335,13 @@ export function parseCommand(v: unknown): Command | null {
       if (!isPoint(x, y)) return null;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'unload', units: [...(units as number[])], x: x as number, y: y as number };
+    }
+    case 'trade-attribute': {
+      const { units, attribute } = o;
+      // The unit count is a byte on the wire (src/tcommand.cpp:916).
+      if (attribute !== 0 && attribute !== 1 && attribute !== 2) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'trade-attribute', units: [...(units as number[])], attribute };
     }
     case 'relation': {
       const { player, relation } = o;

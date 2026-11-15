@@ -317,8 +317,9 @@ describe('techs.md §7.5 vector R2: the Tool Age through commands', () => {
     // Player 2 issued nothing: its masters, techs and attributes are as they started.
     expect(world.masters[2]).toEqual(start.masters[2]);
     expect(world.techs[2]).toEqual(start.techs[2]);
-    // Except attribute 22, % explored, which the per-second block rewrites (victory.md §4).
-    const unexplored = (a: number[]) => a.map((v, i) => (i === 22 ? 0 : v));
+    // Except attribute 22, % explored, and 9, the trade goods, which the per-second block rewrites (victory.md §4,
+    // support-actions.md §7.4).
+    const unexplored = (a: number[]) => a.map((v, i) => (i === 22 || i === 9 ? 0 : v));
     expect(unexplored(world.attributes[2]!)).toEqual(unexplored(start.attributes[2]!));
     expect(world.masters[1]).not.toEqual(start.masters[1]);
     expect([isEnabled(world, 2, ARCHERY_RANGE), buildingFacet(world, 2, TOWN_CENTER)]).toEqual([false, 1]);

@@ -19,6 +19,7 @@ import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { ACTION_REPAIR, aiRepair } from './repair';
 import { ACTION_CONVERT, ACTION_HEAL, aiPriestAction, FAITH_MAX, GROUP_PRIEST } from './priest';
 import { ACTION_ENTER, ACTION_TRANSPORT, AI_ACTION_ENTER, AI_ACTION_TRANSPORT, AI_ACTION_UNLOAD, unload } from './transport';
+import { ACTION_TRADE, AI_ACTION_TRADE, AI_ORDER_TRADE, aiTrade } from './trade';
 import { newSprite } from './sprites';
 import { FARM, type UnitType } from './units';
 import { TILE_VISIBLE } from './visibility';
@@ -74,6 +75,11 @@ const IDLE_TASKED = 6;
 const NOTE_DONE = 2;
 const NOTE_STOP = 3;
 const NOTE_DIED = 4;
+/** A note that gave the unit a new task (the trade ship's request, src/taiuaimd.cpp:1241). */
+const NOTE_TASKED = 6;
+
+/** `MASTER_OBJECT_DOCK_1`: the only Dock a trade ship looks for (src/taiuaimd.cpp:1238-1239). */
+const DOCK = 45;
 
 /** Which `UnitAIModule` subclass an object has (`TRIBE_Combat_Object::initUnitAI`, unit-ai.md §1.1). */
 export const AiClass = {
@@ -293,6 +299,8 @@ export function aiStateForAction(action: number): [order: number, action: number
       return [AI_ORDER_ENTER, AI_ACTION_ENTER];
     case ACTION_TRANSPORT:
       return [AI_ORDER_TRANSPORT, AI_ACTION_TRANSPORT];
+    case ACTION_TRADE:
+      return [AI_ORDER_TRADE, AI_ACTION_TRADE];
     case ACTION_HEAL:
       return [AI_ORDER_HEAL, AI_ACTION_HEAL];
     default:
@@ -980,8 +988,10 @@ function processNotify(ctx: GameContext, e: Entity, note: Note): number {
       return fishingShipNotify(ctx, e, note);
     case AiClass.TransportShip:
       return transportShipNotify(ctx, e, note);
+    case AiClass.TradeShip:
+      return tradeShipNotify(ctx, e, note);
     default:
-      // The trade ships (no such units yet) and the artifact reactions are not ported.
+      // The artifact reactions are not ported.
       return NOTE_DONE;
   }
 }
@@ -1008,6 +1018,36 @@ function fishingShipNotify(ctx: GameContext, e: Entity, note: Note): number {
   }
   runAwayFromAttackers(ctx, e);
   return NOTE_STOP;
+}
+
+/**
+ * `TribeTradeShipUnitAIModule::processNotify` (src/taiuaimd.cpp:1232-1376, support-actions.md §7.5): when hit, the
+ * fishing ship's reaction (the same code). A task request while trading looks for the closest Dock in its search results,
+ * its owner's or an ally's first, then a neutral's, and trades with it; failing that, or when not trading, it stops. The
+ * explore branch is for computer players' boats. Every other note takes the base path.
+ */
+function tradeShipNotify(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  if (note.type === NOTIFY_ATTACKED) return fishingShipNotify(ctx, e, note);
+  if (note.type !== NOTIFY_REQUEST_TASK) return baseNotify(ctx, e, note);
+  if (ai.action === AI_ACTION_TRADE) {
+    for (const relation of [0, 1]) {
+      const id = closestObject(ctx, e, -1, ObjectState.Active, DOCK, relation);
+      if (id !== -1 && tradeWithObject(ctx, e, id)) return NOTE_TASKED;
+    }
+  }
+  removeCurrentTarget(ai);
+  stopObject(ctx, e, true);
+  return NOTE_DONE;
+}
+
+/** `UnitAIModule::tradeWithObject(id, 1)` (src/aiuaimod.cpp:1921-1943): the unit's `trade`, then the action and target recorded. */
+function tradeWithObject(ctx: GameContext, e: Entity, targetId: number): boolean {
+  const target = ctx.entities.get(targetId);
+  if (!target || !aiTrade(ctx, e, target, true)) return false;
+  setAction(e.ai!, AI_ACTION_TRADE);
+  setTarget(e.ai!, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
+  return true;
 }
 
 /**

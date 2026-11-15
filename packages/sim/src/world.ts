@@ -15,6 +15,7 @@ import {
   type ResearchCommand,
   type StandGroundCommand,
   type UnloadCommand,
+  type TradeAttributeCommand,
   type RelationCommand,
   type AlliedVictoryCommand,
   type TributeCommand,
@@ -44,6 +45,7 @@ import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { doRepair, REPAIR_MAN } from './repair';
 import { exitAll, exitObj, isTransport } from './transport';
+import { regrowTradeGoods, setTradeAttribute, UNIT_LEVEL_TRADE } from './trade';
 import { orderResearch, stopBuilding } from './research';
 import { MapStack } from './rmm-base';
 import { MAP_LARGE, MAP_MOSTLY_LAND, mapGenerate2 } from './rmm-controller';
@@ -301,7 +303,7 @@ export interface Snapshot {
   diplomacy: DiplomacyState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19 };
 
 /** `command_flag += 1` (src/act_obj.cpp:107, :135, :143): a player's command reached the unit; a byte. */
 function countCommand(e: Entity): void {
@@ -812,7 +814,8 @@ export class World {
    */
   private updatePlayer(ctx: GameContext, i: number): void {
     const rng = this.rng;
-    // `TRIBE_Player::update`: once a game second, before its objects, the alert cooldown runs down (Gaia's has none).
+    // `TRIBE_Player::update`: once a game second, before its objects, the alert cooldown runs down and the trade goods
+    // regrow (support-actions.md §7.4; Gaia's has none).
     if (i > 0) {
       this.playerUpdateTime[i] = add32(this.playerUpdateTime[i]!, this.deltaSeconds);
       while (this.playerUpdateTime[i]! > 1) {
@@ -825,6 +828,7 @@ export class World {
           objects: ctx.objectsOf(i),
           groupOf: (e) => typeOf(this, e).group,
         });
+        regrowTradeGoods(this.attributes[i]!);
       }
     }
     // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates
@@ -875,6 +879,8 @@ export class World {
         return this.doCommandAttackGround(player, command);
       case 'unload':
         return this.doCommandUnload(player, command);
+      case 'trade-attribute':
+        return this.doCommandTradeAttribute(player, command);
       case 'relation':
         return this.doCommandRelation(player, command);
       case 'allied-victory':
@@ -1183,6 +1189,19 @@ export class World {
   }
 
   /**
+   * `TRIBE_Command::do_command_trade_attribute` (src/tcommand.cpp:489, support-actions.md §7.6): each listed object's held
+   * attribute becomes the cargo. Port-side guards: only the sender's active trade boats (the sender's own filter,
+   * `get_selected_objects_to_command` with `unit_level` 5, src/tplayer.cpp:946).
+   */
+  private doCommandTradeAttribute(player: number, command: TradeAttributeCommand): void {
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e || e.owner !== player || e.state !== ObjectState.Active || typeOf(this, e).unitLevel !== UNIT_LEVEL_TRADE) continue;
+      setTradeAttribute(e, command.attribute);
+    }
+  }
+
+  /**
    * Attack Ground (`TRIBE_Command::do_command_attack_ground`, src/tcommand.cpp:442, commands.md §5): each listed unit
    * gets `attack(x, y, 0, 1)`. Port-side guards: only the sender's active objects (the sender's own filter,
    * `get_selected_objects_to_command`).
@@ -1289,7 +1308,7 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
-      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute') {
+      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute' || q.command.type === 'trade-attribute') {
         hashValue(h, q.command);
       }
     }
