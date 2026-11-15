@@ -36,7 +36,7 @@ Spec: [core.md](core.md).
 
 ## Commands, turns, lockstep, sync
 
-Turn length, latency and speed retuning: [turn-timing.md](turn-timing.md).
+Turn length, latency and speed retuning, and the relay protocol for a broken socket, a dropped player and Quit Game (§9): [turn-timing.md](turn-timing.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |

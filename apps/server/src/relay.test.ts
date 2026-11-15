@@ -295,6 +295,20 @@ describe('turn relay', () => {
     await host.expectSilence();
     expect(rooms.rooms.has(code)).toBe(false);
   });
+
+  test('a player who resigned leaves without ending the game: the server fills its batches', async () => {
+    const { host, guest, code } = await pair();
+    await startGame(host, guest);
+    guest.send({ t: 'turn', turn: 0, commands: [{ type: 'resign' }] });
+    guest.send({ t: 'leave' });
+    host.send({ t: 'turn', turn: 0, commands: [] });
+    expect(await host.expect('turn')).toEqual({ t: 'turn', turn: 0, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [{ type: 'resign' }] }] });
+    host.send({ t: 'turn', turn: 1, commands: [] });
+    expect(await host.expect('turn')).toEqual({ t: 'turn', turn: 1, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [] }] });
+    expect(rooms.rooms.get(code)?.members.map((m) => m.dropped)).toEqual([false, true]);
+    host.close();
+    await guest.expectSilence();
+  });
 });
 
 describe('rejoin', () => {

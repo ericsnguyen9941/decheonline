@@ -165,6 +165,17 @@ export class Lockstep {
     this.pending.push(command);
   }
 
+  /**
+   * Leave the game (Quit Game, `disconnect_multiplayer_game`): the batch of the turn under way goes out at once with
+   * `last` after the queued commands (the resign, `SendIResignMsg`), and the loop stops.
+   */
+  quit(last: Command[]): void {
+    if (this.stopped) return;
+    this.link.send({ t: 'turn', turn: this.world.turn, commands: [...this.pending, ...last] });
+    this.pending = [];
+    this.stop();
+  }
+
   stop(): void {
     this.stopped = true;
     this.unsubscribe();

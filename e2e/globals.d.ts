@@ -55,6 +55,9 @@ interface Window {
     tileVisibility(col: number, row: number, player?: number): number;
     minimapPoint(col: number, row: number): { x: number; y: number } | null;
     sounds(): { event: string; sound: number; game: number; wav: number | null; source: number }[];
+    gameResult(): { endCondition: number; winners: number[]; status: number[] } | null;
+    score(player?: number): { total: number; military: number; economy: number; religion: number; technology: number; survival: number; wonder: number };
+    dropLink(holdMs: number): void;
   };
 }
 

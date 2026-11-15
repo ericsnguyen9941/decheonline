@@ -58,6 +58,8 @@ interface Member {
   dropped: boolean;
   /** Cancels the drop while the socket is away. */
   cancelDrop: (() => void) | null;
+  /** Submitted a resign command: leaving no longer ends the game for the others. */
+  resigned: boolean;
 }
 
 export class Room {
@@ -172,7 +174,9 @@ export class RoomRegistry {
   /**
    * Remove a peer from its room: a leave message or a socket closed on purpose (`dropped` false), or a socket that broke
    * (`dropped`). In a started game a broken socket keeps its slot for `rejoin` until `DROP_AFTER_MS` after the server
-   * last heard from it; then the player is dropped (docs/spec/turn-timing.md §9). Leaving ends the game for the others.
+   * last heard from it; then the player is dropped (docs/spec/turn-timing.md §9). Leaving ends the game for the others,
+   * unless the player resigned first (Quit Game, `disconnect_multiplayer_game` sends `SendIResignMsg`): then the game
+   * goes on for them, the server filling its batches.
    */
   disconnect(peer: Peer, dropped = false): void {
     const room = this.byPeer.get(peer);
@@ -180,6 +184,13 @@ export class RoomRegistry {
     this.byPeer.delete(peer);
     const slot = room.members.findIndex((m) => m.peer === peer);
     if (room.started && dropped) return this.away(room, room.members[slot]!);
+    const member = room.members[slot]!;
+    if (room.started && member.resigned && room.members.some((m) => m !== member && m.peer !== null)) {
+      member.peer = null;
+      member.dropped = true;
+      this.release(room);
+      return;
+    }
     room.members.splice(slot, 1);
     if (room.started) {
       room.broadcast({ t: 'ended', reason: 'peer-left' });
@@ -264,6 +275,7 @@ export class RoomRegistry {
       heardAt: this.now(),
       dropped: false,
       cancelDrop: null,
+      resigned: false,
     };
   }
 
@@ -333,6 +345,7 @@ export class RoomRegistry {
     }
     member.pending.set(turn, commands);
     member.nextTurn++;
+    if (commands.some((c) => c.type === 'resign')) member.resigned = true;
     this.release(room);
   }
 

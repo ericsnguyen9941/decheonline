@@ -310,3 +310,65 @@ to reproduce §§2–6; they are not decomp behaviour.
   last 50 `requestAnimationFrame` intervals (`frame-clock.ts`), so it rises
   with rendering cost and machine load, and `G` with it, as in the original.
   `?debug=net` shows `G`, `F`, the frame time and the round trips.
+
+## 9. Protocol: a broken socket, a dropped player, a player who quits
+
+What the original does with a player it stops hearing from (decomp), then
+how the relay reproduces it (port).
+
+**Original.** Every machine checks how long it has not heard from each other
+player (`TCommunications_Handler`, `src/com_hand.cpp:540-575`). After 25 s it
+notifies `COMM_PLAYER_NOT_RESPONDING`, shown as "Problem communicating with
+%s..." (`STRING_ID_ERROR_COMMUNICATION` 1217) with game sound 2, and again
+every 25 s; the game itself simply waits, because the next turn cannot run
+without that player's "turn done". A non-host player that stays silent
+`0x1D6B4` ms (120.5 s) is kicked; every machine then runs
+`command_resign(player, 1)` on `COMM_OTHER_PLAYER_DROPPED`
+(`RGE_Base_Game::handle_user_command`, `src/basegame.cpp:2903`), which the
+game screen shows as "%s disconnected." (3012). Quit Game in a multiplayer
+game (`do_game_over` -> `disconnect_multiplayer_game`,
+`src/tribegam.cpp:4293`) first sends `SendIResignMsg`: a resign that executes
+on `current_turn + CommandTurnIncrement` on every machine
+(`CheckPlayerStopTurn` -> `COMM_PLAYER_RESIGNED` -> `command_resign(player, 0)`,
+"%s resigned." 3013), then waits up to 15 s for its messages to go out. The
+original has no way back into a game once the link is gone.
+
+**Port.** Messages are in `packages/protocol/src/messages.ts`; the relay is
+`apps/server/src/rooms.ts`; the client side is `apps/client/src/net/link.ts`
+and `lockstep/lockstep.ts`.
+
+1. `start` gives each client a secret `token` along with its slot.
+2. A socket that breaks (close code 1006) or that the client closes as a
+   drop (code >= 4000; `Link.drop`, `?debug=net` `window.__game.dropLink`)
+   does not leave the room: the member is *away*, its slot held. A clean
+   close (1000/1001) or `leave` still ends the game for the other player
+   (`ended peer-left`), except after item 6.
+3. While a game runs the client's link reconnects every 1 s
+   (`RETRY_MS`) for up to `DROP_AFTER_MS` + 10 s, and its first message on
+   the new socket is `rejoin {code, slot, token, received}`, `received` being
+   the number of released turns it already has. The server answers
+   `rejoined {nextTurn}` (the next turn it expects from that slot), then
+   every released turn from `received` on, then `rtt`, then a ping. The
+   client sends again each batch of turn >= `nextTurn` it had sent but not
+   seen released (they may have been lost with the socket), and runs the
+   missed turns as fast as they are due. A wrong token, a dropped slot or a
+   room that is gone gets `error bad-rejoin`; the client then ends its game
+   as dropped (`STRING_ID_PLAYER_DROPPED_NOTICE`, OK opens the achievements).
+4. Meanwhile the other client's loop waits on the turn it lacks, as the
+   original does; after 25 s (`NOT_RESPONDING_MS`) and every 25 s it shows
+   "Problem communicating with %s..." with sound 2. The relay cannot tell
+   which slot is late, so it names every other player still playing (exact
+   with two players).
+5. A member away `DROP_AFTER_MS` (120.5 s) after the server last heard from
+   it is dropped: the server broadcasts `dropped {slot}`, puts a `resign` in
+   that slot's next batch and fills its batches (empty) from then on;
+   hashes from a dropped slot are ignored. Clients show "%s disconnected."
+   for a player resigned after `dropped`. A room with nobody connected is
+   closed.
+6. Quit Game while the game is on: the client sends the batch of the turn
+   under way at once with a `resign` appended (`Lockstep.quit`), then
+   `leave`. A member that has submitted a `resign` and leaves (or closes
+   cleanly) is not an "opponent left": the server marks it dropped and fills
+   its batches, so the resign executes two turns later on the other client,
+   which wins and shows "%s resigned.". After the game is over the quitting
+   client sends no resign.

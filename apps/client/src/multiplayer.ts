@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, type Command, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { SoundPlayer } from './audio/sound-player';
@@ -11,7 +11,7 @@ import { tileCoordsToPixel } from './map/iso';
 import { constructionProgress, researchStatus, trainingStatus } from './hud/commands';
 import { GameHud } from './hud/game-hud';
 import { resourcesOf, type Resources } from './hud/resource-bar';
-import { connect } from './net/link';
+import { connect, type Link } from './net/link';
 import { isBuildingObject, isUnit, UnitLayer, type Ghost } from './units/unit-layer';
 
 /** What `?debug=net` exposes as `window.__game`, for tests and manual poking. */
@@ -75,6 +75,12 @@ export interface NetDebug {
   minimapPoint(col: number, row: number): { x: number; y: number } | null;
   /** Every sound triggered so far, oldest first (whether or not audio has started); empty before the HUD is up. */
   sounds(): SoundTrigger[];
+  /** How the game ended and who won (`World.gameResult`); null while it goes on. */
+  gameResult(): GameResult | null;
+  /** Victory points of `player` (default: this client's) by achievements group (`World.score`). */
+  score(player?: number): Score;
+  /** Break the socket as a network fault would (close code 4000) and stay away `holdMs` before rejoining. */
+  dropLink(holdMs: number): void;
 }
 
 export interface DebugNet {
@@ -259,7 +265,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       }
       // After the end of the game the other player leaving changes nothing: this one stays until Menu/Quit Game.
     };
-    if (debug) panel = debugPanel(host, game, player, () => units, () => hud, () => sounds, frames);
+    if (debug) panel = debugPanel(host, game, link, player, () => units, () => hud, () => sounds, frames);
     void createAssetProvider().then(async (provider) => {
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
@@ -303,8 +309,9 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         game: {
           names,
           resign: () => game.issue({ type: 'resign' }),
+          // The original resigns a player who quits a game still on (`SendIResignMsg`): the other one wins.
           disconnect: () => {
-            game.stop();
+            game.quit(game.world.gameOver || game.world.playerStatus(player) !== 0 ? [] : [{ type: 'resign' }]);
             link.send({ t: 'leave' });
           },
           leave: teardown,
@@ -327,6 +334,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
 function debugPanel(
   host: HTMLElement,
   game: Lockstep,
+  link: Link,
   player: number,
   layer: () => UnitLayer | undefined,
   hud: () => GameHud | undefined,
@@ -433,6 +441,9 @@ function debugPanel(
     tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
     minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,
     sounds: () => [...(sounds()?.log ?? [])],
+    gameResult: () => game.world.gameResult(),
+    score: (p = player) => game.world.score(p),
+    dropLink: (ms) => link.drop?.(ms),
   };
   return panel;
 }

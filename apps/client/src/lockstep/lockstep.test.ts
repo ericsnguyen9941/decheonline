@@ -216,4 +216,16 @@ describe('lockstep', () => {
     link.receive(release(0));
     expect(lockstep.turn).toBe(0);
   });
+
+  test('quit sends the batch of the turn under way with the queued commands and the resign, then stops', () => {
+    const { link, timers, lockstep } = setup();
+    runThrough(link, timers, lockstep, 2);
+    link.sent.splice(0);
+    lockstep.issue({ type: 'test', x: 1, y: 2 });
+    lockstep.quit([{ type: 'resign' }]);
+    expect(link.sent).toEqual([{ t: 'turn', turn: 3, commands: [{ type: 'test', x: 1, y: 2 }, { type: 'resign' }] }]);
+    expect(timers.due).toEqual([]);
+    lockstep.quit([{ type: 'resign' }]);
+    expect(link.sent).toHaveLength(1);
+  });
 });

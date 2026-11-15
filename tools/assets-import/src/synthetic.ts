@@ -37,21 +37,22 @@ export const SYNTHETIC = {
   groupNumberSlp: 50403,
   /**
    * language.dll's strings; languagex.dll replaces `overriddenString`. 4151-4170 are the hotkeys (`STRING_ID_HOTKEY_*`,
-   * the real letters), 16132 the Villager's.
+   * the real letters), 16132 the Villager's, 9004/9005/3013 the end of the game's (`STRING_ID_VICTORY_MESSAGE` ...), 1217 a late turn's.
    */
   strings: {
     10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
     4151: 'B', 4152: 'S', 4153: 'G', 4154: 'U', 4155: 'X', 4157: 'D', 4158: 'T', 4159: 'H',
     4160: 'N', 4161: 'B', 4162: 'D', 4163: 'A', 4164: 'K', 4165: 'L', 4166: 'P', 4167: 'Y',
     4170: 'M', 16132: 'C', 3040: 'Click an area to move there.',
+    9004: 'You are victorious!', 9005: 'You have been defeated!', 3013: '%s resigned.', 1217: 'Problem communicating with %s...',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */
   minimap: { width: 220, height: 114 },
   /** Every edge draws the whole tile plain; edge 1 also leaves `blackSpan` black. */
   blackSpan: [16, 0, 3] as TileSpan,
-  /** sounds.drs wavs: data's, data2's (which also replaces `overriddenWav`), and interfac.drs's button click. */
-  wavs: { data: [5000, 5001], data2: [5001, 5002], interface: [50301] },
+  /** sounds.drs wavs: data's, data2's (which also replaces `overriddenWav`), and interfac.drs's button click, won and lost. */
+  wavs: { data: [5000, 5001], data2: [5001, 5002], interface: [50301, 50320, 50321] },
   overriddenWav: 5001,
   /**
    * The won achievements screen's info file (`scr7`, bina 50057): background SLP 50131 at 640 wide, palette 50505 (index c
