@@ -16,7 +16,7 @@ import { add32, f32, mul32, sub32 } from './num';
 import { updateResearch } from './research';
 import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
-import { updateUnitAI } from './unit-ai';
+import { AI_ACTION_MOVE, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_TARGET_INVALID, notifyObject, updateUnitAI } from './unit-ai';
 import { refreshSighting, stateChanged } from './visibility';
 import { spriteInfo, type UnitType } from './units';
 
@@ -115,7 +115,10 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     // Only `remove` drops an attack; a failed one stays in state 13 and tells the unit AI every update.
     if (updateAttack(ctx, e) === ActionResult.Remove) deleteActions(ctx, e);
   } else if (e.mover?.action) {
+    // A top-level move that ends tells the unit AI, which resets the order (src/act_move.cpp:140, :205, :218, :236).
+    const sub = e.mover.action.sub;
     const r = updateMover(ctx, e);
+    if (!sub) notifyMoveEnd(ctx, e, r);
     if (r === ActionResult.Failed || r === ActionResult.Remove) endAction(e.mover);
   } else if (e.make) {
     updateMake(ctx, e, e.make);
@@ -129,6 +132,12 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   if (t.masterType >= 50) refreshSighting(ctx, e, t);
   if (e.ai && ctx.playerTurn === e.owner) updateUnitAI(ctx, e, ctx.playerTimeDelta[e.owner]!);
   return remove;
+}
+
+function notifyMoveEnd(ctx: GameContext, e: Entity, r: ActionResult): void {
+  if (r === ActionResult.Completed) notifyObject(ctx, e, e.id, NOTIFY_ACTION_COMPLETED, AI_ACTION_MOVE);
+  else if (r === ActionResult.Failed) notifyObject(ctx, e, e.id, NOTIFY_ACTION_FAILED, AI_ACTION_MOVE);
+  else if (r === ActionResult.TargetInvalid) notifyObject(ctx, e, e.id, NOTIFY_TARGET_INVALID, AI_ACTION_MOVE);
 }
 
 /** `RGE_Static_Object::update` (src/stat_obj.cpp:1166). */

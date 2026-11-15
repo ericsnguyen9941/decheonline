@@ -182,6 +182,16 @@ current action:
    continue (`src/act_move.cpp:191-210`).
 4. A negative goal coordinate wraps to 255 when truncated to a byte (decomp
    note at `src/act_move.cpp:154-156`).
+5. **Notifying the unit AI**: a top-level move (not a sub-action of work,
+   attack, build or repair) that completes, fails or finds its target invalid
+   notifies its own object, `notifyObject(ACTION_COMPLETED | ACTION_FAILED |
+   TARGET_INVALID, ACTION_MOVE)` (`src/act_move.cpp:140`, `:205`, `:218`,
+   `:236`). The unit AI sees order = action + 100 and calls `stopObject(1)`,
+   which sets order and action to -1 (`src/aiuaimod.cpp:2974-2981`); the
+   port does it in `objects.ts` right after `updateMover`. Without it a
+   moved unit would keep order MOVE and ignore "attacked" notes (a moved
+   Villager would not flee) and allies with an order would not answer a
+   call for help.
 
 ### 5.1 Move command (`RGE_Command::do_command_move`, `src/Command.cpp:322`)
 

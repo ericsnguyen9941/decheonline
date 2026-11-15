@@ -85,7 +85,7 @@ describe('victory.md §3: relics and ruins on a random map (src/tworld.cpp:727-7
 
 describe('capture: TribeArtifactUnitAIModule (src/taiuaimd.cpp:2128-2162) and change_ownership (src/t_c_obj.cpp:240-251)', () => {
   test("a Gaia relic becomes the only nearby player's, with its storage (attribute 7) and player sprite", () => {
-    const w = world({ owner: 0, type: RELIC, x: 30.5, y: 12.5 }, { owner: 1, type: VILLAGER, x: 32.5, y: 12.5 }, { owner: 2, type: VILLAGER, x: 50.5, y: 12.5 });
+    const w = world({ owner: 0, type: RELIC, x: 30.5, y: 12.5 }, { owner: 1, type: VILLAGER, x: 32.5, y: 12.5 }, { owner: 2, type: VILLAGER, x: 47.5, y: 12.5 });
     const relic = w.entities.get(1)!;
     expect([relic.owner, w.attributes[0]![ATTR_ARTIFACTS], relic.sprite!.graphic]).toEqual([0, 1, typeOf(w, relic).standing.graphic]);
     const gaiaGraphic = relic.sprite!.graphic;
@@ -97,7 +97,7 @@ describe('capture: TribeArtifactUnitAIModule (src/taiuaimd.cpp:2128-2162) and ch
   });
 
   test('recapture: with two players in view the holder keeps it; once the holder leaves, the other takes it', () => {
-    const w = world({ owner: 0, type: RELIC, x: 30.5, y: 12.5 }, { owner: 1, type: VILLAGER, x: 32.5, y: 12.5 }, { owner: 2, type: VILLAGER, x: 50.5, y: 12.5 });
+    const w = world({ owner: 0, type: RELIC, x: 30.5, y: 12.5 }, { owner: 1, type: VILLAGER, x: 32.5, y: 12.5 }, { owner: 2, type: VILLAGER, x: 47.5, y: 12.5 });
     const relic = w.entities.get(1)!;
     runUntil(w, () => relic.owner === 1, 20);
     move(w, 2, 3, 31.5, 13.5);
@@ -117,7 +117,7 @@ describe('capture: TribeArtifactUnitAIModule (src/taiuaimd.cpp:2128-2162) and ch
   });
 
   test('Gaia never takes it back: the holder walks away and keeps it', () => {
-    const w = world({ owner: 0, type: RELIC, x: 30.5, y: 12.5 }, { owner: 1, type: VILLAGER, x: 32.5, y: 12.5 }, { owner: 2, type: VILLAGER, x: 50.5, y: 12.5 });
+    const w = world({ owner: 0, type: RELIC, x: 30.5, y: 12.5 }, { owner: 1, type: VILLAGER, x: 32.5, y: 12.5 }, { owner: 2, type: VILLAGER, x: 47.5, y: 12.5 });
     const relic = w.entities.get(1)!;
     runUntil(w, () => relic.owner === 1, 20);
     move(w, 1, 2, 5.5, 5.5);
