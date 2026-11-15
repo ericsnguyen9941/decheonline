@@ -178,6 +178,10 @@ export interface UnitType {
   clearanceY: number;
   /** `can_be_built_on`: a foundation removes objects with this set (`check_destructables`). */
   canBeBuiltOn: number;
+  /** `obj_max` (the dat's garrison capacity, a byte): how many objects fit inside (`more_room`, naval.md §8). */
+  objMax: number;
+  /** `unit_level` (the dat's interface kind): 7 marks a transport, the target of the enter task (naval.md §8). */
+  unitLevel: number;
   /** `elevation_flag` (the dat's hill mode): 1 allows flat and some slope tiles, 2 flat tiles only. */
   elevationMode: number;
   /** `center_tile_req1/2` (the dat's placement terrain), -1 none. */
@@ -335,6 +339,8 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     clearanceX: r.clearance[0],
     clearanceY: r.clearance[1],
     canBeBuiltOn: r.canBeBuiltOn,
+    objMax: r.objMax,
+    unitLevel: r.unitLevel,
     elevationMode: r.elevationMode,
     placementTerrain: r.placementTerrain,
     placementSideTerrain: r.placementSideTerrain,

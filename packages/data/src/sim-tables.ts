@@ -60,6 +60,8 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
     combatLevel: u.combatLevel,
     blastDefense: u.blastDefenseLevel,
     canBeBuiltOn: u.canBeBuiltOn,
+    objMax: u.garrisonCapacity,
+    unitLevel: u.interfaceKind,
     elevationMode: u.hillMode,
     placementTerrain: [u.placementTerrain[0]!, u.placementTerrain[1]!],
     placementSideTerrain: [u.placementSideTerrain[0]!, u.placementSideTerrain[1]!],

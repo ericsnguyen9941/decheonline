@@ -28,6 +28,10 @@ export interface SimUnitRecord {
   /** `area_effect_object_level`: a blast hits this object when it is at least the blast's level. */
   blastDefense: number;
   canBeBuiltOn: number;
+  /** `obj_max` (the dat's garrison capacity): how many objects fit inside. */
+  objMax: number;
+  /** `unit_level` (the dat's interface kind): 7 is a transport the task list sends units into. */
+  unitLevel: number;
   elevationMode: number;
   placementTerrain: [number, number];
   placementSideTerrain: [number, number];

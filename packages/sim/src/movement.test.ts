@@ -39,6 +39,8 @@ const UNIT: UnitType = {
   clearanceX: f32(0.2),
   clearanceY: f32(0.2),
   canBeBuiltOn: 0,
+  objMax: 0,
+  unitLevel: 0,
   elevationMode: 0,
   placementTerrain: [-1, -1],
   placementSideTerrain: [-1, -1],
