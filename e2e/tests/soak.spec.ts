@@ -6,8 +6,12 @@ import { ARCHERY_RANGE, BARRACKS, BOWMAN, BUILDER, CLUBMAN, FARM, FORAGE, FORAGE
 // project (`npm run test:soak`), never part of `test:e2e`. The first test checks the detector itself: a client that
 // changes its own state after one turn must be reported at the next.
 //
-// Env: SOAK_MINUTES game minutes; SOAK_SEED the map seed (default random, printed; both clients play it); SOAK_BOT_SEED
-// the commands' seed (default derived from the map seed). A failing run is replayed with the two seeds.
+// A game that ends cleanly (conquest) before the minutes are up is not a failure: both clients leave it and play a new
+// game (new invite code, next derived map and command seed, printed) until the summed game time reaches SOAK_MINUTES.
+//
+// Env: SOAK_MINUTES game minutes; SOAK_SEED the first game's map seed (default random, printed; both clients play it);
+// SOAK_BOT_SEED its commands' seed (default derived from the map seed). A failing run is replayed with the two seeds
+// printed for the game that failed.
 const MINUTES = Number(process.env['SOAK_MINUTES'] ?? 20);
 const MAP_SEED = process.env['SOAK_SEED'] !== undefined ? Number(process.env['SOAK_SEED']) : Math.floor(Math.random() * 0x7fffffff);
 const BOT_SEED = process.env['SOAK_BOT_SEED'] !== undefined ? Number(process.env['SOAK_BOT_SEED']) : MAP_SEED ^ 0x5bd1e995;
@@ -18,7 +22,13 @@ const STALL_MS = 180_000;
 
 // speed=20 runs the lockstep clock 20x faster; resources=20000 pays for what the bot builds, trains and researches;
 // bowmen=6 gives every player soldiers to attack with before it has an Archery Range or Barracks; market=1 gives every player a built Market (its tech enables the Farm). Both clients ask for the same.
-const url = (extra: string) => `/?debug=net&speed=20&resources=20000&bowmen=6&market=1&seed=${MAP_SEED}${extra}`;
+const url = (seed: number, extra: string) => `/?debug=net&speed=20&resources=20000&bowmen=6&market=1&seed=${seed}${extra}`;
+/** Game `n`'s map seed: the first game's is SOAK_SEED, the next ones step by the golden-ratio constant. */
+const mapSeedOf = (n: number) => (MAP_SEED + Math.imul(n, 0x9e3779b1)) & 0x7fffffff;
+/** Game `n`'s command seed: SOAK_BOT_SEED for the first game, else derived from that game's map seed. */
+const botSeedOf = (n: number) => (n === 0 ? BOT_SEED : mapSeedOf(n) ^ 0x5bd1e995);
+/** More games than this means games end at once, not early. */
+const MAX_GAMES = 60;
 
 const VILLAGERS: number[] = [VILLAGER, BUILDER, FORAGER, LUMBERJACK, HUNTER, MINER_STONE, MINER_GOLD, 259 /* Farmer */, 156 /* Repairman */];
 const MILITARY: number[] = [CLUBMAN, BOWMAN, SCOUT, SLINGER];
@@ -28,16 +38,16 @@ const TRAINS: Record<number, number[]> = { [TOWN_CENTER]: [VILLAGER], [BARRACKS]
 const BUILDINGS = [HOUSE, HOUSE, HOUSE, FARM, FARM, FARM, BARRACKS, GRANARY, STORAGE_PIT, ARCHERY_RANGE, STABLE, MARKET];
 const TECH_COUNT = 127;
 
-async function open(browser: Browser, extra = ''): Promise<Page> {
+async function open(browser: Browser, seed: number, extra = ''): Promise<Page> {
   const page = await (await browser.newContext({ viewport: { width: 800, height: 600 } })).newPage();
-  await page.goto(url(extra));
+  await page.goto(url(seed, extra));
   return page;
 }
 
 /** Host creates, guest joins by code, both ready (host with `civs`), host starts; resolves once both have drawn the map. */
-async function startGame(browser: Browser, setup: { civs: [number, number]; guestExtra?: string; hostExtra?: string; lobby?: boolean }): Promise<[Page, Page]> {
-  const host = await open(browser, setup.hostExtra);
-  const guest = await open(browser, setup.guestExtra);
+async function startGame(browser: Browser, setup: { civs: [number, number]; seed?: number; guestExtra?: string; hostExtra?: string; lobby?: boolean }): Promise<[Page, Page]> {
+  const host = await open(browser, setup.seed ?? MAP_SEED, setup.hostExtra);
+  const guest = await open(browser, setup.seed ?? MAP_SEED, setup.guestExtra);
   await host.getByTestId('name').fill('Alice');
   await host.getByTestId('create').click();
   const code = (await host.getByTestId('invite-code').textContent())!;
@@ -243,59 +253,97 @@ class Bot {
   }
 }
 
-test(`two clients play ${MINUTES} minutes of game time by invite code without a desync`, async ({ browser }) => {
-  const rand = rng(BOT_SEED ^ 0x1234);
-  const civs: [number, number] = [1 + rand.int(16), 1 + rand.int(16)];
-  console.log(`soak: map seed ${MAP_SEED} (SOAK_SEED), command seed ${BOT_SEED} (SOAK_BOT_SEED), civs ${civs.join(' and ')}, ${MINUTES} min`);
-  const [host, guest] = await startGame(browser, { civs, lobby: true });
-  const pages = [host, guest];
-  const bots = [new Bot(host, BOT_SEED), new Bot(guest, BOT_SEED + 1)];
-  for (const bot of bots) await bot.prepare();
+interface GameReport {
+  turn: number;
+  /** Game time of the world (it stops when the game ends), ms. */
+  timeMs: number;
+  /** The result when the game ended before its time was up, else null. */
+  ended: string | null;
+  hashes: [number | undefined, number | undefined];
+}
 
-  const endMs = MINUTES * 60_000;
-  let turn = await turnOf(host);
-  let rounds = 0;
-  const wallStart = Date.now();
-  for (;;) {
-    // Wait on state: the next round's turn on both clients. Wall time is not a cap; a stalled game is.
-    turn += ROUND_TURNS;
-    for (const page of pages) await page.waitForFunction((t) => window.__game!.turn() >= t, turn, { timeout: STALL_MS });
+/** One game between two fresh clients for `limitMs` of game time or until it ends; a desync throws. */
+async function playGame(browser: Browser, n: number, limitMs: number, issued: Map<string, number>): Promise<GameReport> {
+  const rand = rng(botSeedOf(n) ^ 0x1234);
+  const civs: [number, number] = [1 + rand.int(16), 1 + rand.int(16)];
+  console.log(`soak: game ${n + 1}: map seed ${mapSeedOf(n)} (SOAK_SEED), command seed ${botSeedOf(n)} (SOAK_BOT_SEED), civs ${civs.join(' and ')}, up to ${Math.round(limitMs / 1000)} s`);
+  const [host, guest] = await startGame(browser, { civs, seed: mapSeedOf(n), lobby: true });
+  const pages = [host, guest];
+  try {
+    const bots = [new Bot(host, botSeedOf(n)), new Bot(guest, botSeedOf(n) + 1)];
+    for (const bot of bots) await bot.prepare();
+
+    let turn = await turnOf(host);
+    let rounds = 0;
+    let ended: string | null = null;
+    const wallStart = Date.now();
+    for (;;) {
+      // Wait on state: the next round's turn on both clients. Wall time is not a cap; a stalled game is.
+      turn += ROUND_TURNS;
+      for (const page of pages) await page.waitForFunction((t) => window.__game!.turn() >= t, turn, { timeout: STALL_MS });
+      const failure = await desyncMessage(host, guest);
+      if (failure) throw new Error(failure);
+      const [time, result] = await host.evaluate(() => [window.__game!.gameTime(), window.__game!.gameResult()] as const);
+      if (result) {
+        const scores = await host.evaluate(() => [1, 2].map((p) => window.__game!.score(p).total));
+        ended = `${JSON.stringify(result)}, scores ${scores.join(' and ')}`;
+        break;
+      }
+      if (time >= limitMs) break;
+      for (const bot of bots) await bot.round();
+      if (++rounds % 25 === 0) console.log(`soak: game ${n + 1}: turn ${turn}, game time ${Math.round(time / 1000)} s, wall ${Math.round((Date.now() - wallStart) / 1000)} s`);
+    }
+
+    // Both clients past the host's last turn, then the same turn's hash from each, compared here and by the relay.
+    const last = await turnOf(host);
+    await guest.waitForFunction((t) => window.__game!.turn() > t + 2, last, { timeout: STALL_MS });
+    await host.waitForFunction((t) => window.__game!.turn() > t + 2, last, { timeout: STALL_MS });
     const failure = await desyncMessage(host, guest);
     if (failure) throw new Error(failure);
-    const [time, result] = await host.evaluate(() => [window.__game!.gameTime(), window.__game!.gameResult()] as const);
-    if (result) {
-      const scores = await host.evaluate(() => [1, 2].map((p) => window.__game!.score(p).total));
-      throw new Error(`the game ended at turn ${turn} (game time ${Math.round(time / 1000)} s) before the ${MINUTES} minutes were up: ${JSON.stringify(result)}, scores ${scores.join(' and ')}`);
+    const [h, g] = await hashesAt(host, guest, last);
+    if (h !== g) throw new Error(`desync at turn ${last}: host hash ${hex(h)}, guest hash ${hex(g)} (the relay reported nothing)`);
+
+    const summary = await Promise.all(
+      pages.map((page) =>
+        page.evaluate(() => {
+          const g = window.__game!;
+          const mine = (p: number) => g.units().filter((u) => u.owner === p).length;
+          const built = (p: number) => g.buildings().filter((b) => b.owner === p).length;
+          const soldiers = (p: number) => g.units().filter((u) => u.owner === p && [73, 4, 299, 347].includes(u.type)).length;
+          return [1, 2].map((p) => `player ${p}: ${mine(p)} units (${soldiers(p)} soldiers), ${built(p)} buildings, age ${g.age(p)}, food ${Math.floor(g.resources(p).food)}`);
+        }),
+      ),
+    );
+    expect(summary[0]).toEqual(summary[1]);
+    const time = await host.evaluate(() => window.__game!.gameTime());
+    for (const [i, bot] of bots.entries()) {
+      console.log(`soak: game ${n + 1}: ${i === 0 ? 'host' : 'guest'} issued ${[...bot.issued].map(([k, v]) => `${v} ${k}`).join(', ')}`);
+      for (const [k, v] of bot.issued) issued.set(k, (issued.get(k) ?? 0) + v);
     }
-    if (time >= endMs) break;
-    for (const bot of bots) await bot.round();
-    if (++rounds % 25 === 0) console.log(`soak: turn ${turn}, game time ${Math.round(time / 1000)} s, wall ${Math.round((Date.now() - wallStart) / 1000)} s`);
+    console.log(`soak: game ${n + 1}: ${summary[0]!.join('; ')}`);
+    return { turn: last, timeMs: time, ended, hashes: [h, g] };
+  } finally {
+    for (const page of pages) await page.context().close();
   }
+}
 
-  // Both clients past the host's last turn, then the same turn's hash from each, compared here and by the relay.
-  const last = await turnOf(host);
-  await guest.waitForFunction((t) => window.__game!.turn() > t + 2, last, { timeout: STALL_MS });
-  await host.waitForFunction((t) => window.__game!.turn() > t + 2, last, { timeout: STALL_MS });
-  const failure = await desyncMessage(host, guest);
-  if (failure) throw new Error(failure);
-  const [h, g] = await hashesAt(host, guest, last);
-  if (h !== g) throw new Error(`desync at turn ${last}: host hash ${hex(h)}, guest hash ${hex(g)} (the relay reported nothing)`);
-
-  const summary = await Promise.all(
-    pages.map((page) =>
-      page.evaluate(() => {
-        const g = window.__game!;
-        const mine = (p: number) => g.units().filter((u) => u.owner === p).length;
-        const built = (p: number) => g.buildings().filter((b) => b.owner === p).length;
-        const soldiers = (p: number) => g.units().filter((u) => u.owner === p && [73, 4, 299, 347].includes(u.type)).length;
-        return [1, 2].map((p) => `player ${p}: ${mine(p)} units (${soldiers(p)} soldiers), ${built(p)} buildings, age ${g.age(p)}, food ${Math.floor(g.resources(p).food)}`);
-      }),
-    ),
-  );
-  expect(summary[0]).toEqual(summary[1]);
-  const [time] = await host.evaluate(() => [window.__game!.gameTime()] as const);
-  for (const [i, bot] of bots.entries()) console.log(`soak: ${i === 0 ? 'host' : 'guest'} issued ${[...bot.issued].map(([k, v]) => `${v} ${k}`).join(', ')}`);
-  console.log(`soak: ${summary[0]!.join('; ')}`);
-  console.log(`soak: passed, ${last + 1} turns, game time ${Math.round(time / 1000)} s, no desync; hash of turn ${last}: host ${hex(h)}, guest ${hex(g)}`);
-  for (const bot of bots) for (const kind of ['work', 'build', 'queue', 'move', 'attack', 'research']) expect(bot.issued.get(kind) ?? 0, `${kind} commands issued`).toBeGreaterThan(0);
+test(`two clients play ${MINUTES} minutes of game time by invite code without a desync`, async ({ browser }) => {
+  console.log(`soak: first map seed ${MAP_SEED} (SOAK_SEED), first command seed ${BOT_SEED} (SOAK_BOT_SEED), ${MINUTES} min of game time in total`);
+  const endMs = MINUTES * 60_000;
+  const issued = new Map<string, number>();
+  let total = 0;
+  let games = 0;
+  while (total < endMs) {
+    if (games >= MAX_GAMES) throw new Error(`${MAX_GAMES} games ended and the summed game time is only ${Math.round(total / 1000)} s of ${MINUTES * 60} s`);
+    const report = await playGame(browser, games, endMs - total, issued);
+    total += report.timeMs;
+    const [h, g] = report.hashes;
+    console.log(
+      `soak: game ${games + 1} ${report.ended ? `ended early (${report.ended})` : 'reached its time'}: map seed ${mapSeedOf(games)}, command seeds ${botSeedOf(games)} and ${botSeedOf(games) + 1}, ` +
+        `turn ${report.turn}, game time ${Math.round(report.timeMs / 1000)} s, hash of turn ${report.turn}: host ${hex(h)}, guest ${hex(g)}; summed game time ${Math.round(total / 1000)} s of ${MINUTES * 60} s`,
+    );
+    games++;
+  }
+  console.log(`soak: passed, ${games} game${games === 1 ? '' : 's'}, summed game time ${Math.round(total / 1000)} s, no desync`);
+  for (const kind of ['work', 'build', 'queue', 'move', 'attack', 'research']) expect(issued.get(kind) ?? 0, `${kind} commands issued`).toBeGreaterThan(0);
 });
