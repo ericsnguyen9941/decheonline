@@ -72,6 +72,7 @@ async function main(): Promise<void> {
     houses: Number.isInteger(houses) && houses > 0 ? houses : undefined,
     relics: Number.isInteger(relics) && relics > 0 ? relics : undefined,
     ruins: Number.isInteger(ruins) && ruins > 0 ? ruins : undefined,
+    wonder: params.get('wonder') === '1',
     testMap: params.get('map') === 'test',
     seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
     perturb: params.has('perturb') && Number.isInteger(Number(params.get('perturb'))) ? Number(params.get('perturb')) : undefined,

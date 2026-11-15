@@ -241,6 +241,7 @@ export class GameHud {
       provider: o.provider,
       world: o.world,
       player: o.player,
+      names: o.game.names,
       sound: (index) => sounds?.message(index),
       message: (text) => this.chat.show(text),
     });

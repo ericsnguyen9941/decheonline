@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, HOUSE, MARKET, TECH_DONE, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, HOUSE, MARKET, TECH_DONE, TOWN_CENTER, WONDER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { SoundPlayer } from './audio/sound-player';
@@ -204,6 +204,12 @@ export interface MultiplayerOptions {
    */
   relics?: number;
   ruins?: number;
+  /**
+   * Debug only (`?debug=net&wonder=1`): player 1 starts with a built Wonder left of its Town Center, so its countdown
+   * runs from the first steps (victory.md §8). Placed without a placement check: for the test map. Both clients must
+   * ask for it.
+   */
+  wonder?: boolean;
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
   /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
@@ -228,7 +234,7 @@ const RUIN = 158;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, wonder, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -331,6 +337,10 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       for (let i = 0; i < (ruins ?? 0); i++) game.world.createUnit({ owner: 0, type: RUIN, x: villager.x - 3, y: villager.y - 1 - 3 * i });
       game.world.victory.artifactCount += relics ?? 0;
       game.world.victory.ruinCount += ruins ?? 0;
+    }
+    if (debug && wonder) {
+      const tc = [...game.world.entities.ofPlayer(1)].find((e) => e.type === TOWN_CENTER);
+      if (tc) game.world.createUnit({ owner: 1, type: WONDER, x: Math.floor(tc.x) - 4.5, y: tc.y });
     }
     setGameVisible(true);
     // The original keeps the game screen and says so there; the dialog is only for a game that has no screen yet.

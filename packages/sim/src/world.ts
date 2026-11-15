@@ -31,6 +31,7 @@ import {
 import { EntityStore, ObjectState, type Entity } from './entities';
 import { deleteActions, orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
+import { defaultWonderTask, startWonder, WONDER } from './wonder';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
 import { createTestMap, TileMap, type MapSnapshot } from './map';
 import { copyMasters, hasMaster, master, newMasters, typeOf } from './masters';
@@ -551,6 +552,8 @@ export class World {
     countPopulation(this.attributes[owner]!, t, 1);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));
+    // `TRIBE_Building_Object`'s constructor gives the Wonder its countdown at once (src/t_b_obj.cpp:53-55, victory.md §8).
+    if (type === WONDER && defaultWonderTask(t) !== -1) startWonder(this.gameContext(), e);
     return e;
   }
 
@@ -609,6 +612,7 @@ export class World {
       playerTimeDelta: this.playerTimeDelta,
       alertCooldown: this.alertCooldown,
       depleted: this.depleted,
+      victory: this.victory,
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),

@@ -4,8 +4,8 @@
  * and snapshots it as it is. No RNG anywhere (victory.md §3).
  *
  * The all-relics and all-ruins holds (victory.md §10) count the relics and ruins a random map placed (`artifactCount`,
- * `ruinCount`). Not ported, for want of the objects (victory.md §2, §8): the Wonder (unit 276) and its countdown, and
- * the scenario/MP conditions of §7 other than "victory points". The allied-victory paths read the stances and flags of
+ * `ruinCount`). The Wonder's countdown is its action's (`wonder.ts`, victory.md §8). Not ported, for want of the
+ * objects (victory.md §2): the scenario/MP conditions of §7 other than "victory points". The allied-victory paths read the stances and flags of
  * docs/spec/diplomacy.md (`DiplomacyState`); without one every player is every other's enemy.
  */
 import { relation, RELATION_ALLY, type DiplomacyState } from './diplomacy';
@@ -111,6 +111,11 @@ export interface VictoryState {
    */
   artifactHeld: number[];
   ruinHeld: number[];
+  /**
+   * Per player, `RGE_Base_Game::countdown_timer` (victory.md §8): -1, or the years its completed Wonders still need,
+   * the lowest of them, which the Wonder clock shows. Only a Standard game sets it.
+   */
+  wonderCountdown: number[];
 }
 
 /** `[group, id, command, attribute, n, points]` in `TRIBE_World::new_game`'s order (victory.md §11.2). */
@@ -196,6 +201,7 @@ export function newVictory(players: number, settings: VictorySettings = { type: 
     ruinCount: 0,
     artifactHeld: new Array<number>(players).fill(-1),
     ruinHeld: new Array<number>(players).fill(-1),
+    wonderCountdown: new Array<number>(players).fill(-1),
   };
   for (let p = 1; p < players; p++) {
     if (settings.type === VICTORY_SCORE) v.conditions[p]!.unshift({ command: CONDITION_VICTORY_POINTS, group: 0, ally: true, state: 0, count: amount });
@@ -220,6 +226,7 @@ export function copyVictory(v: VictoryState): VictoryState {
     verdicts: [...v.verdicts],
     artifactHeld: [...v.artifactHeld],
     ruinHeld: [...v.ruinHeld],
+    wonderCountdown: [...v.wonderCountdown],
   };
 }
 

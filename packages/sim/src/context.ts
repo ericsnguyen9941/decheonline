@@ -2,6 +2,7 @@ import type { DiplomacyContext } from './diplomacy';
 import type { Entity } from './entities';
 import type { MoveContext } from './movement';
 import type { TechContext } from './techs';
+import type { VictoryState } from './victory';
 
 /** What object updates and actions need from the world during a step. */
 export interface GameContext extends MoveContext, TechContext, DiplomacyContext {
@@ -23,4 +24,6 @@ export interface GameContext extends MoveContext, TechContext, DiplomacyContext 
   alertCooldown: number[];
   /** Per player, `GAME_NOTIFY_OBJECT_DEPLETED` notifications so far (a farm used up); the client plays farmdie.wav. */
   depleted: number[];
+  /** Game statuses and countdowns (victory.md): the Wonder's action counts and wins (`wonder.ts`). */
+  victory: VictoryState;
 }

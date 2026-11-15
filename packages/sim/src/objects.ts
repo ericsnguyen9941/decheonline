@@ -18,6 +18,7 @@ import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
 import { AI_ACTION_MOVE, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_TARGET_INVALID, notifyObject, updateUnitAI } from './unit-ai';
 import { refreshSighting, stateChanged } from './visibility';
+import { defaultWonderTask, startWonder, updateWonder } from './wonder';
 import { spriteInfo, type UnitType } from './units';
 
 /** Master types (`master_type`): 20 animated, 30 moving, 40 action, 50 combat, 60 missile, 70 unit, 80 building. */
@@ -122,10 +123,13 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     if (r === ActionResult.Failed || r === ActionResult.Remove) endAction(e.mover);
   } else if (e.make) {
     updateMake(ctx, e, e.make);
+  } else if (e.wonder) {
+    updateWonder(ctx, e, e.wonder);
   } else if (e.state === ObjectState.Active) {
     // An active object with no action starts its default task, and does no more this step (src/act_obj.cpp:403-407).
     const task = defaultMakeTask(t);
     if (task !== -1) startMake(ctx, e, task);
+    else if (defaultWonderTask(t) !== -1) startWonder(ctx, e);
   }
   // `RGE_Combat_Object::update` refreshes the object's visible-unit records, then ends with the unit AI, on the owner's
   // turn only, with the owner's accumulated time.

@@ -133,7 +133,7 @@ Spec: [support-actions.md](support-actions.md).
 | `src/tact_rep.cpp` | 11/0/0/1 | `TRIBE_Action_Repair::update` :167 [N] | R3 |
 | `src/tact_trd.cpp` | 11/0/1/0 | `TRIBE_Action_Trade::update` :186 [L] | R3 |
 | `src/t_c_obj.cpp` | 38/0/1/0 | `TRIBE_Combat_Object::convert` :525, `heal` :552, `repair` :579, `trade` :638 (all [M]) | R3 |
-| `src/tact_art.cpp`, `tact_dar.cpp`, `tact_wnd.cpp` | 11/0/0/0, 8/0/0/0, 6/0/0/0 | artifact capture (action 107: [victory.md](victory.md) §10.2), discovery, wonder | R3 |
+| `src/tact_art.cpp`, `tact_dar.cpp`, `tact_wnd.cpp` | 11/0/0/0, 8/0/0/0, 6/0/0/0 | artifact capture (action 107: [victory.md](victory.md) §10.2), discovery, wonder (action 120: [victory.md](victory.md) §8, `wonder.ts`) | R3 |
 
 ## Game setup (lobby)
 

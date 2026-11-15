@@ -107,6 +107,10 @@ area of the canvas (not under the top strip or the bottom panel).
   `_LOST`, src/tribegam.cpp:1990-2087): 11 artheld.wav when a team starts holding all of them, 12 artlost.wav when it
   stops, on every player's screen, Standard game only (victory.md §10). The client plays them when
   `World.victory.artifactHeld` / `ruinHeld` leave or return to −1 (`hud/relics.ts`, hud.md "Relics and ruins").
+- **Wonder started / completed / destroyed** (`GAME_NOTIFY_WONDER_STARTED` / `_COMPLETED` / `_DESTROYED`,
+  src/tribegam.cpp:1905-1988): 8 mstart.wav, 9 mdone.wav, 10 mkilled.wav on every player's screen; destroyed only in a
+  Standard game (victory.md §8). The client plays them when a Wonder's action (`Entity.wonder`) appears, reaches state
+  6, or goes (`hud/relics.ts` `wonderNotices`, hud.md "Wonder").
 - A unit trained or a building finished has no game sound, only its own master sound (§3).
 - `RGE_Base_Game::play_sound` (src/basegame.cpp:3894) leaves a game sound alone while it is still playing. A
   button restarts its sound.
@@ -127,7 +131,7 @@ key-down. Sounds triggered before that are logged but not played.
 - Terrain ambient sounds (`TRIBE_Screen_Game::handle_terrain_sound`, src/scr_game.cpp:3570): every 20 s, a
   terrain sound from `sound/*.wav` plays for at most 6 s.
 - Music (src/music.cpp): CD audio tracks first (`MCI_DEVTYPE_CD_AUDIO`), else `sound/music%d.mid`.
-- Chat received (2) plays for chat (docs/spec/chat.md §3), a late turn and a desync; tribute (4) for a tribute received (docs/spec/diplomacy.md §7.4). Can't do (3), player killed or dropped (6, 7), wonder (8-10),
+- Chat received (2) plays for chat (docs/spec/chat.md §3), a late turn and a desync; tribute (4) for a tribute received (docs/spec/diplomacy.md §7.4). Can't do (3), player killed or dropped (6, 7),
   conversion (13, 14): their features or notifications are not in the client yet.
 - Gather and drop-off sounds (`resourceGatheringSoundId`, `resourceDepositSoundId` of a task): -1 for every 1.0a
   task.

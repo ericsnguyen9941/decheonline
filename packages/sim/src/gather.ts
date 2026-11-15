@@ -18,6 +18,7 @@ import { newSprite } from './sprites';
 import { AI_ACTION_GATHER, AI_ACTION_HUNT, aiStateForAction, NOTIFY_REQUEST_TASK, notifyObject, setAiState } from './unit-ai';
 import type { SpriteInfo, Task, UnitType } from './units';
 import { exploreObject, unexploreObject } from './visibility';
+import { endWonder } from './wonder';
 
 export const ACTION_GATHER = 5;
 export const ACTION_HUNT = 110;
@@ -164,6 +165,7 @@ export function deleteActions(ctx: GameContext, e: Entity): void {
   e.work = null;
   e.attack = null;
   e.make = null;
+  endWonder(ctx, e);
   if (e.mover) endAction(e.mover);
   dropResearch(ctx, e);
 }

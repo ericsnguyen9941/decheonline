@@ -261,8 +261,18 @@ or recycled while not yet pending removal (`src/stat_obj.cpp:60-71`,
 
 The Wonder (unit 276) runs a `TRIBE_Action_Wonder` (action type 120,
 `include/action.h:25`; created by the action-list factory,
-`src/tact_lst.cpp:83-84`; which data/task attaches it to the Wonder is not
-traced — unverified). Constant `LIMIT = 2000.0f` (`src/tact_wnd.cpp:15`).
+`src/tact_lst.cpp:83-84`). Constant `LIMIT = 2000.0f` (`src/tact_wnd.cpp:15`).
+The dat gives the Wonder one task, action 120, flagged default (its
+`default_task`). `TRIBE_Building_Object`'s constructor calls
+`set_task(default_task)` for master 276 (`src/t_b_obj.cpp:53-55`), so a
+Wonder has its action from the moment it is created, as a foundation. Like
+any action object, an active Wonder with an empty action list starts its
+default task again on its next update (`src/act_obj.cpp:403-407`).
+
+In the dat (all civs): 1000 wood, 1000 stone, 1000 gold, 8000 build points,
+made at location 118 (Villagers' build menu, button 18), 500 hit points, 5 x 5
+(radius 2.5), line of sight 4, not enabled at start; an Iron Age effect
+enables it.
 
 - State 2 (`src/tact_wnd.cpp:129-148`), entered on first push
   (`:92-96`): reveals the site to every other player and notifies "wonder
@@ -282,9 +292,29 @@ traced — unverified). Constant `LIMIT = 2000.0f` (`src/tact_wnd.cpp:15`).
   the vtable (+4), so this reads offset 0x108 of the `TRIBE_World`, which is
   `victory_type` (`include/tworld.h:78`). So the wonder wins only when
   `victory_type == 0`, but its timer runs in every mode.
-- The timer belongs to the action; destroying the wonder destroys it (the
-  destructor only un-reveals, `src/tact_wnd.cpp:26-89`). A new wonder starts
-  from 0.
+- The timer belongs to the action. A Wonder that starts dying deletes its
+  action list (`src/act_obj.cpp:397-401`), and so does the stop command
+  (`TRIBE_Building_Object::stop` → `RGE_Combat_Object::stop` →
+  `stopObject(1)` → `stopAction`, `actions->delete_list()`,
+  `src/com_obj.cpp:103-111`, `:843-847`). The destructor
+  (`src/tact_wnd.cpp:26-89`), only while `game_state == 0`: un-reveals what
+  state 2 or 6 showed the others; in state 6 and a Standard game clears the
+  owner's countdown display (`reset_countdown_timer`) and sets it to 2000
+  again if the owner has another Wonder in object state ≥ 2 (its next update
+  lowers it); then notifies "wonder destroyed". A new action (a new Wonder,
+  or the default task after a stop) starts from 0, so stopping one's own
+  completed Wonder restarts its 2000 years (quirk, read from the code).
+- The countdown display is `RGE_Base_Game::countdown_timer[player]`
+  (`src/basegame.cpp:3869-3882`), −1 at first. `set_countdown_timer` keeps a
+  new value only if it is lower or the current one is below 0, so with two
+  Wonders the clock shows the one nearer to winning.
+- The reveals: state 2 `explore_terrain(p, 1)` for each other player `p`
+  (the footprint rectangle; the building override forces the rectangle while
+  unbuilt, `src/t_b_obj.cpp:365-370`); state 6 `unexplore_terrain(p, 1)` then
+  `explore_terrain(p, 0)` (its line-of-sight circle, radius 4).
+- Notifications (`GAME_NOTIFY_WONDER_STARTED` / `_COMPLETED` / `_DESTROYED`):
+  started and completed in every game, destroyed only in a Standard one; what
+  each screen shows and plays is in hud.md "Wonder".
 - The win happens inside the owner's `objects->update`, so later players
   in the same step already see final statuses, and that step's
   `check_game_state` ends the game (§5).
@@ -674,7 +704,6 @@ later draw shifts by one.
   (L): victory-type mapping, relic/ruin rolls, score table, time limit,
   relic/ruin holds.
 - The wonder's standard-victory test is an offset inference (§8).
-- How the Wonder unit gets its `TRIBE_Action_Wonder` (task data) is not traced.
 - Random maps have no `sp_victory` conditions (§2).
 - Retail 1.0a may differ in score weights or menu amounts (`beta-only?`);
   only the dat values were checked against the captain's files.
@@ -720,14 +749,29 @@ Ported, with vectors in `victory.test.ts`:
   from `gather.ts` like the other task actions; the relic walks on a move or
   work order and the ruin (select level 3) is never ordered (the client's
   `UnitLayer.orderedUnits`). Vectors in `artifact.test.ts`.
+- The Wonder (§8): unit 276 in the sim's table (`tools/gen-sim-tables.mjs`
+  ROOTS), so the Iron Age enables it in the Villagers' build menu with the
+  dat's cost and build time; `TRIBE_Action_Wonder` in `wonder.ts`
+  (`startWonder` from `World.createObject` as the constructor does, and from
+  `objects.ts` as the default task; `updateWonder` in the action chain;
+  `endWonder` from `gather.ts` `deleteActions`, the destructor). Attribute 42
+  is the generic flag-4 storage. Client read API: `Entity.wonder` (`state`,
+  `timer`) and `World.victory.wonderCountdown[p]` (the countdown display).
+  The notifications are not sent: the client derives them from
+  `Entity.wonder` (`apps/client/src/hud/relics.ts` `wonderNotices`, hud.md
+  "Wonder"). Vectors in `wonder.test.ts`: the dat record and the Iron Age
+  build (foundation in state 2, shown to the other player), Example 1 (won at
+  2000.054931640625 after 11110 increments, end condition 100), destroyed
+  (countdown −1, no win), two Wonders (lowest shown, 2000 the step the older
+  falls), outside Standard (timer stops at 2000, nothing shown, no win), an
+  allied-victory team winning together, the stop command restarting it, a
+  snapshot.
 - Victory types 0 Standard, 1 Conquest, 2 time limit, 3 Score (world option
   `victory`, default Standard). Type 4 is accepted with no condition: conquest
   off, the game never ends (the sim's tests of other rules use it).
 
 Not ported, for want of objects or systems the sim does not have yet:
 
-- Wonder victory (§8): no Wonder (unit 276) or `TRIBE_Action_Wonder` in the sim;
-  attribute 42 stays 0. Example 1 has no test.
 - The scenario and MP special conditions of §7 other than "victory points"
   (ruins, artifacts, discoveries, exploration, gold settings): none of their
   lobby settings exist yet.

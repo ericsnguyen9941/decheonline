@@ -38,7 +38,8 @@ export const SYNTHETIC = {
   /**
    * language.dll's strings; languagex.dll replaces `overriddenString`. 4151-4170 are the hotkeys (`STRING_ID_HOTKEY_*`,
    * the real letters), 16132 the Villager's, 9004/9005/3013 the end of the game's (`STRING_ID_VICTORY_MESSAGE` ...), 1217 a late turn's,
-   * 3016/3026 the tribute and stance notifications, 9851/9856/9863 the Diplomacy dialog's title, fee and Market texts.
+   * 3016/3026 the tribute and stance notifications, 3028-3030/11302 the relics' and 3019/3020/3022/3058/11301 the
+   * Wonder's, 9851/9856/9863 the Diplomacy dialog's title, fee and Market texts.
    */
   strings: {
     10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
@@ -50,7 +51,9 @@ export const SYNTHETIC = {
     9856: 'Pay Tribute (cost %d%%)', 9863: 'You need a Market to pay tribute.',
     3028: 'All Artifacts have been captured. Hold them for 2000 years to win!',
     3029: 'All Artifacts have been captured. You will lose if they are held for 2000 years!', 3030: 'Control of the Artifacts was lost!',
-    11302: 'Artifacts: %d Years',
+    11302: 'Artifacts: %d Years', 3058: 'You have started building a Wonder!', 3019: '%s started building a Wonder!',
+    3020: 'You completed a Wonder. You will win if it stands for 2000 years!',
+    3022: '%s completed a Wonder. You will lose if it stands for 2000 years!', 11301: 'Wonder: %d Years',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */

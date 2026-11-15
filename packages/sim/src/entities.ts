@@ -7,6 +7,7 @@ import type { MakeAction } from './make';
 import type { ResearchAction } from './research';
 import type { ActiveSprite } from './sprites';
 import type { UnitAI } from './unit-ai';
+import type { WonderAction } from './wonder';
 
 /** `object_state` values (include/stat_obj.h). */
 export const ObjectState = {
@@ -63,6 +64,8 @@ export interface Entity {
   research?: ResearchAction | null;
   /** A Farm's food production (`RGE_Action_Make`), its default task while it is active. */
   make?: MakeAction | null;
+  /** The Wonder's countdown (`TRIBE_Action_Wonder`, `wonder.ts`), from its creation. */
+  wonder?: WonderAction | null;
   /** Combat objects: the unified visibility cell of its tile at its last update (`Unified_Map_Value`, visibility.md §4.1). */
   sighted?: number;
   /** Combat objects: the unit AI (`unitAIValue`), absent for groups without one. */
@@ -147,6 +150,7 @@ function copyEntity(e: Entity): Entity {
   if (e.train) copy.train = { ...e.train };
   if (e.research) copy.research = { ...e.research };
   if (e.make) copy.make = { ...e.make };
+  if (e.wonder) copy.wonder = { ...e.wonder };
   if (e.ai) {
     copy.ai = {
       ...e.ai,

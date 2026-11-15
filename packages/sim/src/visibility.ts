@@ -397,27 +397,28 @@ function footprint(e: Entity, t: UnitType): [number, number, number, number] {
 /**
  * `RGE_Static_Object::explore_terrain(owner, type, los)` with `TRIBE_Building_Object`'s override (visibility.md §3.1):
  * radius `los`, or (int) master LOS when -1; nothing unless > 0. Type 0 is the normal shape around the object's tile;
- * type 1 (forced for an unbuilt building) is its footprint rectangle, when both radii are positive.
+ * type 1 (forced for an unbuilt building) is its footprint rectangle, when both radii are positive. `who` is the
+ * player whose map it is, the owner but for the Wonder's (`wonder.ts`).
  */
-export function exploreObject(ctx: VisibilityContext, e: Entity, t: UnitType, square: boolean, los = -1): number {
+export function exploreObject(ctx: VisibilityContext, e: Entity, t: UnitType, square: boolean, los = -1, who = e.owner): number {
   const v = ctx.visibility;
   const radius = los === -1 ? toInt(t.los) : los;
   if (!v || !(radius > 0)) return 0;
-  if (!square && !unbuilt(e, t)) return v.explore(e.owner, toInt(e.x), toInt(e.y), radius, false);
+  if (!square && !unbuilt(e, t)) return v.explore(who, toInt(e.x), toInt(e.y), radius, false);
   if (!(t.radiusX > 0 && t.radiusY > 0)) return 0;
   const [x1, y1, x2, y2] = footprint(e, t);
-  return v.exploreRect(e.owner, x1, y1, x2, y2);
+  return v.exploreRect(who, x1, y1, x2, y2);
 }
 
-/** `RGE_Static_Object::unexplore_terrain(owner, type, los)`: the reverse of `exploreObject`, with no building override. */
-export function unexploreObject(ctx: VisibilityContext, e: Entity, t: UnitType, square: boolean, los = -1): void {
+/** `RGE_Static_Object::unexplore_terrain(who, type, los)`: the reverse of `exploreObject`, with no building override. */
+export function unexploreObject(ctx: VisibilityContext, e: Entity, t: UnitType, square: boolean, los = -1, who = e.owner): void {
   const v = ctx.visibility;
   const radius = los === -1 ? toInt(t.los) : los;
   if (!v || !(radius > 0)) return;
-  if (!square) return v.unexplore(e.owner, toInt(e.x), toInt(e.y), radius, false);
+  if (!square) return v.unexplore(who, toInt(e.x), toInt(e.y), radius, false);
   if (!(t.radiusX > 0 && t.radiusY > 0)) return;
   const [x1, y1, x2, y2] = footprint(e, t);
-  v.unexploreRect(e.owner, x1, y1, x2, y2);
+  v.unexploreRect(who, x1, y1, x2, y2);
 }
 
 /**
