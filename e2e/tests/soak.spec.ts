@@ -16,9 +16,9 @@ const ROUND_TURNS = 2;
 /** A turn that does not come within this long is a stall, not a slow machine (frames take 70-300 ms on a loaded one). */
 const STALL_MS = 180_000;
 
-// speed=20 runs the lockstep clock 20x faster; resources=5000 pays for what the bot builds, trains and researches;
-// market=1 gives every player a built Market (its tech enables the Farm). Both clients ask for the same.
-const url = (extra: string) => `/?debug=net&speed=20&resources=5000&market=1&seed=${MAP_SEED}${extra}`;
+// speed=20 runs the lockstep clock 20x faster; resources=20000 pays for what the bot builds, trains and researches;
+// bowmen=6 gives every player soldiers to attack with before it has an Archery Range or Barracks; market=1 gives every player a built Market (its tech enables the Farm). Both clients ask for the same.
+const url = (extra: string) => `/?debug=net&speed=20&resources=20000&bowmen=6&market=1&seed=${MAP_SEED}${extra}`;
 
 const VILLAGERS: number[] = [VILLAGER, BUILDER, FORAGER, LUMBERJACK, HUNTER, MINER_STONE, MINER_GOLD, 259 /* Farmer */, 156 /* Repairman */];
 const MILITARY: number[] = [CLUBMAN, BOWMAN, SCOUT, SLINGER];
@@ -284,7 +284,8 @@ test(`two clients play ${MINUTES} minutes of game time by invite code without a 
         const g = window.__game!;
         const mine = (p: number) => g.units().filter((u) => u.owner === p).length;
         const built = (p: number) => g.buildings().filter((b) => b.owner === p).length;
-        return [1, 2].map((p) => `player ${p}: ${mine(p)} units, ${built(p)} buildings, age ${g.age(p)}, food ${Math.floor(g.resources(p).food)}`);
+        const soldiers = (p: number) => g.units().filter((u) => u.owner === p && [73, 4, 299, 347].includes(u.type)).length;
+        return [1, 2].map((p) => `player ${p}: ${mine(p)} units (${soldiers(p)} soldiers), ${built(p)} buildings, age ${g.age(p)}, food ${Math.floor(g.resources(p).food)}`);
       }),
     ),
   );
@@ -293,5 +294,5 @@ test(`two clients play ${MINUTES} minutes of game time by invite code without a 
   for (const [i, bot] of bots.entries()) console.log(`soak: ${i === 0 ? 'host' : 'guest'} issued ${[...bot.issued].map(([k, v]) => `${v} ${k}`).join(', ')}`);
   console.log(`soak: ${summary[0]!.join('; ')}`);
   console.log(`soak: passed, ${last + 1} turns, game time ${Math.round(time / 1000)} s, no desync; hash of turn ${last}: host ${hex(h)}, guest ${hex(g)}`);
-  for (const bot of bots) expect(bot.issued.size).toBeGreaterThanOrEqual(6);
+  for (const bot of bots) for (const kind of ['work', 'build', 'queue', 'move', 'attack', 'research']) expect(bot.issued.get(kind) ?? 0, `${kind} commands issued`).toBeGreaterThan(0);
 });
