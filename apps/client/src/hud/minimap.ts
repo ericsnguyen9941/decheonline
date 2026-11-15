@@ -3,7 +3,7 @@
 import { TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, typeOf, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, MapArt } from '../assets';
 import { tileShade, tileType } from '../map/elevation';
-import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
+import { pixelToTileCoords } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import type { Doppelganger } from '../units/fog-objects';
 import { minimapGeometry, objectPoint, pickTile, plainMinimapShape, tileRect, viewRect, type MinimapGeometry } from './minimap-geometry';
@@ -296,8 +296,7 @@ export class Minimap {
 
   /** `set_view_loc(col + 0.5, row + 0.5)`. */
   private lookAt(col: number, row: number): void {
-    const p = tileCoordsToPixel(col + 0.5, row + 0.5, this.o.world.map.width);
-    this.o.view.centerOn(p.x, p.y);
+    this.o.view.lookAt(col + 0.5, row + 0.5);
   }
 
   private playerColour(player: number): number {

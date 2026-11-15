@@ -166,6 +166,27 @@ export class Ground {
   }
 
   /**
+   * Map pixel the view centres on when it looks at map point (x, y) (`RGE_View::update`, src/view.cpp:1061-1093): the
+   * point, kept on the map (`RGE_Player::set_view_loc`, src/player.cpp:993), at its flat place (the view adds the centre
+   * tile's `height * elev_hgt` back to its `screen_ypos`, and the fraction is truncated to whole pixels), `ELEV_H` higher
+   * when the centre tile's top corner is raised (`coordinate_map`'s shift stays in `screen_ypos`). Not the drawn height.
+   */
+  viewPixel(x: number, y: number): { x: number; y: number } {
+    const { width, height } = this.map;
+    const vx = Math.min(Math.max(x, 0), width - 1);
+    const vy = Math.min(Math.max(y, 0), height - 1);
+    const col = Math.trunc(vx);
+    const row = Math.trunc(vy);
+    const o = tileOrigin(col, row, width);
+    const fx = vx - col;
+    const fy = vy - row;
+    return {
+      x: o.x + Math.trunc((fx + fy) * (TILE_W / 2)),
+      y: o.y + TILE_H / 2 + Math.trunc((fy - fx) * (TILE_H / 2)) - (raisedTop(this.type(col, row)) ? ELEV_H : 0),
+    };
+  }
+
+  /**
    * Map pixel where the building being placed is drawn when aligned at map point (x, y) (`draw_place_object`, src/
    * view.cpp:1160): the tile's box (`get_tile_screen_coords` with `drop`, view.cpp:1430: plus its type's `y_delta`, 8
    * lower on any slope and `ELEV_H` higher on types 3, 5, 6 and 11) and the middle of `alignment_box`'s corners (src/

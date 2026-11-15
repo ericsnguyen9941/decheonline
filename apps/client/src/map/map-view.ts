@@ -161,6 +161,12 @@ export class MapView {
     this.refresh();
   }
 
+  /** Centre the view on map point (x, y) as the original does (`Ground.viewPixel`: its flat place, not its height). */
+  lookAt(x: number, y: number): void {
+    const p = this.ground.viewPixel(x, y);
+    this.centerOn(p.x, p.y);
+  }
+
   /** Make the sprites match the camera and the fog; no-op when neither has changed since the last call. */
   refresh(): void {
     const { x, y } = this.camera;

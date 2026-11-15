@@ -2,7 +2,6 @@ import type { Application } from 'pixi.js';
 import { STEP_MS, startingObjects, World, type Command, type StartUnit } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { exposeMapDebug, MapView } from './map';
-import { tileCoordsToPixel } from './map/iso';
 import { UnitLayer } from './units/unit-layer';
 
 // Master ids (empires.dat): Bowman, Clubman, Villager.
@@ -59,8 +58,7 @@ export async function startSkirmish(app: Application, speed: number): Promise<Sk
   let pending: Command[] = [];
   const stepMs = () => STEP_MS / speed;
   const layer = new UnitLayer({ app, view, world, provider, player: 1, issue: (c) => pending.push(c), stepMs });
-  const centre = tileCoordsToPixel(MIDDLE.x, MIDDLE.y, world.map.width);
-  view.centerOn(centre.x, centre.y);
+  view.lookAt(MIDDLE.x, MIDDLE.y);
   exposeMapDebug(view);
   // One step at a time, so the units slide from step to step as in a game.
   const run = () => {

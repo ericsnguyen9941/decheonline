@@ -8,7 +8,7 @@ import { frameCursor } from '../hud/frame-image';
 import { HOTKEY_STRING, hotkeyLetter, pressedLetter } from '../hud/hotkeys';
 import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
 import { attackRollover } from '../hud/text';
-import { mapPixelSize, tileCoordsToPixel } from '../map/iso';
+import { mapPixelSize } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import { composeGraphic, GROUND_LAYER, splitsShadow, splitsTerrain, type PartSet } from './composite';
 import { facingFrame } from './facing';
@@ -359,8 +359,7 @@ export class UnitLayer {
     }
     const at = this.primary === null ? undefined : this.o.world.entities.get(this.primary);
     if (centre && at) {
-      const p = tileCoordsToPixel(at.x, at.y, this.o.world.map.width);
-      this.o.view.centerOn(p.x, p.y);
+      this.o.view.lookAt(at.x, at.y);
     }
   }
 
@@ -950,8 +949,7 @@ export class UnitLayer {
     if (!next) return;
     this.unselect();
     this.selectObject(next);
-    const p = tileCoordsToPixel(next.x, next.y, this.o.world.map.width);
-    this.o.view.centerOn(p.x, p.y);
+    this.o.view.lookAt(next.x, next.y);
   }
 
   /** `command_tab_selected`: `selected_obj` steps through the selection. */

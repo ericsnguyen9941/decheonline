@@ -7,7 +7,6 @@ import { Lockstep, showEndDialog } from './lockstep';
 import { FrameClock } from './lockstep/frame-clock';
 import { LobbyView, Session } from './lobby';
 import { exposeMapDebug, MapView } from './map';
-import { tileCoordsToPixel } from './map/iso';
 import { constructionProgress, researchStatus, trainingStatus } from './hud/commands';
 import { GameHud } from './hud/game-hud';
 import { resourcesOf, type Resources } from './hud/resource-bar';
@@ -383,8 +382,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       const own = [...game.world.entities.ofPlayer(player)];
       const start = own.find((e) => e.type === TOWN_CENTER) ?? own.at(-1);
       if (start) {
-        const p = tileCoordsToPixel(start.x, start.y, game.world.map.width);
-        view.centerOn(p.x, p.y);
+        view.lookAt(start.x, start.y);
       }
       if (debug) exposeMapDebug(view);
     });

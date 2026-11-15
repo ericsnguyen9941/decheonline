@@ -170,3 +170,22 @@ test('the building being placed is drawn where get_tile_screen_coords puts it: y
   }
   expect([...seen].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 });
+
+test('the view centres on a point at its flat place, 16 px higher on a raised-top tile, as RGE_View::update does', () => {
+  const map = hill(3);
+  const ground = new Ground(map);
+  const flat = (x: number, y: number) => tileCoordsToPixel(x, y, map.width);
+  // The plateau top (level 3, type 0) is not lifted: the view ignores the height.
+  expect(ground.type(8, 8)).toBe(0);
+  expect(ground.viewPixel(8.5, 8.5)).toEqual(flat(8.5, 8.5));
+  for (let row = 1; row < 15; row++) {
+    for (let col = 1; col < 15; col++) {
+      const lift = raisedTop(ground.type(col, row)) ? ELEV_H : 0;
+      const f = flat(col + 0.5, row + 0.5);
+      expect(ground.viewPixel(col + 0.5, row + 0.5)).toEqual({ x: f.x, y: f.y - lift });
+    }
+  }
+  // set_view_loc keeps the point on the map; the fraction is truncated to whole pixels.
+  expect(ground.viewPixel(-3, 20)).toEqual(ground.viewPixel(0, 15));
+  expect(ground.viewPixel(2.01, 3)).toEqual({ x: flat(2, 3).x, y: flat(2, 3).y });
+});

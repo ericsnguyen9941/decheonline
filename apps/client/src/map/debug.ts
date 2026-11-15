@@ -43,8 +43,7 @@ export function exposeMapDebug(view: MapView): MapDebug {
     mapHash: mapHasher.digest(),
     camera: () => ({ x: camera.x, y: camera.y }),
     centerOnTile(col, row) {
-      const c = centre(col, row);
-      view.centerOn(c.x, c.y);
+      view.lookAt(col + 0.5, row + 0.5);
     },
     setCamera(x, y) {
       camera.moveTo(x, y);
