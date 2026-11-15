@@ -37,7 +37,8 @@ export const SYNTHETIC = {
   groupNumberSlp: 50403,
   /**
    * language.dll's strings; languagex.dll replaces `overriddenString`. 4151-4170 are the hotkeys (`STRING_ID_HOTKEY_*`,
-   * the real letters), 16132 the Villager's, 9004/9005/3013 the end of the game's (`STRING_ID_VICTORY_MESSAGE` ...), 1217 a late turn's.
+   * the real letters), 16132 the Villager's, 9004/9005/3013 the end of the game's (`STRING_ID_VICTORY_MESSAGE` ...), 1217 a late turn's,
+   * 3016/3026 the tribute and stance notifications, 9851/9856/9863 the Diplomacy dialog's title, fee and Market texts.
    */
   strings: {
     10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
@@ -45,6 +46,8 @@ export const SYNTHETIC = {
     4160: 'N', 4161: 'B', 4162: 'D', 4163: 'A', 4164: 'K', 4165: 'L', 4166: 'P', 4167: 'Y',
     4170: 'M', 4173: 'R', 16132: 'C', 3040: 'Click an area to move there.', 3052: 'Click the building or boat to repair.',
     9004: 'You are victorious!', 9005: 'You have been defeated!', 3013: '%s resigned.', 1217: 'Problem communicating with %s...',
+    3016: '%s paid %d food in tribute to you.', 3026: '%s changed diplomatic stance with you to Ally.', 9851: 'Diplomacy',
+    9856: 'Pay Tribute (cost %d%%)', 9863: 'You need a Market to pay tribute.',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */

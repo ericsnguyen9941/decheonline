@@ -184,7 +184,89 @@ mutually allied with and that have allied victory on; without it, itself only.
 Port: `victory.ts` `teammates`, `winGameNow`, `checkVictory`,
 `checkAllyGroup`, `checkGameState`; the world passes `World.diplomacy`.
 
-## 7. Port status
+## 7. The Diplomacy dialog and the notifications
+
+### 7.1 Opening it
+
+The top strip's Diplomacy button (`button_panel[13]`, `TRIBE_UI_COMMAND_DIPLOMACY`,
+`src/scr_game.cpp:243`) runs `command_diplomacy` (`:3855-3862`): when the game is
+not paused, a new `TribeDiplomacyDialog` (single player also pauses). There is no
+hotkey: `key_down_action` (`:1451-1780`) has no Diplomacy key. The dialog is
+modal; Esc is Cancel.
+
+### 7.2 Layout (`TribeDiplomacyDialog::TribeDiplomacyDialog`, `src/dlg_dip.cpp:16-345`)
+
+625 x 405, in the game screen's popup look (`dlg6_<culture>`, the Send Messages
+dialog's). Texts are `create_text(x, y, w, h, font, horz_center, vert_center, wrap)`;
+strings from language.dll (`include/resource_ids.h:144-162`):
+
+| item | string | box | notes |
+| --- | --- | --- | --- |
+| title | 9851 "Diplomacy" | 72, 5, 500 x 30 | Copperplate 21, centred |
+| headers | 9862 Name, 9852 Civilization, 9853 Ally, 9854 Neutral, 9855 Enemy | x 5 / 137 / 235 / 290 / 360, y 50 | standard font, left, centred top to bottom |
+| fee | 9856 "Pay Tribute (cost %d%%)" with `(long)(attr 46 * 100)` (`g_diplomacy_attribute_percent_scale`, `src/game_globals.cpp:216`) | 440, 50, 180 x 30 | |
+| no Market | 9863 "You need a Market to pay tribute." | 440, 110, 175 x 60 | centred, word-wrapped |
+| Allied Victory | 9857 | 318, 330, 300 x 30 | check box at (282, 327) |
+| OK, Clear Tributes, Cancel | 4001, 9859, 4002 | (10 / 215 / 420, 367), 190 x 30 | Copperplate 12; Cancel's hotkey Esc |
+| help | 4009 "?" | 500, 327, 30 x 30 | `setup_popup_help` |
+
+A row per player 1 .. n-1, row = player - 1, y = 80 + 30 * row (`:123-234`):
+`dlg_plbn.shp` (0xC63A) at (10, y) in the player's colour (`draw`, `:832-859`);
+the name (5, y, 130 x 30), struck out (`RGE_FONT_STRIKEOUT`) when the player is
+defeated (`game_status` 2) or not a human or computer any more (`:133-150`); the
+civilization (137, y, 100 x 30). For every other player three radio buttons
+(`btn6` frames 4 / 6) at x 240, 310, 380, set from this player's own stance
+(Ally, Neutral, else Enemy). For another player still playing, outside the game
+over mode, four tribute buttons 40 x 30: wood 440, food 480, gold 520, stone 560,
+`tradicon.shp` (0xC62C) frames 0, 2, 3, 1, picture and amount text. On this
+player's own row the same four columns show its stock less the amounts chosen
+(`:277-300`).
+
+- Market (`:302-320`): with an active Market (master 0x54) the fee, the stock and
+  the tribute buttons show and "You need a Market" hides; without one the
+  reverse. Coinage researched (tech 30 state 3) hides the fee text (`:322-324`).
+- `check_gold` .. `check_stone` (`:680-830`): a resource's buttons are disabled
+  (two plain rectangles, no click) when the stock less the chosen total is 0 or
+  less, and always on this player's row and in the game over mode.
+- Game over mode: radio buttons and check box disabled, no OK or Clear Tributes.
+- Focus starts on OK; tab order OK, Clear Tributes, Cancel (`:331-345`): Enter or
+  Space presses the focused button (`TButtonPanel::key_down_action`,
+  `src/pnl_btn.cpp:810-825`).
+
+### 7.3 Behaviour (`TribeDiplomacyDialog::action`, `src/dlg_dip.cpp:418-678`)
+
+- A tribute click (`:557-678`): `cost = max(fee, 0)`; when the resource is not
+  exhausted, `cost += 1`; if `stock - total < cost * 100` the amount grows by
+  `(stock - total) / cost` and the total by that times cost, else by 100 and
+  `cost * 100`. The button shows `(long) amount`, the stock text
+  `(long)(stock - total)`. Exhausted: the stock text shows what is left, at
+  least 0. In floats. Example (fee 0.25, 1000 food): two clicks show 200 and
+  750.
+- OK (`:426-500`): the allied victory command when the check box changed, then
+  per other player row the relation command when the radio changed, then that
+  row's tributes in the order gold, wood, food, stone (each > 0); the dialog
+  closes.
+- Clear Tributes (`:516-555`): every amount and total back to 0, the buttons'
+  texts empty, the stock texts the stock.
+- Cancel (`:502-509`): closes, sends nothing.
+
+### 7.4 Notifications (`TRIBE_Game::notification`, `src/tribegam.cpp:1857-1903`)
+
+Each machine runs the notification as the command executes; only the target
+player's screen shows it, on a chat line (`display_system_message`,
+`src/scr_game.cpp:1408`):
+
+- `GAME_NOTIFY_DIPLOMACY_CHANGED` (`src/tcommand.cpp:373`, val1 the sender, val2
+  the target, val3 the stance): when val2 is this player, 3026 "%s changed
+  diplomatic stance with you to Ally." (3025 Neutral, 3027 Enemy) with the
+  sender's name. No sound. The sender sees nothing.
+- `GAME_NOTIFY_TRIBUTE_PAID` (`src/tcommand.cpp:482`, val4 `(long)` the amount
+  the receiver got, after the fee and a short stock): when val2 is this player,
+  `play_sound(4)` (tribute.wav, interfac 50304) and 3016 food / 3015 wood / 3017
+  stone / 3009 gold "%s paid %d food in tribute to you.". The sender sees
+  nothing.
+
+## 8. Port status
 
 Ported, with tests in `diplomacy.test.ts`: §1-§6. Client read API:
 `World.relation(p, q)`, `isAlly`, `isEnemy`, `World.diplomacy`
@@ -192,10 +274,27 @@ Ported, with tests in `diplomacy.test.ts`: §1-§6. Client read API:
 attributes 46 and 53. The chat's Allies/Enemies targets read `isAlly`/`isEnemy`
 (chat.md §4).
 
+§7, client: `apps/client/src/hud/diplomacy.ts` `DiplomacyDialog` (opened by the
+top strip's Diplomacy button in `hud/game-hud.ts`; test ids `diplomacy`,
+`diplomacy-<ally|neutral|enemy>-<p>`, `diplomacy-tribute-<resource>-<p>`,
+`diplomacy-stock-<resource>`, `diplomacy-allied-victory`, `diplomacy-ok` ...)
+and `diplomacyNotices` (unit tests `diplomacy.test.ts` in the client). The sim
+has no notification events, so the client reads the notifications off the
+commands themselves: `Lockstep.onCommands` hands each turn's batches over just
+before the step that runs them, and `diplomacyNotices` replays the stance,
+tribute and resign commands in the sim's order (by player, then as issued) with
+the sim's guards and `giveAttribute` over a copy of the attributes, for the
+amount received. Known gap: another command earlier in the same step that
+spends or refunds the sender's resource (a train, a building, a cancel) is not
+replayed, so with a stock that runs short the amount shown can differ from what
+the sim gave. e2e: `e2e/tests/diplomacy.spec.ts` (two players by invite code),
+`e2e/real/real-diplomacy.spec.ts` (the real art and strings, screenshots
+`diplomacy-no-market.png`, `diplomacy-tribute.png`, `diplomacy-notices.png`).
+
 Not ported:
 
-- The Diplomacy dialog and the notifications (diplomacy changed, tribute paid):
-  client UI, a later ship.
+- The help button (`setup_popup_help`): shown disabled, as the menu's Help.
+- Single player's pause while the dialog is open (multiplayer only here).
 - Lobby teams and their starting alliances (`src/world.cpp:1013-1029`).
 - The non-mutual visibility masks (drawing of fogged buildings).
 - Priest conversion's stance checks: the sim has no Priests.

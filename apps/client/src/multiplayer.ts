@@ -75,6 +75,9 @@ export interface NetDebug {
   techState(tech: number, player?: number): number;
   /** What `player` (default: this client's) knows of tile (col, row): 0x0F visible, 0x80 fogged, 0 unexplored. */
   tileVisibility(col: number, row: number, player?: number): number;
+  /** `player`'s stance towards `other` (0 ally, 1 neutral, 3 enemy; docs/spec/diplomacy.md §1) and its allied victory flag. */
+  relation(player: number, other: number): number;
+  alliedVictory(player: number): boolean;
   /** Pixel of the minimap canvas where tile (col, row)'s objects are drawn, or null before the HUD is up. */
   minimapPoint(col: number, row: number): { x: number; y: number } | null;
   /** Every sound triggered so far, oldest first (whether or not audio has started); empty before the HUD is up. */
@@ -288,6 +291,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     const dropped = new Set<number>();
     game.onDropped = (slot) => dropped.add(slot + 1);
     game.onNotResponding = () => hud?.notResponding();
+    game.onCommands = (_turn, batches) => hud?.commandsDue(batches);
     lockstep = game;
     // Before the first turn runs: the relay releases turns asynchronously.
     if (debug && resources !== undefined) {
@@ -522,6 +526,8 @@ function debugPanel(
     age: (p = player) => game.world.attributes[p]![ATTR_CURRENT_AGE]!,
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
     tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
+    relation: (p, q) => game.world.relation(p, q),
+    alliedVictory: (p) => game.world.diplomacy.alliedVictory[p] ?? false,
     minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,
     sounds: () => [...(sounds()?.log ?? [])],
     gameResult: () => game.world.gameResult(),

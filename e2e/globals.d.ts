@@ -55,6 +55,8 @@ interface Window {
     age(player?: number): number;
     techState(tech: number, player?: number): number;
     tileVisibility(col: number, row: number, player?: number): number;
+    relation(player: number, other: number): number;
+    alliedVictory(player: number): boolean;
     minimapPoint(col: number, row: number): { x: number; y: number } | null;
     sounds(): { event: string; sound: number; game: number; wav: number | null; source: number }[];
     gameResult(): { endCondition: number; winners: number[]; status: number[] } | null;

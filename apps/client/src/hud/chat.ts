@@ -22,10 +22,10 @@ export const STRING_CHAT = {
 export const GAME_CHAT_LENGTH = 65;
 /** `btn6_0` (interfac.drs 50605), the in-game dialogs' `button_file`: check box frames 0 / 2, radio button 4 / 6. */
 const BUTTON_PICS = 50605;
-const CHECK_FRAMES = [0, 2];
-const RADIO_FRAMES = [4, 6];
+export const CHECK_FRAMES = [0, 2];
+export const RADIO_FRAMES = [4, 6];
 /** `dlg_plbn.shp` (0xC63A): the bar under a player's name, in the player's colour (`TribeSendMessageDialog::draw`). */
-const PLAYER_BAR = 0xc63a;
+export const PLAYER_BAR = 0xc63a;
 
 /** One row of the Send Messages dialog: a player in the game. */
 export interface ChatPlayer {
@@ -69,7 +69,7 @@ function chatInput(parent: HTMLElement, look: PanelLook, x: number, y: number, w
 }
 
 /** A text panel: `horz` centres it across, every one here is centred top to bottom. */
-function label(parent: HTMLElement, look: PanelLook, text: string, font: string, x: number, y: number, w: number, h: number, horz: boolean): HTMLDivElement {
+export function label(parent: HTMLElement, look: PanelLook, text: string, font: string, x: number, y: number, w: number, h: number, horz: boolean): HTMLDivElement {
   const el = placed(parent, 'div', `aoe-text ${font}`, x, y, w, h);
   Object.assign(el.style, { display: 'flex', alignItems: 'center', justifyContent: horz ? 'center' : 'flex-start' });
   el.textContent = text;
@@ -78,7 +78,7 @@ function label(parent: HTMLElement, look: PanelLook, text: string, font: string,
 }
 
 /** A check box or radio button (`create_check_box`, `create_radio_button`): `btn6_0` frame by state, bevel type 4. */
-class PictureButton {
+export class PictureButton {
   readonly el: HTMLButtonElement;
   private on = false;
 

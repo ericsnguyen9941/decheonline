@@ -64,6 +64,8 @@ export class Lockstep {
   readonly hashes = new Map<number, number>();
   /** Called after each executed turn. */
   onTurn: (turn: number, hash: number) => void = () => {};
+  /** Called with each sender's commands for `turn` (player number, as issued) before the step that runs them. */
+  onCommands: (turn: number, batches: { player: number; commands: Command[] }[]) => void = () => {};
   onDesync: (turn: number, hashes: number[]) => void = () => {};
   onEnded: (reason: LockstepEnd) => void = () => {};
   /** The game has waited `NOT_RESPONDING_MS` (and every `NOT_RESPONDING_MS` after) for a turn the relay has not released. */
@@ -226,6 +228,7 @@ export class Lockstep {
     this.released.delete(issued);
     this.taken = issued + 1;
     for (const batch of release.batches) this.world.addBatch(issued, batch.slot + 1, batch.commands);
+    this.onCommands(turn, release.batches.map((b) => ({ player: b.slot + 1, commands: b.commands })));
     if (release.speed) this.world.setSpeedChange(release.speed);
     return true;
   }

@@ -10,6 +10,7 @@ import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } 
 import { Minimap, type MinimapUnits } from './minimap';
 import { AchievementsScreen } from './achievements';
 import { ChatEntry, STRING_CHAT } from './chat';
+import { DiplomacyDialog, diplomacyNotices, SOUND_TRIBUTE, type DueBatch } from './diplomacy';
 import { easyButton, FONT, GAME_DIALOG_INFO, lookOf } from './easy-panel';
 import { ChatLines, formatName, GameOver, MESSAGE_NOT_RESPONDING, SOUND_CHAT, type GameOverSounds } from './game-over';
 import { MenuDialog, okPopup } from './menu';
@@ -163,6 +164,8 @@ export class GameHud {
   readonly chat: ChatLines;
   /** Enter's chat bar and the Chat button's Send Messages dialog. */
   readonly chatEntry: ChatEntry;
+  /** The Diplomacy button's dialog. */
+  readonly diplomacy: DiplomacyDialog;
   /**
    * The chat group (`TChat::chatGroupPlayers`): every player from the setup screen (src/scr_mps.cpp:53-55), this one
    * again at the start (src/tribegam.cpp:3488); the Send Messages dialog's check boxes change it.
@@ -246,6 +249,18 @@ export class GameHud {
       send: (text) => this.sendChat(text),
       click,
     });
+    this.diplomacy = new DiplomacyDialog({
+      parent: this.root,
+      provider: o.provider,
+      world: o.world,
+      player: o.player,
+      names: o.game.names,
+      out: (p) => o.game.dropped(p) || o.world.playerStatus(p) === STATUS_LOST,
+      gameOver: () => this.gameOver.over,
+      civ: (p) => civilizationName(o.provider, o.world.civs[p]!),
+      issue: o.issue,
+      click,
+    });
     window.addEventListener('keydown', this.onKey);
     this.menu = new MenuDialog(this.root, o.provider, {
       playing: () => o.world.playerStatus(o.player) === 0 && !this.quit,
@@ -262,12 +277,13 @@ export class GameHud {
       click,
     });
     // The top strip's buttons click like the grid's (`RGE_Panel_Tool_Box` gets `get_sound(1)`, src/scr_game.cpp:466);
-    // Menu opens the menu.
+    // Diplomacy opens the Diplomacy dialog (`command_diplomacy`, src/scr_game.cpp:3855; no hotkey), Menu the menu.
     this.menus.forEach((el, i) =>
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         click();
         if (i === 0) this.commandChat(false);
+        if (i === 1) this.diplomacy.show();
         if (i === 2) this.menu.show();
       }),
     );
@@ -290,6 +306,7 @@ export class GameHud {
     this.o.app.ticker.remove(this.tick);
     this.menu.close();
     this.chatEntry.close();
+    this.diplomacy.close();
     window.removeEventListener('keydown', this.onKey);
     this.chat.destroy();
     this.scores.destroy();
@@ -370,6 +387,18 @@ export class GameHud {
   receiveChat(from: number, text: string): void {
     this.o.sounds?.message(SOUND_CHAT);
     this.chat.show(`${this.o.game.names[from] ?? ''}: ${text}`);
+  }
+
+  /**
+   * The commands about to run on a turn: another player's stance towards this one and its tribute to this one on the
+   * chat lines (`display_system_message`), a tribute with tribute.wav (diplomacy.md §7).
+   */
+  commandsDue(batches: readonly DueBatch[]): void {
+    const { world, player, provider, game } = this.o;
+    for (const n of diplomacyNotices(world, player, batches, provider, game.names)) {
+      if (n.tribute) this.o.sounds?.message(SOUND_TRIBUTE);
+      this.chat.show(n.text);
+    }
   }
 
   /** "Problem communicating with %s...": a turn is late (com_hand.cpp `COMM_PLAYER_NOT_RESPONDING`); names who is playing. */

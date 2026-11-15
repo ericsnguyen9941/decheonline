@@ -139,5 +139,6 @@ the settings and the ready buttons, with the same lengths and behaviour.
 
 - Cheat codes typed in chat (`processCheatCode`, before sending) and taunts
   (`TTaunt::PlayTauntStr` on a line that is a number).
-- The Diplomacy dialog and team games, which would make Allies differ.
+- Team games, which would make Allies differ. (The Diplomacy dialog changes this
+  player's stance, which Allies and Enemies read: diplomacy.md §7.)
 - More than 2 players' rows (the code handles up to 8).
