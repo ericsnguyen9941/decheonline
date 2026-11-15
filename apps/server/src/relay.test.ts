@@ -213,7 +213,7 @@ describe('rooms', () => {
 
   test('settings the sim cannot play are refused by the codec', async () => {
     const { host } = await pair();
-    host.send({ t: 'settings', settings: { deathMatch: false, startingAge: 0, resources: 0, revealMap: false, fullTechTree: false, mapType: 0, mapSize: 144, victory: { type: 0 }, populationLimit: 50 } });
+    host.send({ t: 'settings', settings: { deathMatch: false, startingAge: 0, resources: 0, revealMap: false, fullTechTree: false, mapType: 9, mapSize: 144, victory: { type: 0 }, populationLimit: 50 } });
     expect((await host.expect('error')).code).toBe('bad-message');
     host.send({ t: 'civ', civ: 0 });
     expect((await host.expect('error')).code).toBe('bad-message');

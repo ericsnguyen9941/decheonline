@@ -61,7 +61,8 @@ export function isBuilding(t: UnitType): boolean {
 function objectsInTiles(ctx: GameContext, x0: number, y0: number, x1: number, y1: number): Entity[] {
   const found: Entity[] = [];
   for (const o of ctx.entities.all()) {
-    if (!hasMaster(ctx, o.owner, o.type)) continue;
+    // A passenger is on no tile.
+    if (!hasMaster(ctx, o.owner, o.type) || o.inside != null) continue;
     const tx = Math.trunc(o.x);
     const ty = Math.trunc(o.y);
     if (tx >= x0 && tx <= x1 && ty >= y0 && ty <= y1) found.push(o);

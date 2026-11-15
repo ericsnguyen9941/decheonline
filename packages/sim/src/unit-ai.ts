@@ -18,6 +18,7 @@ import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { ACTION_REPAIR, aiRepair } from './repair';
 import { ACTION_CONVERT, ACTION_HEAL, aiPriestAction, FAITH_MAX, GROUP_PRIEST } from './priest';
+import { ACTION_ENTER, ACTION_TRANSPORT, AI_ACTION_ENTER, AI_ACTION_TRANSPORT, AI_ACTION_UNLOAD, unload } from './transport';
 import { newSprite } from './sprites';
 import { FARM, type UnitType } from './units';
 import { TILE_VISIBLE } from './visibility';
@@ -47,6 +48,10 @@ export const AI_ORDER_HUNT = 0x2c9;
 export const AI_ORDER_REPAIR = 0x2ce;
 const AI_ORDER_MOVE_TO_TARGET = 0x2d4;
 export const AI_ORDER_STAND_GROUND = 0x2d5;
+/** `UNIT_AI_ORDER_TRANSPORT`, `UNIT_AI_ORDER_ENTER`, `UNIT_AI_ORDER_UNLOAD` (include/stat_obj.h). */
+const AI_ORDER_TRANSPORT = 0x2ca;
+const AI_ORDER_ENTER = 0x2cd;
+const AI_ORDER_UNLOAD = 0x2d1;
 const AI_ORDER_ATTACK_ROUNDUP = 0x2d9;
 /** Notifications (`UNIT_AI_NOTIFY_*` and the owner events). */
 export const NOTIFY_ATTACKED = 0x1f4;
@@ -284,6 +289,10 @@ export function aiStateForAction(action: number): [order: number, action: number
       return [AI_ORDER_REPAIR, AI_ACTION_REPAIR];
     case ACTION_CONVERT:
       return [AI_ORDER_CONVERT, AI_ACTION_CONVERT];
+    case ACTION_ENTER:
+      return [AI_ORDER_ENTER, AI_ACTION_ENTER];
+    case ACTION_TRANSPORT:
+      return [AI_ORDER_TRANSPORT, AI_ACTION_TRANSPORT];
     case ACTION_HEAL:
       return [AI_ORDER_HEAL, AI_ACTION_HEAL];
     default:
@@ -969,8 +978,10 @@ function processNotify(ctx: GameContext, e: Entity, note: Note): number {
       return lionNotify(ctx, e, note);
     case AiClass.FishingShip:
       return fishingShipNotify(ctx, e, note);
+    case AiClass.TransportShip:
+      return transportShipNotify(ctx, e, note);
     default:
-      // The trade and transport ships (no such units yet) and the artifact reactions are not ported.
+      // The trade ships (no such units yet) and the artifact reactions are not ported.
       return NOTE_DONE;
   }
 }
@@ -996,6 +1007,26 @@ function fishingShipNotify(ctx: GameContext, e: Entity, note: Note): number {
     stopObject(ctx, e, true);
   }
   runAwayFromAttackers(ctx, e);
+  return NOTE_STOP;
+}
+
+/**
+ * `TribeTransportShipUnitAIModule::processNotify` (src/taiuaimd.cpp:1416-1480, naval.md §7.7): when hit, the alert on the
+ * first attacker and a help call for a new one, the attacker recorded; with an order it keeps it; with no action, or an
+ * idle top action (state 2), it runs from its attackers. Every other note takes the base path.
+ */
+function transportShipNotify(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  if (note.type !== NOTIFY_ATTACKED) return baseNotify(ctx, e, note);
+  if (note.p2 <= 0) {
+    playerNotify(ctx, e.owner, NOTIFY_KILLED, note.caller);
+    ai.notes = [];
+    return NOTE_DIED;
+  }
+  alertAndAskForHelp(ctx, e, note);
+  if (ai.order !== -1) return NOTE_DONE;
+  const top = e.work ?? e.attack ?? e.mover?.action ?? null;
+  if (!top || top.state === 2) runAwayFromAttackers(ctx, e);
   return NOTE_STOP;
 }
 
@@ -1450,6 +1481,9 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
     case AI_ORDER_CONVERT:
       ok = priestObject(ctx, e, o.target, ACTION_CONVERT, true);
       break;
+    case AI_ORDER_UNLOAD:
+      ok = unloadObject(ctx, e, o.x, o.y);
+      break;
   }
   if (ok) {
     if (o.type === AI_ORDER_STOP) {
@@ -1485,6 +1519,26 @@ function repairObject(ctx: GameContext, e: Entity, targetId: number, uncondition
 export function standGround(ctx: GameContext, e: Entity, player: number): void {
   if (!e.ai) return;
   aiOrder(ctx, e, player, AI_ORDER_STAND_GROUND, -1, -1, e.x, e.y, e.z, 1, true, false, 100);
+}
+
+/**
+ * `UnitAIModule::unload(1, x, y)` (src/aiuaimod.cpp:1980): the object's `unload`, then the action (0x26D) and the
+ * object itself as the target recorded.
+ */
+function unloadObject(ctx: GameContext, e: Entity, x: number, y: number): boolean {
+  if (!unload(ctx, e, x, y)) return false;
+  setAction(e.ai!, AI_ACTION_UNLOAD);
+  setTarget(e.ai!, e.id, typeOf(ctx, e).group, e.x, e.y, e.z);
+  return true;
+}
+
+/**
+ * `TRIBE_Command::do_command_unload` (src/tcommand.cpp:513, naval.md §7.6): an immediate UNLOAD order from the owner at
+ * (x, y), range 1, priority 100.
+ */
+export function orderUnload(ctx: GameContext, e: Entity, x: number, y: number): void {
+  if (!e.ai) return;
+  aiOrder(ctx, e, e.owner, AI_ORDER_UNLOAD, e.id, e.owner, x, y, 0, 1, true, false, 100);
 }
 
 /**

@@ -7,8 +7,10 @@ import { ACTION_ARTIFACT, artifactMoveTo, artifactWork, startArtifact, updateArt
 import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } from './build';
 import { ACTION_REPAIR, repairMoveTo, repairTaskFor, repairWork, startRepair, updateRepair } from './repair';
 import { ACTION_CONVERT, ACTION_HEAL, GROUP_PRIEST, priestWork, startPriestAction, updateConvert, updateHeal } from './priest';
+import { ACTION_ENTER, ACTION_TRANSPORT, enterTaskFor, startEnter, startTransport, transportMoveTo, transportWork, updateEnter, updateTransport } from './transport';
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
+import type { TileMap } from './map';
 import { isAlly, relation, RELATION_ALLY, type DiplomacyContext } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
 import { typeOf, type PlayerMasters } from './masters';
@@ -114,9 +116,10 @@ function checkTask(ctx: PlayerMasters & DiplomacyContext, task: Task, e: Entity,
 }
 
 /** `TRIBE_Task_List::get_target_task` then `RGE_Task_List::get_target_task` (src/task_lst.cpp:107): task index or -1. */
-function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entity, target: Entity | undefined): number {
+function targetTask(ctx: PlayerMasters & DiplomacyContext & { readonly map?: TileMap }, t: UnitType, e: Entity, target: Entity | undefined, x = -1, y = -1): number {
   const tasks = t.action?.tasks ?? [];
-  if (!target || tasks.length === 0) return -1;
+  if (tasks.length === 0) return -1;
+  if (!target) return terrainTask(ctx, tasks, x, y);
   const tt = typeOf(ctx, target);
   const self = typeOf(ctx, e);
   const carrier = self.group === GROUP_CIVILIAN || self.group === GROUP_FISHING_BOAT;
@@ -138,6 +141,8 @@ function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entit
     const i = tasks.findIndex((k) => k.building === 1 && checkTask(ctx, k, e, target));
     if (i !== -1) return i;
   }
+  const enter = enterTaskFor(ctx, t, e, target);
+  if (enter !== null) return enter;
   const repair = repairTaskFor(ctx, t, e, target);
   if (repair !== null) return repair;
   if (self.group === GROUP_PRIEST) return priestTask(ctx, tasks, e, target, tt);
@@ -146,8 +151,20 @@ function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entit
   i = tasks.findIndex((k) => k.group === tt.group && checkTask(ctx, k, e, target));
   if (i !== -1) return i;
   if (target.state < ObjectState.Dying && tt.combatLevel > 0) i = tasks.findIndex((k) => k.combatLevel > 0 && checkTask(ctx, k, e, target));
-  // The terrain pass never matches here: no task of these units names a terrain.
-  return i;
+  return i !== -1 ? i : terrainTask(ctx, tasks, x, y);
+}
+
+/**
+ * The terrain pass of `RGE_Task_List::get_target_task` (src/task_lst.cpp:147-160): the first task naming the terrain of
+ * the point's tile (a point of -1 skips it). The transport's task 0 names the beach (naval.md §7.4).
+ */
+function terrainTask(ctx: { readonly map?: TileMap }, tasks: readonly Task[], x: number, y: number): number {
+  if (!ctx.map || x === -1 || y === -1) return -1;
+  const tx = toInt(x);
+  const ty = toInt(y);
+  if (tx < 0 || tx >= ctx.map.width || ty < 0 || ty >= ctx.map.height) return -1;
+  const terrain = ctx.map.terrainAt(tx, ty);
+  return tasks.findIndex((k) => k.terrainId === terrain);
 }
 
 /** Boats, artifacts, walls and buildings: a priest heals none of them (src/ttsk_lst.cpp:127-130). */
@@ -213,10 +230,10 @@ export function deleteActions(ctx: GameContext, e: Entity): void {
 export function orderWork(ctx: GameContext, e: Entity, target: Entity | undefined, x: number, y: number): void {
   if (target === e || !e.mover) return;
   let t = typeOf(ctx, e);
-  let task = targetTask(ctx, t, e, target);
+  let task = targetTask(ctx, t, e, target, f32(x), f32(y));
   if (task === -1 && t.action && t.action.taskSwapGroup !== 0) {
     for (const other of swapTypes(ctx, e.owner, t)) {
-      const i = targetTask(ctx, other, e, target);
+      const i = targetTask(ctx, other, e, target, f32(x), f32(y));
       if (i !== -1) {
         transform(ctx, e, other);
         t = other;
@@ -252,6 +269,10 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
       artifactWork(ctx, e, w, target, x, y);
       return w.type;
     }
+    if (w.type === ACTION_TRANSPORT) {
+      transportWork(ctx, e, w, target, x, y);
+      return w.type;
+    }
     if (w.type === ACTION_CONVERT || w.type === ACTION_HEAL) {
       if (priestWork(ctx, e, w, target)) return w.type;
     } else if (workRetarget(ctx, e, w, target, x, y)) return w.type;
@@ -268,6 +289,14 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
   }
   if (kind === ACTION_CONVERT || kind === ACTION_HEAL) {
     startPriestAction(ctx, e, kind, task, target, x, y);
+    return kind;
+  }
+  if (kind === ACTION_ENTER && target) {
+    startEnter(ctx, e, task, target);
+    return kind;
+  }
+  if (kind === ACTION_TRANSPORT) {
+    startTransport(ctx, e, task, x, y);
     return kind;
   }
   deleteActions(ctx, e);
@@ -328,8 +357,12 @@ export function workMoveTo(ctx: GameContext, e: Entity, x: number, y: number): b
     artifactMoveTo(ctx, e, a, x, y);
     return true;
   }
-  // `RGE_Action::move_to`: the convert and the heal do not take a walk.
-  if (a.type === ACTION_CONVERT || a.type === ACTION_HEAL) return false;
+  if (a.type === ACTION_TRANSPORT) {
+    transportMoveTo(ctx, e, a, x, y);
+    return true;
+  }
+  // `RGE_Action::move_to`: the convert, the heal and the enter do not take a walk.
+  if (a.type === ACTION_CONVERT || a.type === ACTION_HEAL || a.type === ACTION_ENTER) return false;
   a.x = f32(x);
   a.y = f32(y);
   a.z = 0;
@@ -554,6 +587,8 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
   if (a.type === ACTION_ARTIFACT) return updateArtifact(ctx, e, a);
   if (a.type === ACTION_CONVERT) return updateConvert(ctx, e, a);
   if (a.type === ACTION_HEAL) return updateHeal(ctx, e, a);
+  if (a.type === ACTION_ENTER) return updateEnter(ctx, e, a);
+  if (a.type === ACTION_TRANSPORT) return updateTransport(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   const live = (id: number) => {
     const o = object(ctx, id);

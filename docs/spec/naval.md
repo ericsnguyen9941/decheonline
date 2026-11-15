@@ -372,30 +372,38 @@ again; with no drop points left, the rest stay aboard. Returns the count
 dropped.
 
 `find_drop_location`: the ring radius is the given radius plus the
-passenger's; two rings (the second adds twice the passenger's radius), 50
-tries each. A try draws `rand() * 4 / 0x7fff` for the side (0 east `x + r`, 1
-west `x - r`, 2 south `y + r`, 3 north `y - r`; 4, when `rand()` is 32767,
-keeps the last spot) and one more `rand()` for the position along it,
+passenger's; 50 tries (the ring loop counts from 1 while below 2, so the
+widened second ring it prepares is never tried). A try draws `rand() * 4 /
+0x7fff` for the side (0 east `x + r`, 1 west `x - r`, 2 south `y + r`, 3 north
+`y - r`; 4, when `rand()` is 32767, keeps the last spot) and one more `rand()` for the position along it,
 `value × 2r × (1/32767) - r` (float32). The spot must be on the map, in the
 drop zone (when it is not -1), pass the passenger's `check_placement` (as a
 unit is placed, other units ignored) and be passable for it.
 
-So the Unload command (§7.6), whose target is the boat's own position and
-zone, only drops onto shallows beside the boat (the land zone is not the
-water zone); a drop onto a beach takes a targetless work order on a beach tile
-within 2 tiles of the boat (verified against the 1.0a `Empiresx.exe`, not a
-beta difference).
+A player's Unload (§7.6) gives the boat a new Transport action whose target
+point is the clicked one: the boat sails towards it and drops in the clicked
+point's zone, so on the beach of the shore clicked (or onto shallows of the
+boat's own zone when the click is on water).
 
 ### 7.6 The Unload command
 
 `do_command_unload` gives each listed object a player AI order UNLOAD (0x2D1)
-at the command's point, range 1, immediate, priority 100. The unit AI runs
-`unload(unconditional, x, y)`: `RGE_Combat_Object::unload` gives a top
-Transport action `work(boat, boat's own position)` and ignores the point;
-without one it replaces every action with a new Transport action that takes
-`work(boat, x, y)`. On success the unit AI's action is 0x26D. The interface
-sends it for the selected units of `unit_level` 7. The port ignores objects of
-another player.
+at the command's point, range 1, immediate, priority 100. An immediate order
+first stops the object (`UnitAIModule::order` → `stopObject(1)` →
+`stopAction`, which deletes every action, the Transport action included), then
+runs `unload(unconditional, x, y)`. `RGE_Combat_Object::unload`: with a
+Transport action on top it would call `work(boat, boat's own position)` and
+ignore the point (only reachable without the stop, the computer player's
+path); without one, as after the stop, a new Transport action without a task
+(made with the boat's position, so first in stack state 11) replaces every
+action and takes `work(boat, x, y)`: drop now when the point's zone is within
+2 tiles of the boat and the point at most 2 away, else sail there (state 4)
+and drop (state 6). Without a task, `next_to_drop_off_terrain` always checks
+the box. On success the unit AI's action is 0x26D and its target the boat. The
+interface sends it for the selected units of `unit_level` 7; the port ignores
+objects of another player and objects that are not transports.
+The task-less action stays on top afterwards (idle in state 2), until an
+order replaces it.
 
 ### 7.7 Transport ship unit AI
 

@@ -144,6 +144,18 @@ export interface AttackGroundCommand {
   y: number;
 }
 
+/**
+ * Unload (`TRIBE_Command::do_command_unload`, src/tcommand.cpp:513, naval.md §7.6): each listed transport of the sender
+ * gets an immediate UNLOAD order at map point (x, y), in tiles; a transport idle with its Transport action drops at its own
+ * position and ignores the point.
+ */
+export interface UnloadCommand {
+  type: 'unload';
+  units: number[];
+  x: number;
+  y: number;
+}
+
 /** Resign (`RGE_Command::do_command_resign`, victory.md §4): the sender loses. */
 export interface ResignCommand {
   type: 'resign';
@@ -195,6 +207,7 @@ export type Command =
   | RepairCommand
   | StandGroundCommand
   | AttackGroundCommand
+  | UnloadCommand
   | RelationCommand
   | AlliedVictoryCommand
   | TributeCommand;
@@ -304,6 +317,12 @@ export function parseCommand(v: unknown): Command | null {
       if (!isPoint(x, y)) return null;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'attack-ground', units: [...(units as number[])], x: x as number, y: y as number };
+    }
+    case 'unload': {
+      const { units, x, y } = o;
+      if (!isPoint(x, y)) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'unload', units: [...(units as number[])], x: x as number, y: y as number };
     }
     case 'relation': {
       const { player, relation } = o;

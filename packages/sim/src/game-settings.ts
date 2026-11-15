@@ -4,7 +4,23 @@
  * civilization, and the game they start. Only the values the sim can play are offered (lobby.md §6).
  */
 import { CrtRand } from './rng';
-import { MAP_CONTINENTAL, MAP_HILLY, MAP_HUGE, MAP_HUMONGOUS, MAP_LARGE, MAP_MEDIUM, MAP_MOSTLY_LAND, MAP_ALL_LAND, MAP_SMALL, MAP_TINY } from './rmm-controller';
+import {
+  MAP_ALL_LAND,
+  MAP_ALL_WATER,
+  MAP_CONTINENTAL,
+  MAP_HILLY,
+  MAP_HUGE,
+  MAP_HUMONGOUS,
+  MAP_ISTHMAS,
+  MAP_LAKE,
+  MAP_LARGE,
+  MAP_MEDIUM,
+  MAP_MOSTLY_LAND,
+  MAP_MOSTLY_WATER,
+  MAP_SMALL,
+  MAP_TINY,
+  MAP_WATER_AND_LAND,
+} from './rmm-controller';
 import { CIV_GAIA } from './units';
 import { VICTORY_CONQUEST, VICTORY_SCORE, VICTORY_STANDARD, VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
 import {
@@ -56,11 +72,18 @@ export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   populationLimit: DEFAULT_POPULATION_LIMIT,
 };
 
-/**
- * The map types offered, in the drop-down's order (src/scr_set.cpp:63-71): those whose two start positions a land
- * unit can always walk between. The water maps need the Dock and boats, which the sim does not have (lobby.md §6).
- */
-export const LOBBY_MAP_TYPES: readonly number[] = [MAP_MOSTLY_LAND, MAP_ALL_LAND, MAP_CONTINENTAL, MAP_HILLY];
+/** The map types offered, all nine in the drop-down's order (src/scr_set.cpp:63-71, lobby.md §6). */
+export const LOBBY_MAP_TYPES: readonly number[] = [
+  MAP_ALL_WATER,
+  MAP_MOSTLY_WATER,
+  MAP_WATER_AND_LAND,
+  MAP_MOSTLY_LAND,
+  MAP_ALL_LAND,
+  MAP_CONTINENTAL,
+  MAP_LAKE,
+  MAP_HILLY,
+  MAP_ISTHMAS,
+];
 /** Tiny .. Gigantic (src/scr_set.cpp:50-55). */
 export const LOBBY_MAP_SIZES: readonly number[] = [MAP_TINY, MAP_SMALL, MAP_MEDIUM, MAP_LARGE, MAP_HUGE, MAP_HUMONGOUS];
 /** Standard, Conquest, Time Limit, Score: a random game's victory drop-down (src/scr_set.cpp:83-89), as world types. */

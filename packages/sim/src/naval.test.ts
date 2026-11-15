@@ -221,7 +221,7 @@ describe('naval.md §4: the Dock techs and the civ ship bonuses', () => {
     return [w, live(w, 1, DOCK)[0]!];
   }
 
-  test('Fishing Ship (4) makes 13 the Fishing Ship: 75 hp, speed 2; Merchant Ship (6) and Heavy Transport (8) research but change no master in the table', () => {
+  test('Fishing Ship (4) makes 13 the Fishing Ship: 75 hp, speed 2; Merchant Ship (6) researches but changes no master in the table (Heavy Transport: transport.test.ts)', () => {
     const [w, dock] = dockGame(CIV_EGYPTIAN, AGE_BRONZE);
     research(w, dock, TECH_FISHING_SHIP);
     const t = master(w, 1, FISHING_BOAT);

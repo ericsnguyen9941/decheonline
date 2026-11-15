@@ -14,6 +14,7 @@ import {
   type RepairCommand,
   type ResearchCommand,
   type StandGroundCommand,
+  type UnloadCommand,
   type RelationCommand,
   type AlliedVictoryCommand,
   type TributeCommand,
@@ -42,6 +43,7 @@ import { initialFacing, newMover, orderMove, teleport } from './movement';
 import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
 import { doRepair, REPAIR_MAN } from './repair';
+import { exitAll, exitObj, isTransport } from './transport';
 import { orderResearch, stopBuilding } from './research';
 import { MapStack } from './rmm-base';
 import { MAP_LARGE, MAP_MOSTLY_LAND, mapGenerate2 } from './rmm-controller';
@@ -64,7 +66,7 @@ import {
   type VictorySettings,
   type VictoryState,
 } from './victory';
-import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, NOTIFY_OWNER_CHANGED, notifyObject, purgeNotes, setAiState, standGround } from './unit-ai';
+import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, NOTIFY_OWNER_CHANGED, notifyObject, orderUnload, purgeNotes, setAiState, standGround } from './unit-ai';
 import { FAITH_MAX, GROUP_PRIEST, martyrdom, RESOURCE_FAITH } from './priest';
 import { exploreObject, forgetSighting, stateChanged, unexploreObject, Visibility, type VisibilitySnapshot } from './visibility';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, copyUnitType, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
@@ -299,7 +301,7 @@ export interface Snapshot {
   diplomacy: DiplomacyState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18 };
 
 /** `command_flag += 1` (src/act_obj.cpp:107, :135, :143): a player's command reached the unit; a byte. */
 function countCommand(e: Entity): void {
@@ -702,6 +704,9 @@ export class World {
     countPopulation(this.attributes[e.owner]!, t, -1);
     this.pathing.unstamp(e, t);
     if (t.masterType >= 50) forgetSighting(this, e, t);
+    // The destructor exits a transport's passengers and takes a passenger off its transport (naval.md §7.3).
+    exitObj(this.gameContext(), e);
+    exitAll(this.gameContext(), e);
     const list = this.awake[e.owner]!;
     const i = list.indexOf(e.id);
     if (i !== -1) list.splice(i, 1);
@@ -868,6 +873,8 @@ export class World {
         return this.doCommandStandGround(player, command);
       case 'attack-ground':
         return this.doCommandAttackGround(player, command);
+      case 'unload':
+        return this.doCommandUnload(player, command);
       case 'relation':
         return this.doCommandRelation(player, command);
       case 'allied-victory':
@@ -1161,6 +1168,21 @@ export class World {
   }
 
   /**
+   * `TRIBE_Command::do_command_unload` (src/tcommand.cpp:513, naval.md §7.6): each listed object leaves its pathing group
+   * and gets an immediate UNLOAD order at (x, y). Port-side guards (economy.md §5.5): only the sender's active transports
+   * (the original's button sends only objects of `unit_level` 7).
+   */
+  private doCommandUnload(player: number, command: UnloadCommand): void {
+    const ctx = this.gameContext();
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e?.mover || e.owner !== player || e.state !== ObjectState.Active || !isTransport(typeOf(this, e))) continue;
+      e.mover.group = [];
+      orderUnload(ctx, e, f32(command.x), f32(command.y));
+    }
+  }
+
+  /**
    * Attack Ground (`TRIBE_Command::do_command_attack_ground`, src/tcommand.cpp:442, commands.md §5): each listed unit
    * gets `attack(x, y, 0, 1)`. Port-side guards: only the sender's active objects (the sender's own filter,
    * `get_selected_objects_to_command`).
@@ -1261,7 +1283,7 @@ export class World {
     for (const q of queued) {
       h.u32(q.turn).u32(q.player).u32(q.seq).u32(COMMAND_TYPE_IDS[q.command.type]);
       if (q.command.type === 'test') h.f64(q.command.x).f64(q.command.y);
-      if (q.command.type === 'move' || q.command.type === 'work' || q.command.type === 'attack-ground') {
+      if (q.command.type === 'move' || q.command.type === 'work' || q.command.type === 'attack-ground' || q.command.type === 'unload') {
         h.u32(q.command.units.length);
         for (const id of q.command.units) h.u32(id);
         h.f64(q.command.x).f64(q.command.y);

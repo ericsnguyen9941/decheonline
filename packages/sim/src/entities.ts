@@ -81,6 +81,10 @@ export interface Entity {
    * src/act_obj.cpp:103-145); a repairer that called a boat only calls it again while it is unchanged (naval.md §6.1).
    */
   commandFlag?: number;
+  /** `inside_obj`: the transport the unit is aboard (naval.md §7.3), null or absent when none. */
+  inside?: number | null;
+  /** A transport's `objects`: its passengers, the last to board first (naval.md §7.3). */
+  cargo?: number[];
 }
 
 export type EntityInit = Pick<Entity, 'owner' | 'type' | 'x' | 'y' | 'z' | 'hp'> & Partial<Omit<Entity, 'id'>>;
@@ -162,6 +166,7 @@ function copyEntity(e: Entity): Entity {
   if (e.research) copy.research = { ...e.research };
   if (e.make) copy.make = { ...e.make };
   if (e.wonder) copy.wonder = { ...e.wonder };
+  if (e.cargo) copy.cargo = [...e.cargo];
   if (e.ownMaster) copy.ownMaster = copyUnitType(e.ownMaster);
   if (e.ai) {
     copy.ai = {

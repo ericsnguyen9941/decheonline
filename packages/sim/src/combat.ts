@@ -387,6 +387,12 @@ export function updateAttack(ctx: GameContext, e: Entity): ActionResult {
       if (!a.sub) notifyObject(ctx, e, e.id, NOTIFY_TARGET_INVALID, AI_ACTION_ATTACK);
       return ActionResult.TargetInvalid;
     }
+    // So is a target aboard a transport (src/act_atak.cpp:292-300, naval.md §7.3).
+    if (target.inside != null) {
+      setAttackState(ctx, e, a, ATTACK_DONE);
+      if (!a.sub) notifyObject(ctx, e, e.id, NOTIFY_TARGET_INVALID, AI_ACTION_ATTACK, target.id);
+      return ActionResult.TargetInvalid;
+    }
   }
   switch (a.state) {
     case ATTACK_DONE:
@@ -573,7 +579,8 @@ export function areaAttack(ctx: GameContext, attacker: Entity, x: number, y: num
   const sparesOwn = tribe && BLAST_SPARES_OWN.includes(t.id);
   const listed: { o: Entity; tile: number }[] = [];
   for (const o of ctx.entities.all()) {
-    if (!ctx.masters[o.owner]?.[o.type]) continue;
+    // A passenger is on no tile.
+    if (!ctx.masters[o.owner]?.[o.type] || o.inside != null) continue;
     const col = Math.min(Math.max(toInt(o.x), 0), width - 1);
     const row = Math.min(Math.max(toInt(o.y), 0), height - 1);
     if (col < x0 || col >= x1 || row < y0 || row >= y1) continue;

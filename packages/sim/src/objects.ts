@@ -18,6 +18,7 @@ import { updateResearch } from './research';
 import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
 import { AI_ACTION_MOVE, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_TARGET_INVALID, notifyObject, updateUnitAI } from './unit-ai';
+import { defaultTransportTask, startTransport } from './transport';
 import { refreshSighting, stateChanged } from './visibility';
 import { defaultWonderTask, startWonder, updateWonder } from './wonder';
 import { spriteInfo, type UnitType } from './units';
@@ -61,7 +62,8 @@ function setObjectState(ctx: GameContext, e: Entity, state: number): void {
   const lost = isBuilding(t) && state === ObjectState.Dying && e.state === ObjectState.Active;
   if (lost) giveBuiltStorages(ctx, e, t, -1);
   if (state >= ObjectState.Dying && e.state < ObjectState.Dying) giveStorages(ctx.attributes[e.owner]!, t, -1, [2]);
-  stateChanged(ctx, e, t, state);
+  // A passenger's sight was taken away when it boarded (naval.md §7.3).
+  if (e.inside == null) stateChanged(ctx, e, t, state);
   e.state = state;
   if (lost && !ctx.objectsOf(e.owner).some((o) => o.type === e.type && o.state === ObjectState.Active)) {
     if (t.building!.techId > -1) undoTech(ctx, e.owner, t.building!.techId);
@@ -93,7 +95,8 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     if (e.attackTimer < 0) e.attackTimer = 0;
   }
   const remove = staticUpdate(ctx, e, t);
-  if (isAnimated(t)) {
+  const inside = e.inside != null;
+  if (isAnimated(t) && !inside) {
     if (e.state === ObjectState.Dying) setObjectState(ctx, e, t.dying ? ObjectState.DeathAnimation : ObjectState.Dead);
     else if (e.state === ObjectState.DeathAnimation && !(e.sprite && isAnimating(e.sprite, spriteInfo(e.sprite.graphic)))) {
       e.state = ObjectState.Dead;
@@ -105,10 +108,12 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   if (e.state > ObjectState.Active) {
     deleteActions(ctx, e);
     e.missile = null;
-    if (t.masterType >= 50) refreshSighting(ctx, e, t);
+    if (t.masterType >= 50 && !inside) refreshSighting(ctx, e, t);
     return remove;
   }
-  if (e.research) {
+  if (inside) {
+    // A passenger's actions wait until it is dropped; its unit AI still runs (naval.md §7.3).
+  } else if (e.research) {
     if (updateResearch(ctx, e, e.research) === ActionResult.Remove) e.research = null;
   } else if (e.missile) {
     if (updateMissile(ctx, e) === ActionResult.Remove) e.missile = null;
@@ -133,10 +138,11 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     const task = defaultMakeTask(t);
     if (task !== -1) startMake(ctx, e, task);
     else if (defaultWonderTask(t) !== -1) startWonder(ctx, e);
+    else if (defaultTransportTask(t) !== -1) startTransport(ctx, e, defaultTransportTask(t), -1, -1);
   }
   // `RGE_Combat_Object::update` refreshes the object's visible-unit records, then ends with the unit AI, on the owner's
   // turn only, with the owner's accumulated time.
-  if (t.masterType >= 50) refreshSighting(ctx, e, t);
+  if (t.masterType >= 50 && !inside) refreshSighting(ctx, e, t);
   if (e.ai && ctx.playerTurn === e.owner) updateUnitAI(ctx, e, ctx.playerTimeDelta[e.owner]!);
   return remove;
 }
@@ -149,6 +155,12 @@ function notifyMoveEnd(ctx: GameContext, e: Entity, r: ActionResult): void {
 
 /** `RGE_Static_Object::update` (src/stat_obj.cpp:1166). */
 function staticUpdate(ctx: GameContext, e: Entity, t: UnitType): boolean {
+  if (e.inside != null) {
+    // A passenger copies its transport's state once that is past active: it dies with its ship (src/stat_obj.cpp:1233).
+    const vessel = ctx.entities.get(e.inside);
+    if (vessel && vessel.state > ObjectState.Active) setObjectState(ctx, e, vessel.state);
+    return false;
+  }
   switch (e.state) {
     case ObjectState.Active:
     case ObjectState.Unbuilt:

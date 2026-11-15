@@ -151,7 +151,7 @@ export function checkOwnership(ctx: GameContext, e: Entity): number {
   const players = ctx.masters.length;
   const count = new Array<number>(players).fill(0);
   for (const o of ctx.entities.all()) {
-    if (o.state !== ObjectState.Active || !hasMaster(ctx, o.owner, o.type)) continue;
+    if (o.state !== ObjectState.Active || !hasMaster(ctx, o.owner, o.type) || o.inside != null) continue;
     const col = Math.trunc(o.x);
     const row = Math.trunc(o.y);
     if (col < x0 || col > x1 || row < y0 || row > y1) continue;

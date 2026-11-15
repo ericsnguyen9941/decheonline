@@ -63,7 +63,11 @@ export class ZoneMap {
    * (the box `±(int)range`, clamped to the map) has the start tile's zone.
    */
   withinRange(sx: number, sy: number, gx: number, gy: number, range: number): boolean {
-    const start = this.zones[sy * this.w + sx]!;
+    return this.zoneWithinRange(this.zones[sy * this.w + sx]!, gx, gy, range);
+  }
+
+  /** `withinRange(startZone, goal, range)` (src/zone_map.cpp:243): some tile of zone `start` within `range` of the goal tile. */
+  zoneWithinRange(start: number, gx: number, gy: number, range: number): boolean {
     const r = Math.trunc(range);
     const x0 = Math.max(gx - r, 0);
     const y0 = Math.max(gy - r, 0);

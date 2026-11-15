@@ -15,6 +15,7 @@ export * from './combat';
 export * from './gather';
 export * from './build';
 export * from './repair';
+export * from './transport';
 export * from './artifact';
 export { hasAction } from './unit-ai';
 export * from './buildings';

@@ -13,7 +13,7 @@ import {
   resolveCivs,
   type GameSettings,
 } from './game-settings';
-import { MAP_ALL_WATER, MAP_HILLY, MAP_ISTHMAS, MAP_MOSTLY_WATER } from './rmm-controller';
+import { MAP_ALL_WATER, MAP_HILLY } from './rmm-controller';
 import { runReplay, sampleLobbyReplay } from './replay';
 import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT } from './buildings';
 import { ObjectState } from './entities';
@@ -38,8 +38,8 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     expect(isLobbySettings(DEFAULT_GAME_SETTINGS)).toBe(true);
   });
 
-  test('only what the sim can play is offered', () => {
-    for (const water of [MAP_ALL_WATER, MAP_MOSTLY_WATER, MAP_ISTHMAS]) expect(LOBBY_MAP_TYPES).not.toContain(water);
+  test('all nine map types are offered, in the drop-down order', () => {
+    expect(LOBBY_MAP_TYPES).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
     expect(LOBBY_MAP_SIZES).toEqual([72, 96, 120, 144, 200, 250]);
     const s = (mapType: number, mapSize: number, type: number, amount?: number, populationLimit = 50) =>
       isLobbySettings({ ...DEFAULT_GAME_SETTINGS, mapType, mapSize, victory: amount === undefined ? { type } : { type, amount }, populationLimit });
@@ -47,7 +47,8 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     expect(s(MAP_HILLY, 72, VICTORY_SCORE, 900)).toBe(true);
     expect(s(MAP_HILLY, 72, VICTORY_SCORE, 950)).toBe(false);
     expect(s(MAP_HILLY, 72, VICTORY_SPECIAL)).toBe(false);
-    expect(s(MAP_ALL_WATER, 72, VICTORY_STANDARD)).toBe(false);
+    expect(s(MAP_ALL_WATER, 72, VICTORY_STANDARD)).toBe(true);
+    expect(s(9, 72, VICTORY_STANDARD)).toBe(false);
     expect(s(MAP_HILLY, 73, VICTORY_STANDARD)).toBe(false);
     // The multiplayer Population Limit drop-down: 25 to 200 by 25 (scr_set.cpp:181-194).
     expect(LOBBY_POPULATION_LIMITS).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);

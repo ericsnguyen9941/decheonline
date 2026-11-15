@@ -71,7 +71,7 @@ describe('client message decoding', () => {
     ['hash out of range', JSON.stringify({ t: 'hash', turn: 0, hash: 2 ** 32 })],
     ['frame time out of range', JSON.stringify({ t: 'turn', turn: 0, commands: [], frameMs: 256 })],
     ['pong without number', JSON.stringify({ t: 'pong' })],
-    ['map type the sim cannot play', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 0, mapSize: 144, victory: { type: 0 }, populationLimit: 50 } })],
+    ['map type not offered', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 9, mapSize: 144, victory: { type: 0 }, populationLimit: 50 } })],
     ['map size not offered', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 100, victory: { type: 0 }, populationLimit: 50 } })],
     ['special victory', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 4 }, populationLimit: 50 } })],
     ['time limit not offered', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 2, amount: 100 }, populationLimit: 50 } })],
