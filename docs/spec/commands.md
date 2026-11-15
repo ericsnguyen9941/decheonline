@@ -185,6 +185,4 @@ original. The client's button, cursor and click mode are not ported yet
 
 | command | original | why |
 | --- | --- | --- |
-| Heal | `TRIBE_Combat_Object::heal` (`src/t_c_obj.cpp:552`), support-actions.md §5 | no Priest in the sim |
-| Convert | `TRIBE_Combat_Object::convert` (`src/t_c_obj.cpp:525`), support-actions.md §4 | no Priest in the sim |
 | Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | no boats in the sim |

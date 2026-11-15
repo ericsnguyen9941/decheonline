@@ -6,6 +6,7 @@
 import { ACTION_ARTIFACT, artifactMoveTo, artifactWork, startArtifact, updateArtifact } from './artifact';
 import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } from './build';
 import { ACTION_REPAIR, repairMoveTo, repairTaskFor, repairWork, startRepair, updateRepair } from './repair';
+import { ACTION_CONVERT, ACTION_HEAL, GROUP_PRIEST, priestWork, startPriestAction, updateConvert, updateHeal } from './priest';
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
 import { isAlly, relation, RELATION_ALLY, type DiplomacyContext } from './diplomacy';
@@ -57,6 +58,8 @@ export interface WorkAction {
   z: number;
   /** Gather and hunt: `targetType`, the master id of the object the action was made for (-1 or absent: a point). */
   targetType?: number;
+  /** Convert: `requiredRange`, the approach range (1 for a building, else the priest's weapon range). */
+  range?: number;
 }
 
 /** `g_gather_dropoff_distance_threshold` / `g_hunt_drop_distance_threshold`, compared squared. */
@@ -126,6 +129,7 @@ function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entit
   }
   const repair = repairTaskFor(ctx, t, e, target);
   if (repair !== null) return repair;
+  if (self.group === GROUP_PRIEST) return priestTask(ctx, tasks, e, target, tt);
   let i = tasks.findIndex((k) => k.unitId === target.type && checkTask(ctx, k, e, target));
   if (i !== -1) return i;
   i = tasks.findIndex((k) => k.group === tt.group && checkTask(ctx, k, e, target));
@@ -133,6 +137,24 @@ function targetTask(ctx: PlayerMasters & DiplomacyContext, t: UnitType, e: Entit
   if (target.state < ObjectState.Dying && tt.combatLevel > 0) i = tasks.findIndex((k) => k.combatLevel > 0 && checkTask(ctx, k, e, target));
   // The terrain pass never matches here: no task of these units names a terrain.
   return i;
+}
+
+/** Boats, artifacts, walls and buildings: a priest heals none of them (src/ttsk_lst.cpp:127-130). */
+const NO_HEAL_GROUPS = [21, 2, 20, 22, 1, 27, 3];
+
+/**
+ * The priest's pass of `TRIBE_Task_List::get_target_task` (src/ttsk_lst.cpp:113-143), which ends the search: a living
+ * object of another player (not Gaia's, not an ally's, not an artifact) takes the convert task; its owner's or an ally's
+ * short of hit points, not a boat, artifact, wall or building, takes the heal task; anything else has none.
+ */
+function priestTask(ctx: PlayerMasters & DiplomacyContext, tasks: readonly Task[], e: Entity, target: Entity, tt: UnitType): number {
+  if (target.owner !== e.owner && target.state < ObjectState.Dying && target.owner > 0 && !isAlly(ctx, e.owner, target.owner) && tt.group !== 1) {
+    return tasks.findIndex((k) => k.actionType === ACTION_CONVERT);
+  }
+  if (isAlly(ctx, e.owner, target.owner) && target.hp < f32(tt.hitPoints) && target.state < ObjectState.Dying && !NO_HEAL_GROUPS.includes(tt.group)) {
+    return tasks.findIndex((k) => k.actionType === ACTION_HEAL);
+  }
+  return -1;
 }
 
 /**
@@ -146,6 +168,8 @@ export function transform(ctx: GameContext, e: Entity, next: UnitType): void {
   unexploreObject(ctx, e, old, false);
   ctx.pathing.unstamp(e, old);
   e.type = next.id;
+  // `TRIBE_Combat_Object::transform` frees a private master (src/t_c_obj.cpp:178-186): the unit reads its owner's again.
+  if (e.ownMaster) delete e.ownMaster;
   exploreObject(ctx, e, next, false);
   ctx.pathing.stamp(e, next);
   newSprite(ctx, e, next.standing);
@@ -217,7 +241,9 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
       artifactWork(ctx, e, w, target, x, y);
       return w.type;
     }
-    if (workRetarget(ctx, e, w, target, x, y)) return w.type;
+    if (w.type === ACTION_CONVERT || w.type === ACTION_HEAL) {
+      if (priestWork(ctx, e, w, target)) return w.type;
+    } else if (workRetarget(ctx, e, w, target, x, y)) return w.type;
   }
   if (e.attack && !e.work && target && e.attack.target === target.id && attackWork(ctx, e, target)) return ACTION_ATTACK;
   const kind = task === -1 ? -1 : t.action!.tasks[task]!.actionType;
@@ -227,6 +253,10 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
   }
   if (kind === ACTION_ARTIFACT) {
     startArtifact(ctx, e, task, target, x, y);
+    return kind;
+  }
+  if (kind === ACTION_CONVERT || kind === ACTION_HEAL) {
+    startPriestAction(ctx, e, kind, task, target, x, y);
     return kind;
   }
   deleteActions(ctx, e);
@@ -287,6 +317,8 @@ export function workMoveTo(ctx: GameContext, e: Entity, x: number, y: number): b
     artifactMoveTo(ctx, e, a, x, y);
     return true;
   }
+  // `RGE_Action::move_to`: the convert and the heal do not take a walk.
+  if (a.type === ACTION_CONVERT || a.type === ACTION_HEAL) return false;
   a.x = f32(x);
   a.y = f32(y);
   a.z = 0;
@@ -504,6 +536,8 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
   if (a.type === ACTION_BUILD) return updateBuild(ctx, e, a);
   if (a.type === ACTION_REPAIR) return updateRepair(ctx, e, a);
   if (a.type === ACTION_ARTIFACT) return updateArtifact(ctx, e, a);
+  if (a.type === ACTION_CONVERT) return updateConvert(ctx, e, a);
+  if (a.type === ACTION_HEAL) return updateHeal(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   const live = (id: number) => {
     const o = object(ctx, id);

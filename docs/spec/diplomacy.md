@@ -63,6 +63,12 @@ All read the stance of the acting object's owner towards the other owner.
   ally's unit therefore finds no task.
 - Repair: allowed on its own or an ally's object, one-sided `isAlly`
   (`src/ttsk_lst.cpp:82-92`, `src/tact_rep.cpp:188`).
+- Convert and heal (support-actions.md §4.7, §5): the priest's task pass
+  converts what is not Gaia's, its own or an ally's and heals its own or an
+  ally's (one-sided `isAlly`, `src/ttsk_lst.cpp:113-143`); each step the
+  convert ends, zeroing faith, once the target is its own or an ally's
+  (`src/tact_cnv.cpp:228-236`), the heal once it is neither
+  (`src/tact_hea.cpp:134-140`).
 
 ## 3. Allied line of sight (Writing)
 
@@ -297,6 +303,5 @@ Not ported:
 - Single player's pause while the dialog is open (multiplayer only here).
 - Lobby teams and their starting alliances (`src/world.cpp:1013-1029`).
 - The non-mutual visibility masks (drawing of fogged buildings).
-- Priest conversion's stance checks: the sim has no Priests.
 - Gaia searching its own objects: the original's bucket is SELF; the port keeps
   them in the GAIA bucket, as before this change.

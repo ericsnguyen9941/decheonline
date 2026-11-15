@@ -711,7 +711,11 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
   Government Center 82, Temple 104 and Siege Workshop 49. A line's upgrades
   are `copy_obj` into the button's type (75, 5, 39, 37, 40, 46, 93; Heavy
   Catapult 54 and Massive Catapult 36 into 35, Helepolis 27 into 11; Alchemy
-  37 copies 329 into 34 and 205 into 204). Not in the table yet: Priest,
-  boats and the Dock, so the Temple trains nothing. Blast and melee splash
+  37 copies 329 into 34 and 205 into 204), and the Temple's Priest 125
+  (Dead_Priest 222 with it; the Temple techs 18-24, 119, 120 and the civ
+  effects that touch 125 or attributes 27, 28, 35, 56, 57 now act;
+  support-actions.md §4.7). Not in the table yet: boats and the Dock.
+  Blast and melee splash
   (combat.md §4.3-§4.4) are ported. Tests: `land-units.test.ts` (training,
-  the upgrade techs), `siege.test.ts` (Alchemy, Engineering, Ballistics).
+  the upgrade techs), `siege.test.ts` (Alchemy, Engineering, Ballistics),
+  `priests.test.ts` (the Temple techs).

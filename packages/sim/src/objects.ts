@@ -13,6 +13,7 @@ import { defaultMakeTask, startMake, updateMake } from './make';
 import { typeOf } from './masters';
 import { ActionResult, endAction, updateMover } from './movement';
 import { add32, f32, mul32, sub32 } from './num';
+import { GROUP_PRIEST, rechargeFaith } from './priest';
 import { updateResearch } from './research';
 import { advanceSprite, isAnimating, newSprite } from './sprites';
 import { undoTech } from './techs';
@@ -84,6 +85,8 @@ export function updateObject(ctx: GameContext, e: Entity): boolean {
 }
 
 function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
+  // `TRIBE_Combat_Object::update`: a priest's faith recharges first (support-actions.md §4.1).
+  if (t.group === GROUP_PRIEST) rechargeFaith(ctx, e);
   // `RGE_Combat_Object::update`: the reload timer runs first.
   if (e.attackTimer !== undefined && e.attackTimer > 0) {
     e.attackTimer = sub32(e.attackTimer, ctx.deltaSeconds);

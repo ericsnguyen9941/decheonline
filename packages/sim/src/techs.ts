@@ -300,7 +300,7 @@ function modifyTobj(ctx: TechContext, player: number, c: EffectCommand): void {
   const code = u8(c.c);
   for (const id of ids) {
     const t = masters[id]!;
-    for (const e of ctx.objectsOf(player)) if (e.type === id) modifyObject(ctx, e, t, c.type, code, c.d);
+    for (const e of ctx.objectsOf(player)) if (e.type === id && !e.ownMaster) modifyObject(ctx, e, t, c.type, code, c.d);
     modifyMaster(t, c.type, code, c.d);
   }
 }
@@ -439,7 +439,7 @@ function copyObj(ctx: TechContext, player: number, dest: number, source: number)
   const old = masters[dest];
   const src = masters[source];
   if (!old || !src) return;
-  for (const e of ctx.objectsOf(player)) if (e.type === dest) copyObject(ctx, e, old, src);
+  for (const e of ctx.objectsOf(player)) if (e.type === dest && !e.ownMaster) copyObject(ctx, e, old, src);
   masters[dest] = { ...copyUnitType(src), id: dest, enabled: old.enabled };
 }
 

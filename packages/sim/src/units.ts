@@ -49,6 +49,8 @@ export interface Task {
   /** `attribute_type3`: owner attribute credited on drop-off, -1 the carried type. */
   resourceOut: number;
   workValue1: number;
+  /** `work_val2`: the convert's seconds per attempt (support-actions.md §4.3). */
+  workValue2: number;
   workRange: number;
   /** `combat_level` (the reader's `enableTargeting`). */
   combatLevel: number;
@@ -278,6 +280,7 @@ function task(k: readonly (number | SimSprite | null)[]): Task {
     carrying: s(16),
     isDefault: n(17),
     workFlag: n(18),
+    workValue2: n(19),
   };
 }
 

@@ -14,7 +14,7 @@ export interface GameContext extends MoveContext, TechContext, DiplomacyContext 
   wake(e: Entity): void;
   /** The owner's updated objects in list order (newest or most recently woken first). */
   objectsOf(owner: number): Entity[];
-  /** `change_ownership`: the object becomes `owner`'s (artifacts only in the sim). */
+  /** `change_ownership`: the object becomes `owner`'s (an artifact taken, a conversion). */
   changeOwnership(e: Entity, owner: number): void;
   /** The player whose turn it is (`is_player_turn`): only its units run their unit AI this step. */
   playerTurn: number;
@@ -24,6 +24,8 @@ export interface GameContext extends MoveContext, TechContext, DiplomacyContext 
   alertCooldown: number[];
   /** Per player, `GAME_NOTIFY_OBJECT_DEPLETED` notifications so far (a farm used up); the client plays farmdie.wav. */
   depleted: number[];
+  /** Each player's civ (`master_player_id`): a Macedonian's objects resist conversion (support-actions.md §4.4). */
+  civs: readonly number[];
   /** Game statuses and countdowns (victory.md): the Wonder's action counts and wins (`wonder.ts`). */
   victory: VictoryState;
 }

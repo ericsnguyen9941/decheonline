@@ -1,4 +1,4 @@
-import { build, cancelBuild, checkDestructables, checkPlacement, connectWall, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
+import { build, cancelBuild, checkDestructables, checkPlacement, connectWall, giveBuiltStorages, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
 import { attackGround } from './combat';
 import {
   CommandQueue,
@@ -49,7 +49,7 @@ import { RmmMap, type RmmWorld } from './rmm-map';
 import { placeRelicsAndRuins } from './rmm-objects';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
-import { checkForNewTech, doEffect, newResearchDone, newTechStates, startInAge } from './techs';
+import { checkForNewTech, doEffect, doTech, newResearchDone, newTechStates, startInAge } from './techs';
 import {
   checkGameState,
   copyVictory,
@@ -64,9 +64,10 @@ import {
   type VictorySettings,
   type VictoryState,
 } from './victory';
-import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState, standGround } from './unit-ai';
+import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, NOTIFY_OWNER_CHANGED, notifyObject, purgeNotes, setAiState, standGround } from './unit-ai';
+import { FAITH_MAX, GROUP_PRIEST, martyrdom, RESOURCE_FAITH } from './priest';
 import { exploreObject, forgetSighting, stateChanged, unexploreObject, Visibility, type VisibilitySnapshot } from './visibility';
-import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
+import { CIV_EGYPTIAN, CIV_GAIA, CIVS, copyUnitType, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
 
 /** Default base time per step: the network frame granularity `G` (src/com_spd.cpp:11-25). Never wall time. */
 export const STEP_MS = 90;
@@ -78,6 +79,8 @@ export const SINGLE_STEP_TURNS = 6;
 export const COMMAND_DELAY_TURNS = 2;
 /** A move order keeps the group's layout unless it spans more than this many tiles on an axis (movement.md §5.1). */
 const GROUP_EXTENT_LIMIT = 8.0;
+/** `OBJECT_GROUP_ARTIFACT`: relics and ruins change hands by the static path. */
+const GROUP_ARTIFACT = 1;
 /** `random_seed` set by the world constructor (src/world.cpp:95). */
 export const DEFAULT_RANDOM_SEED = 14;
 
@@ -546,6 +549,11 @@ export class World {
     });
     if (t.combat) e.attackTimer = 0;
     if (isMoving(t)) e.turnTowardsTime = 0;
+    // A priest starts with full faith as its held attribute (src/t_c_obj.cpp:89-92).
+    if (t.group === GROUP_PRIEST) {
+      e.heldAmount = FAITH_MAX;
+      e.heldType = RESOURCE_FAITH;
+    }
     teleport(this.gameContext(), e, t, e.x, e.y, e.z, true);
     newSprite(this.gameContext(), e, null);
     giveStorages(this.attributes[owner]!, t, 1, [1, 2]);
@@ -561,31 +569,77 @@ export class World {
   }
 
   /**
-   * `TRIBE_Combat_Object::change_ownership` for an artifact (src/t_c_obj.cpp:240-251) through
-   * `RGE_Action_Object::change_ownership` (src/act_obj.cpp:425-429) and `RGE_Static_Object::change_ownership`
-   * (src/stat_obj.cpp:1675-1720): nothing when the new owner has no such master; else every visible-unit record of the
-   * object takes the new owner, its actions stop, the old owner loses its flag-2 storages and the object's sight, the
-   * object moves to the front of the new owner's list, shows the new master's sprite (one draw for a random start
-   * frame), keeps its hit-point ratio, and the new owner gets its sight and its flag 1/2 storages. Only artifacts
-   * change owner in the sim (conversion is not ported). The closing `notify(0x20B)` to itself is dropped: the artifact
-   * AI ignores it (src/taiuaimd.cpp:2093-2111).
+   * `TRIBE_Combat_Object::change_ownership` (src/t_c_obj.cpp:240-286, support-actions.md §4.6): every visible-unit record
+   * of the object takes the new owner first. An artifact then goes through `RGE_Static_Object::change_ownership`
+   * (`artifactOwnership`). Anything else, when the new owner has its master: a building first gives up its built
+   * storages, cuts its queue to the unit in training and drops its actions (`TRIBE_Building_Object::change_ownership`,
+   * src/t_b_obj.cpp:394-444); the old owner loses its flag-2 storages and the object's sight, the object moves to the
+   * front of the new owner's list, takes a private copy of its master (it keeps its old civ's record and techs), gives
+   * the new owner its sight and flag 1/2 storages, purges its notes and tells itself (0x20B, which stops it on its new
+   * owner's turn). A built building then runs its on-build object and tech for the new owner and gives it the built
+   * storages. Its other actions keep running until then; the civilian/military counts stay with the old owner (decomp
+   * @bug, src/t_c_obj.cpp:233-238).
    */
   private changeOwnership(e: Entity, owner: number): void {
-    if (!hasMaster(this, owner, e.type)) return;
     const ctx = this.gameContext();
-    this.visibility.setRecordOwner(e.id, typeOf(this, e).group, owner);
-    deleteActions(ctx, e);
     const old = typeOf(this, e);
-    const next = master(this, owner, e.type);
-    const hpRatio = div32(e.hp, f32(Math.trunc(old.hitPoints)));
+    this.visibility.setRecordOwner(e.id, old.group, owner);
+    if (old.group === GROUP_ARTIFACT) return this.artifactOwnership(e, owner);
+    if (!hasMaster(this, owner, e.type)) return;
+    const building = isBuilding(old);
+    if (building) {
+      if (e.state === ObjectState.Active) giveBuiltStorages(ctx, e, old, -1);
+      if (e.state === ObjectState.Unbuilt) unexploreObject(this, e, old, true);
+      if (e.queue && e.queue.length > 0) e.queue = [{ unit: e.queue[0]!.unit, count: 1 }];
+      deleteActions(ctx, e);
+    }
     giveStorages(this.attributes[e.owner]!, old, -1, [2]);
+    this.moveToOwnerList(e, owner);
     if (e.state === ObjectState.Active) unexploreObject(this, e, old, false);
+    e.owner = owner;
+    if (!e.ownMaster) e.ownMaster = copyUnitType(old);
+    const t = e.ownMaster;
+    if (e.state === ObjectState.Active) exploreObject(this, e, t, false);
+    giveStorages(this.attributes[owner]!, t, 1, [1, 2]);
+    if (e.ai) purgeNotes(ctx, e);
+    notifyObject(ctx, e, e.id, NOTIFY_OWNER_CHANGED, owner);
+    if (!building) return;
+    if (e.state === ObjectState.Unbuilt) exploreObject(this, e, t, true);
+    if (e.state === ObjectState.Active) {
+      if (t.building!.makeObject > -1) this.createObject(owner, t.building!.makeObject, e.x, e.y, e.z);
+      if (t.building!.techId > -1) doTech(ctx, owner, t.building!.techId);
+      giveBuiltStorages(ctx, e, t, 1);
+    }
+  }
+
+  /** `removeObject` from the old owner's list, `addObject` at the front of the new owner's. */
+  private moveToOwnerList(e: Entity, owner: number): void {
     const list = this.awake[e.owner]!;
     const i = list.indexOf(e.id);
     if (i !== -1) {
       list.splice(i, 1);
       this.awake[owner]!.unshift(e.id);
     }
+  }
+
+  /**
+   * An artifact's `change_ownership` through `RGE_Action_Object::change_ownership` (src/act_obj.cpp:425-429) and
+   * `RGE_Static_Object::change_ownership` (src/stat_obj.cpp:1675-1720): nothing when the new owner has no such master;
+   * else its actions stop, the old owner loses its flag-2 storages and the object's sight, the object moves to the front
+   * of the new owner's list, shows the new master's sprite (one draw for a random start frame), keeps its hit-point ratio,
+   * and the new owner gets its sight and its flag 1/2 storages. The closing `notify(0x20B)` to itself is dropped: the
+   * artifact AI ignores it (src/taiuaimd.cpp:2093-2111).
+   */
+  private artifactOwnership(e: Entity, owner: number): void {
+    if (!hasMaster(this, owner, e.type)) return;
+    const ctx = this.gameContext();
+    deleteActions(ctx, e);
+    const old = typeOf(this, e);
+    const next = master(this, owner, e.type);
+    const hpRatio = div32(e.hp, f32(Math.trunc(old.hitPoints)));
+    giveStorages(this.attributes[e.owner]!, old, -1, [2]);
+    if (e.state === ObjectState.Active) unexploreObject(this, e, old, false);
+    this.moveToOwnerList(e, owner);
     // `new_sprite` runs while the object still has its old master.
     const sprite = old.dying && e.sprite?.graphic === old.dying.graphic ? next.dying : next.standing;
     if (sprite) newSprite(ctx, e, sprite);
@@ -616,6 +670,7 @@ export class World {
       alertCooldown: this.alertCooldown,
       depleted: this.depleted,
       victory: this.victory,
+      civs: this.civs,
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
@@ -1032,6 +1087,8 @@ export class World {
     const ctx = this.gameContext();
     if (isBuilding(t) && e.state === ObjectState.Unbuilt) cancelBuild(ctx, e);
     else {
+      // `TRIBE_Combat_Object::cancel_object` → `die_die_die`: a priest's martyrdom first (support-actions.md §4.5).
+      martyrdom(ctx, e);
       this.wake(e);
       e.hp = 0;
     }

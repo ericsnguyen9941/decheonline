@@ -248,15 +248,16 @@ export function updateRepair(ctx: GameContext, e: Entity, a: WorkAction): Action
 
 /** `heal`'s results: still short, full, the owner could not pay. */
 const HEAL_SHORT = 0;
-const HEAL_FULL = 1;
-const HEAL_UNPAID = 2;
+export const HEAL_FULL = 1;
+export const HEAL_UNPAID = 2;
 
 /**
  * `TRIBE_Building_Object::heal` (src/t_b_obj.cpp:215, support-actions.md §6.3): a building scales the amount by hit
  * points over build points, clamps it to the missing hit points and pays `healing / (2 * hp)` of its cost; then
- * `RGE_Static_Object::heal` (src/stat_obj.cpp:2224) adds it. Other objects (no boats in the sim) heal for free.
+ * `RGE_Static_Object::heal` (src/stat_obj.cpp:2224) adds it. Other objects (no boats in the sim) heal for free. The
+ * priest's heal (`priest.ts`) calls it too.
  */
-function heal(ctx: GameContext, target: Entity, amount: number): number {
+export function heal(ctx: GameContext, target: Entity, amount: number): number {
   const t = typeOf(ctx, target);
   let healing = amount;
   if (t.masterType === MASTER_TYPE_BUILDING) {

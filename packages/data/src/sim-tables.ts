@@ -33,6 +33,7 @@ function task(rules: RuleSet, k: UnitTask): (number | SimSprite | null)[] {
     sprite(rules, k.carryingGraphicId),
     k.isDefault,
     k.gatherType,
+    f(k.workValue2),
   ];
 }
 

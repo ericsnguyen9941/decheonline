@@ -17,6 +17,7 @@ import { typeOf, type PlayerMasters } from './masters';
 import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { ACTION_REPAIR, aiRepair } from './repair';
+import { ACTION_CONVERT, ACTION_HEAL, aiPriestAction, FAITH_MAX, GROUP_PRIEST } from './priest';
 import { newSprite } from './sprites';
 import { FARM, type UnitType } from './units';
 import { TILE_VISIBLE } from './visibility';
@@ -25,8 +26,8 @@ import { TILE_VISIBLE } from './visibility';
 export const AI_ACTION_ATTACK = 0x258;
 const AI_ACTION_DEFEND = 0x259;
 export const AI_ACTION_BUILD = 0x25a;
-const AI_ACTION_HEAL = 0x25b;
-const AI_ACTION_CONVERT = 0x25c;
+export const AI_ACTION_HEAL = 0x25b;
+export const AI_ACTION_CONVERT = 0x25c;
 export const AI_ACTION_GATHER = 0x261;
 export const AI_ACTION_MOVE = 0x262;
 const AI_ACTION_FOLLOW = 0x264;
@@ -37,6 +38,8 @@ export const AI_ACTION_RESEARCH = 0x26c;
 /** Unit AI orders (`UNIT_AI_ORDER_*`): an order is its action + 100. */
 export const AI_ORDER_ATTACK = 0x2bc;
 export const AI_ORDER_BUILD = 0x2be;
+export const AI_ORDER_HEAL = 0x2bf;
+export const AI_ORDER_CONVERT = 0x2c0;
 const AI_ORDER_STOP = 0x2c2;
 export const AI_ORDER_GATHER = 0x2c5;
 export const AI_ORDER_MOVE = 0x2c6;
@@ -53,6 +56,8 @@ export const NOTIFY_TARGET_INVALID = 0x1fb;
 const NOTIFY_UNDER_ATTACK = 0x201;
 export const NOTIFY_REQUEST_TASK = 0x202;
 const NOTIFY_KILLED = 0x209;
+/** The object changed hands (`change_ownership`'s notify to itself, src/t_c_obj.cpp:284). */
+export const NOTIFY_OWNER_CHANGED = 0x20b;
 const NOTIFY_STOPPED_WORKING = 0x2bb;
 
 /** `TribeCivilianUnitAIModule::convertToLOSResourceType` (src/taiuaimd.cpp:546): the groups with a resource type. */
@@ -275,6 +280,10 @@ export function aiStateForAction(action: number): [order: number, action: number
       return [AI_ORDER_HUNT, AI_ACTION_HUNT];
     case ACTION_REPAIR:
       return [AI_ORDER_REPAIR, AI_ACTION_REPAIR];
+    case ACTION_CONVERT:
+      return [AI_ORDER_CONVERT, AI_ACTION_CONVERT];
+    case ACTION_HEAL:
+      return [AI_ORDER_HEAL, AI_ACTION_HEAL];
     default:
       return [-1, -1];
   }
@@ -501,7 +510,10 @@ function canPath(ctx: GameContext, e: Entity, target: Entity, range: number): bo
   return ctx.pathing.findTilePath(e, typeOf(ctx, e), toInt(e.x), toInt(e.y), toInt(target.x), toInt(target.y), range, target.id).found;
 }
 
-function canAttackUnit(ctx: PlayerMasters, ai: UnitAI, target: Entity): boolean {
+/** `canAttackUnit`: a priest's is `canConvert`. */
+function canAttackUnit(ctx: GameContext, e: Entity, target: Entity): boolean {
+  const ai = e.ai!;
+  if (ai.kind === AiClass.Priest) return canConvert(ctx, e, target);
   if (ai.kind === AiClass.Soldier || ai.kind === AiClass.Civilian || ai.kind === AiClass.Tower) return typeOf(ctx, target).group !== GROUP_ARTIFACT;
   return true;
 }
@@ -518,12 +530,32 @@ function canAttackUnitAtNeutrality(ai: UnitAI, group: number): boolean {
   return true;
 }
 
-/** `attackObject` (src/aiuaimod.cpp:1752). */
+/**
+ * `TribePriestUnitAIModule::canConvert` (src/taiuaimd.cpp:922-953): with full faith, any object but Town_Center1, a wall,
+ * an artifact, the ruins, the Wonder or a flag; a priest only with the owner's Monotheism (attribute 27), a building only
+ * with attribute 28.
+ */
+function canConvert(ctx: GameContext, e: Entity, target: Entity): boolean {
+  if (!(e.heldAmount >= FAITH_MAX)) return false;
+  const tt = typeOf(ctx, target);
+  if (tt.id === 109 || tt.group === GROUP_WALL || tt.id === 159 || tt.id === 276 || tt.id === 158 || tt.id === 163 || tt.group === 30) return false;
+  const attributes = ctx.attributes[e.owner]!;
+  if (tt.group === GROUP_PRIEST && attributes[27]! <= 0) return false;
+  if (tt.group === GROUP_BUILDING && attributes[28]! <= 0) return false;
+  return true;
+}
+
+/** `attackObject` (src/aiuaimod.cpp:1752); a priest's converts (`TribePriestUnitAIModule::attackObject`, src/taiuaimd.cpp:904). */
 export function attackObject(ctx: GameContext, e: Entity, targetId: number, unconditional: boolean): boolean {
   const ai = e.ai!;
+  if (ai.kind === AiClass.Priest) {
+    // A computer player's priest walks into range instead; humans only.
+    const target = ctx.entities.get(targetId);
+    return !!target && canConvert(ctx, e, target) && priestObject(ctx, e, targetId, ACTION_CONVERT, unconditional);
+  }
   if (!unconditional && ai.action !== -1) return false;
   const target = ctx.entities.get(targetId);
-  if (!target || !canAttackUnit(ctx, ai, target)) return false;
+  if (!target || !canAttackUnit(ctx, e, target)) return false;
   if (!combatAttack(ctx, e, target, unconditional)) return false;
   // `attack` may have transformed a villager; the AI record travels with the object.
   setAction(e.ai!, AI_ACTION_ATTACK);
@@ -681,7 +713,7 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
     const g = typeOf(ctx, o).group;
     if (!(allowWalls && wallOk) && g === GROUP_WALL) return false;
     if (g === GROUP_BUILDING && o.hp <= 1 && CATAPULTS.includes(t.id)) return false;
-    if (!canAttackUnit(ctx, ai, o)) return false;
+    if (!canAttackUnit(ctx, e, o)) return false;
     return bucket !== 3 || canAttackUnitAtNeutrality(ai, g);
   };
   let nonCurrent = 0;
@@ -912,8 +944,9 @@ function processNotify(ctx: GameContext, e: Entity, note: Note): number {
     case AiClass.Soldier:
     case AiClass.Tower:
     case AiClass.Predator:
-    case AiClass.Priest:
       return baseNotify(ctx, e, note);
+    case AiClass.Priest:
+      return priestNotify(ctx, e, note);
     case AiClass.Civilian:
       return civilianNotify(ctx, e, note);
     case AiClass.Building:
@@ -984,7 +1017,7 @@ function baseNotify(ctx: GameContext, e: Entity, note: Note): number {
       if (target) {
         const tt = typeOf(ctx, target);
         if ((tt.group === GROUP_BUILDING || tt.group === GROUP_WALL) && !SWITCH_EXEMPT_TOWERS.includes(tt.id)) {
-          if (!canAttackUnit(ctx, ai, attacker) || (!inAttackRange(ctx, e, attacker) && !canPath(ctx, e, attacker, weaponRange(ctx, e)))) {
+          if (!canAttackUnit(ctx, e, attacker) || (!inAttackRange(ctx, e, attacker) && !canPath(ctx, e, attacker, weaponRange(ctx, e)))) {
             runAwayFromAttackers(ctx, e);
             return NOTE_STOP;
           }
@@ -994,7 +1027,7 @@ function baseNotify(ctx: GameContext, e: Entity, note: Note): number {
         // A human unit keeps a unit (or tower) target; the kill-time comparison is for computer players.
         return NOTE_DONE;
       }
-      if (canAttackUnit(ctx, ai, attacker) && (inAttackRange(ctx, e, attacker) || canPath(ctx, e, attacker, weaponRange(ctx, e)))) {
+      if (canAttackUnit(ctx, e, attacker) && (inAttackRange(ctx, e, attacker) || canPath(ctx, e, attacker, weaponRange(ctx, e)))) {
         attackObject(ctx, e, note.caller, true);
         return NOTE_STOP;
       }
@@ -1035,9 +1068,109 @@ function baseNotify(ctx: GameContext, e: Entity, note: Note): number {
       if (i !== -1) ai.attackers.splice(i, 1);
       return NOTE_DONE;
     }
+    case NOTIFY_OWNER_CHANGED:
+      // A converted object stops everything and forgets its notes and orders (src/aiuaimod.cpp:3302-3318); no groups.
+      deleteActions(ctx, e);
+      newSprite(ctx, e, null);
+      removeCurrentTarget(ai);
+      stopObject(ctx, e, true);
+      purgeNotes(ctx, e);
+      ai.orders = [];
+      return NOTE_DONE;
     default:
       return NOTE_DONE;
   }
+}
+
+/**
+ * `purgeNotifyQueue` (src/aiuaimod.cpp:3871-3900): a queued completion of the current action the unit runs without an
+ * order (a move only when it is the current action) drops the target and stops it; then the queue is emptied.
+ */
+export function purgeNotes(ctx: GameContext, e: Entity): void {
+  const ai = e.ai!;
+  for (const n of ai.notes) {
+    if (n.type !== NOTIFY_ACTION_COMPLETED) continue;
+    if (n.p1 !== AI_ACTION_MOVE || ai.action === n.p1 || ai.action === 0x268) {
+      if (ai.order === -1 && ai.action === n.p1) {
+        removeCurrentTarget(ai);
+        stopObject(ctx, e, true);
+        break;
+      }
+    }
+  }
+  ai.notes = [];
+}
+
+/**
+ * `TribePriestUnitAIModule::processNotify` (src/taiuaimd.cpp:1058-1128) for a human owner: a failed, invalid or idle
+ * convert ends (`stopObject(1)`); a heal that ends looks for the next unit to heal in reach (`bestUnitToHeal(0)`); anything
+ * else of the three stops the priest (`stopObject(0)`). The owner hears each (`notifyCommander`). Every other note takes the
+ * base path; the 0x1FC branch is not ported (the sim's move action never sends 0x1FC).
+ */
+function priestNotify(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  if (note.type !== NOTIFY_ACTION_FAILED && note.type !== NOTIFY_TARGET_INVALID && note.type !== NOTIFY_REQUEST_TASK) return baseNotify(ctx, e, note);
+  if (ai.action === AI_ACTION_CONVERT) {
+    removeCurrentTarget(ai);
+    stopObject(ctx, e, true);
+    playerNotify(ctx, e.owner, note.type, note.p1);
+    return NOTE_DONE;
+  }
+  if (ai.action === AI_ACTION_HEAL) {
+    const id = bestUnitToHeal(ctx, e, false);
+    if (id !== -1 && priestObject(ctx, e, id, ACTION_HEAL, true)) return NOTE_STOP;
+  }
+  removeCurrentTarget(ai);
+  stopObject(ctx, e, false);
+  playerNotify(ctx, e.owner, note.type, note.p1);
+  return NOTE_DONE;
+}
+
+/**
+ * `TribePriestUnitAIModule::bestUnitToHeal(idleHeal)` (src/taiuaimd.cpp:962-1016): over its own and then its allies'
+ * search results (Gaia's priest: up to the enemy bucket), the first bucket with a living unit short of hit points it can
+ * path to, not itself and not a building, within visible distance 4 (any with `idleHeal`; 2 for Gaia's), gives the one of
+ * smallest `max hp - hp / distance` (the decomp's precedence).
+ */
+function bestUnitToHeal(ctx: GameContext, e: Entity, idleHeal: boolean): number {
+  const buckets = search(ctx, e);
+  const maxLimit = e.owner === 0 ? 4 : 2;
+  let best = -1;
+  let bestNeed = 0;
+  for (let b = 1; b <= maxLimit; b++) {
+    for (const r of buckets[b]!) {
+      if (r.id === e.id) continue;
+      const o = ctx.entities.get(r.id);
+      if (!o) continue;
+      const ot = typeOf(ctx, o);
+      if (ot.group === GROUP_BUILDING || !(f32(Math.trunc(ot.hitPoints)) > o.hp) || o.state >= ObjectState.Dying) continue;
+      if (!idleHeal && r.distance > 4) continue;
+      if (e.owner === 0 && r.distance > 2) continue;
+      if (!canPath(ctx, e, o, f32(1))) continue;
+      const need = sub32(f32(Math.trunc(ot.hitPoints)), div32(o.hp, f32(r.distance)));
+      if (best === -1 || need < bestNeed) {
+        bestNeed = need;
+        best = o.id;
+      }
+    }
+    if (best !== -1) return best;
+  }
+  return -1;
+}
+
+/**
+ * `UnitAIModule::convertObject` / `healObject` (src/aiuaimod.cpp:1821-1858): the unit's `convert` or `heal` on the target,
+ * then the action and target recorded. A non-unconditional call does nothing while it already does that.
+ */
+function priestObject(ctx: GameContext, e: Entity, targetId: number, type: number, unconditional: boolean): boolean {
+  const ai = e.ai!;
+  const action = type === ACTION_CONVERT ? AI_ACTION_CONVERT : AI_ACTION_HEAL;
+  if (!unconditional && ai.action === action) return false;
+  const target = ctx.entities.get(targetId);
+  if (!target || !aiPriestAction(ctx, e, type, target, unconditional)) return false;
+  setAction(ai, action);
+  setTarget(ai, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
+  return true;
 }
 
 /** `TribeCivilianUnitAIModule::processNotify` (src/taiuaimd.cpp:568, unit-ai.md §4.3). */
@@ -1099,6 +1232,9 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
       if (ai.action === AI_ACTION_BUILD) return builderRequest(ctx, e);
       if (ai.action !== AI_ACTION_GATHER || note.p2 !== FARM) return NOTE_DONE;
       return farmerRequest(ctx, e);
+    case NOTIFY_OWNER_CHANGED:
+      // The class's `default` is the base path (src/taiuaimd.cpp:866); of the notes it can take only this one is ported there.
+      return baseNotify(ctx, e, note);
     default:
       return NOTE_DONE;
   }
@@ -1270,6 +1406,12 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
       break;
     case AI_ORDER_REPAIR:
       ok = repairObject(ctx, e, o.target, true);
+      break;
+    case AI_ORDER_HEAL:
+      ok = priestObject(ctx, e, o.target, ACTION_HEAL, true);
+      break;
+    case AI_ORDER_CONVERT:
+      ok = priestObject(ctx, e, o.target, ACTION_CONVERT, true);
       break;
   }
   if (ok) {

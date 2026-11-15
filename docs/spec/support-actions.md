@@ -232,6 +232,59 @@ first remove flag ≥ 4 contributions, cut the production queue to one item
 and clear their actions (`src/t_b_obj.cpp:394-420`, D). No `rand()` call is
 made directly in these bodies.
 
+### 4.7 Port status (convert)
+
+Ported in `packages/sim/src/priest.ts` (`updateConvert`, the roll
+`conversionSucceeds`, `martyrdom`, faith `rechargeFaith` from
+`objects.ts`) and `World.changeOwnership` (`world.ts`, §4.6 and
+`TRIBE_Building_Object::change_ownership`). Human players only: the
+computer-player branches (state 11 instead of 13 on a refusal, the AI's
+own target picking) are not ported. What the port settles that §4.6 leaves
+open, from the decomp:
+
+- There is no convert or heal command on the wire. A right click is a
+  `work` order (`do_command_work` → `work2`, the sim's `work`/`attack`
+  commands); the task list's priest pass
+  (`TRIBE_Task_List::get_target_task`, `src/ttsk_lst.cpp:113-143`) picks
+  convert for a living object of a player who is neither Gaia, the
+  priest's owner nor an ally (not an artifact), heal for the owner's or an
+  ally's object short of hit points that is not a boat, artifact, wall or
+  building, and nothing else (the priest walks). `ORDER_CONVERT` / `HEAL`
+  (0x2C0 / 0x2BF) are issued only by computer players; ported in the unit
+  AI's `processOrder` anyway.
+- The priest unit AI (`TribePriestUnitAIModule`, `unit-ai.ts`
+  `priestNotify`, `bestUnitToHeal`, `canConvert`): a human's priest never
+  picks a convert target on its own; attacked with full faith it converts
+  the attacker (`attackObject` → `canConvert`); a heal that ends heals the
+  next hurt unit within distance 4; a convert that fails or ends stops it.
+- A converted object keeps running its actions until its unit AI reads
+  the 0x20B note (`src/aiuaimod.cpp:3302-3318`): then its actions, target,
+  orders and notes go. A building's research is dropped without refund
+  (its action is deleted, `~TRIBE_Action_Make_Tech`), its queue cut to one
+  of the unit in training, now trained for the new owner.
+- Population moves with the flag 1/2 storages (attribute 11) and a
+  building's flag ≥ 4 storages (a House's room); the civilian and military
+  counts (attributes 37, 40) stay with the old owner (decomp `@bug`,
+  `src/t_c_obj.cpp:233-238`, kept). A built building runs its on-build
+  object and tech for the new owner (a Temple completes tech 17, the
+  Priest). Sight moves (unexplore for the old owner, explore for the new);
+  visible-unit records take the new owner. Elimination follows on the next
+  per-second check (victory.md).
+- Only Town_Center1 (109) is refused; Town_Center2 (71) can be converted.
+- Martyrdom triggers on the delete command (`cancel_object` →
+  `die_die_die`, `src/t_c_obj.cpp:198-210`). A priest killed in combat
+  does not pass there (damage only lowers hp); the other callers are
+  cheats (`src/tworld.cpp:1201-1255`), scenario objects and quick-build,
+  none in a 1.0a multiplayer game.
+- A converted object's private master (`Entity.ownMaster`) is skipped by
+  the owner's later tech effects and freed by a transform; it is in the
+  snapshot and the hash.
+
+Tests: `packages/sim/src/priests.test.ts` (roll vectors §4.4 and §10.1,
+range, rejuvenation, Monotheism, buildings, Temple, Martyrdom, owner
+change, victory, fog, snapshot), `samplePriestReplay` in the determinism
+e2e.
+
 ## 5. Heal (`src/tact_hea.cpp`)
 
 - Start (`:46-57`): target is a boat (2, 20, 21, 22) → **no state is set**;
@@ -255,12 +308,17 @@ made directly in these bodies.
   `RGE_Static_Object::heal` (`src/stat_obj.cpp:2224-2237`): `hp += work`; if
   `hp ≥ max hp` set hp to max, return 1; else 0. Free.
 - No `rand()` call anywhere in the heal path.
+- Port status: ported in `packages/sim/src/priest.ts` (`updateHeal`, the
+  free `heal` of `repair.ts`); the paid boat and building heals are not
+  reached (a priest's heal task never takes a building, boats are not in
+  the sim). Tests: `priests.test.ts` "§5" (Example C, a walking target,
+  buildings and enemies).
 
 ## 6. Repair (`src/tact_rep.cpp`, `update` is N)
 
 Port status: ported in `packages/sim/src/repair.ts` (the command and its
-other ways in: commands.md §4), boats excepted. Convert, heal and trade are
-not ported (no Priests, no boats in the sim).
+other ways in: commands.md §4), boats excepted. Convert and heal: §4.7,
+§5. Trade is not ported (no boats in the sim).
 
 ### 6.1 Start
 
@@ -543,8 +601,7 @@ capped to **75**.
 - Whether attr 30 can block building repair in normal play (§6.3).
 - Flare removal RNG, unit-AI reaction to the per-step "attacked" notify, and
   the exact step count for 4 → 6 → 7 between attempts.
-- Which objects the Priest heal task accepts (task matching is outside these
-  files); a priest heal order on a building would go through the paid
-  building `heal`.
+- Which objects the Priest heal task accepts: settled, §4.7 (the task
+  list's priest pass never gives a building or a boat the heal task).
 - How the trade cargo resource is chosen by the player (UI command) — not in
   these files.

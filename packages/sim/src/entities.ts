@@ -7,6 +7,7 @@ import type { MakeAction } from './make';
 import type { ResearchAction } from './research';
 import type { ActiveSprite } from './sprites';
 import type { UnitAI } from './unit-ai';
+import { copyUnitType, type UnitType } from './units';
 import type { WonderAction } from './wonder';
 
 /** `object_state` values (include/stat_obj.h). */
@@ -70,6 +71,11 @@ export interface Entity {
   sighted?: number;
   /** Combat objects: the unit AI (`unitAIValue`), absent for groups without one. */
   ai?: UnitAI | null;
+  /**
+   * `own_master`: the private copy of its master a converted object takes (`TRIBE_Combat_Object::change_ownership`,
+   * src/t_c_obj.cpp:269-272), which `typeOf` reads instead of the owner's; the owner's techs do not reach it. A transform drops it.
+   */
+  ownMaster?: UnitType | null;
 }
 
 export type EntityInit = Pick<Entity, 'owner' | 'type' | 'x' | 'y' | 'z' | 'hp'> & Partial<Omit<Entity, 'id'>>;
@@ -151,6 +157,7 @@ function copyEntity(e: Entity): Entity {
   if (e.research) copy.research = { ...e.research };
   if (e.make) copy.make = { ...e.make };
   if (e.wonder) copy.wonder = { ...e.wonder };
+  if (e.ownMaster) copy.ownMaster = copyUnitType(e.ownMaster);
   if (e.ai) {
     copy.ai = {
       ...e.ai,

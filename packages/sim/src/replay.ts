@@ -5,7 +5,7 @@ import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, MARKET, SMALL_WALL, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
-import { AGE_BRONZE, startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit, type WorldOptions } from './world';
+import { AGE_BRONZE, AGE_IRON, startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit, type WorldOptions } from './world';
 
 /** Everything needed to rerun a game: start state plus every batch, keyed by the turn it was issued on. */
 export interface ReplayLog {
@@ -222,6 +222,46 @@ export function sampleSiegeReplay(turns = 120, seed = 20261118): ReplayLog {
   }
   // The siege units come after the other start objects, so those keep their ids.
   return { ...log, units: [...log.units!, ...SIEGE], batches };
+}
+
+/** Each side's Priests for `samplePriestReplay`, behind its skirmish units. */
+const PRIESTS: readonly StartUnit[] = [
+  { owner: 1, type: 125, x: 16.5, y: 17.5 },
+  { owner: 1, type: 125, x: 16.5, y: 19.5 },
+  { owner: 2, type: 125, x: 24.5, y: 20.5 },
+  { owner: 2, type: 125, x: 24.5, y: 22.5 },
+];
+
+/**
+ * `sampleReplay`'s game (with the skirmish) in the Iron Age, Babylonian against Egyptian, plus two Priests a side
+ * (`PRIESTS`) and, from a sixth generator, now and then a `work` order by some of a side's Priests on a skirmish unit,
+ * one of a few Villagers or a Priest of either side (a convert on the other side's, a heal or a walk on its own; sometimes the
+ * other side's Priests, which is ignored): faith, rolls, flares, ownership changes and heals in every engine.
+ */
+export function samplePriestReplay(turns = 120, seed = 20261116): ReplayLog {
+  const log = sampleReplay(turns, seed);
+  const first = log.units!.length + 1;
+  const priests = PRIESTS.map((u, i) => ({ id: first + i, owner: u.owner }));
+  const targets = log.units!.flatMap((u, i) => (i + 1 > log.units!.length - SKIRMISH.length || (u.type === VILLAGER && i % 3 === 0) ? [i + 1] : []));
+  targets.push(...priests.map((p) => p.id));
+  const pray = new CrtRand();
+  pray.srand(seed + 49979687);
+  const batches = [...log.batches];
+  for (let turn = 0; turn < turns; turn++) {
+    for (const player of [1, 2]) {
+      if (pray.rand() % 3 !== 0) continue;
+      const units = priests.filter((p) => pray.rand() % 2 === 0 && (p.owner === player || pray.rand() % 8 === 0)).map((p) => p.id);
+      if (units.length === 0) continue;
+      const target = targets[pray.rand() % targets.length]!;
+      const at = log.units![target - 1] ?? PRIESTS[target - first]!;
+      const commands: Command[] = [{ type: 'work', units, target, x: at.x, y: at.y }];
+      const batch = batches.find((b) => b.turn === turn && b.player === player);
+      if (batch) batch.commands = [...batch.commands, ...commands];
+      else batches.push({ turn, player, commands });
+    }
+  }
+  // The priests come after the other start objects, so those keep their ids.
+  return { ...log, units: [...log.units!, ...PRIESTS], batches, civs: [0, 3, 1], start: { startingAge: AGE_IRON } };
 }
 
 /** What the sample orders aim at: the start objects, by id; ids past `count` are what the game made. */

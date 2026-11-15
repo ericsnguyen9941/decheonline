@@ -26,9 +26,12 @@ export function hasMaster(p: PlayerMasters, owner: number, id: number): boolean 
   return p.masters[owner]?.[id] !== undefined;
 }
 
-/** The master an object reads: its owner's copy of its type. */
-export function typeOf(p: PlayerMasters, e: { owner: number; type: number }): UnitType {
-  return master(p, e.owner, e.type);
+/**
+ * The master an object reads: its private copy when it has one (`own_master`, a converted object keeps its old owner's
+ * record, support-actions.md §4.6), else its owner's copy of its type.
+ */
+export function typeOf(p: PlayerMasters, e: { owner: number; type: number; ownMaster?: UnitType | null }): UnitType {
+  return e.ownMaster ?? master(p, e.owner, e.type);
 }
 
 /** A deep copy of every player's masters (snapshots). */
