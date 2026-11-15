@@ -48,8 +48,14 @@ export interface CommandPanelOptions {
    * or more); the panel's object alone when not given.
    */
   commandObjects?: (minLevel: number) => number[];
-  /** The Repair button: the next click on the map picks the building to repair. */
-  repair?: () => void;
+  /**
+   * The Repair, Attack Ground, Heal and Convert buttons: arm the order mode whose next click on the map names the target.
+   */
+  armCommand?: (mode: 'repair' | 'attack-ground' | 'heal' | 'convert') => void;
+  /** The order mode armed now (the Move key's too), or null; the grid shows only Cancel while there is one. */
+  commandMode?: () => string | null;
+  /** Cancel (or Esc) in an order mode: back to the normal mode. */
+  cancelCommand?: () => void;
 }
 
 /**
@@ -157,6 +163,10 @@ export class CommandPanel {
       this.mode = 'normal';
       this.page = 0;
     }
+    // An order mode (`TRIBE_GAME_MODE_COMMAND_*`) is the unit layer's: it ends with its click, Cancel, Esc or unselecting.
+    const command = this.o.commandMode?.() ?? null;
+    if (command !== null && this.mode !== 'place') this.mode = 'command';
+    else if (command === null && this.mode === 'command') this.mode = 'normal';
     this.object = object;
     const { world, player, provider } = this.o;
     const buttons = commandButtons({
@@ -307,8 +317,11 @@ export class CommandPanel {
         return;
       }
       case 'repair':
-        this.o.repair?.();
-        return;
+      case 'attack-ground':
+      case 'heal':
+      case 'convert':
+        this.o.armCommand?.(b.kind);
+        break;
       case 'cancel-construction':
         issue({ type: 'cancel', target: object.id });
         return;
@@ -316,6 +329,7 @@ export class CommandPanel {
         // `command_cancel`: leaves a mode, or in the normal mode unselects.
         if (this.mode === 'normal') return this.o.unselect();
         if (this.mode === 'place') this.o.cancelPlacement();
+        if (this.mode === 'command') this.o.cancelCommand?.();
         this.mode = 'normal';
         break;
       case 'unselect':

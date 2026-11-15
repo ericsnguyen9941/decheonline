@@ -30,7 +30,7 @@ interface Window {
     shownObjects(): number;
     resources(player?: number): { food: number; wood: number; gold: number; stone: number };
     resourcesAt(turn: number, player: number): { food: number; wood: number; gold: number; stone: number } | undefined;
-    objects(): { id: number; owner: number; type: number; x: number; y: number; state: number; heldType: number; heldAmount: number; graphic: number; frame: number }[];
+    objects(): { id: number; owner: number; type: number; x: number; y: number; state: number; heldType: number; heldAmount: number; hp: number; graphic: number; frame: number }[];
     issueWork(units: number[], target: number, x: number, y: number): void;
     objectScreenPos(id: number): { x: number; y: number } | null;
     population(player?: number): { count: number; headroom: number; limit: number };
@@ -55,6 +55,9 @@ interface Window {
     age(player?: number): number;
     techState(tech: number, player?: number): number;
     objectName(id: number): string | null;
+    commandMode(): string | null;
+    drawnOwner(id: number): number | null;
+    cursor(): string;
     tileVisibility(col: number, row: number, player?: number): number;
     relation(player: number, other: number): number;
     alliedVictory(player: number): boolean;

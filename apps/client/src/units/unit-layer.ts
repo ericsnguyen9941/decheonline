@@ -1,9 +1,28 @@
 import { Assets, Container, Graphics, Rectangle, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
-import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, TILE_FOGGED, TILE_VISIBLE, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
+import {
+  ACTION_CONVERT,
+  ACTION_HEAL,
+  buildingFacet,
+  checkPlacement,
+  master,
+  ObjectState,
+  RESOURCE_FAITH,
+  spriteInfo,
+  targetActionType,
+  TILE_FOGGED,
+  TILE_VISIBLE,
+  typeOf,
+  UNIT_TYPES,
+  unitDiplomacy,
+  unitType,
+  type Command,
+  type Entity,
+  type World,
+} from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, FramePart, GraphicInfo, SpriteFrame } from '../assets';
 import type { GameSounds } from '../audio/game-sounds';
-import { canBuild } from '../hud/commands';
+import { canBuild, levelOf } from '../hud/commands';
 import { frameCursor } from '../hud/frame-image';
 import { HOTKEY_STRING, hotkeyLetter, pressedLetter } from '../hud/hotkeys';
 import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
@@ -16,7 +35,7 @@ import { Doppelgangers, fogDraw, TERRAIN_LAYER, type Doppelganger } from './fog-
 import { FIRST_GROUP, GroupIds } from './group-ids';
 import { groupKey } from './group-keys';
 import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
-import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
+import { ATTACK_CURSOR_FRAME, canAttack, isAttackable, priestCursor, type PriestSelection } from './mouse-actions';
 import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
 import { alignBuilding, wallOutline } from './placement';
 
@@ -31,10 +50,24 @@ const BAR_EMPTY = 0xff0101;
 const FLASH_MS = 1500;
 /** `update_display_selected_objects`: the flash is on while bit 8 of the elapsed milliseconds is clear. */
 const FLASH_BIT = 0x100;
-/** `STRING_ID_MESSAGE_MOVE`: shown when the Move key arms the next click. */
-const MESSAGE_MOVE = 0x0be0;
-/** `STRING_ID_MESSAGE_REPAIR`: shown when the Repair button arms the next click. */
-const MESSAGE_REPAIR = 0x0bec;
+/**
+ * An order mode waiting for its click on the map (`game_mode`): the Move key's (`RGE_GAME_MODE_COMMAND_MOVE`), and the
+ * Repair, Attack Ground, Heal and Convert buttons' (`TRIBE_GAME_MODE_COMMAND_*`).
+ */
+export type ClickMode = 'move' | 'repair' | 'attack-ground' | 'heal' | 'convert';
+/**
+ * `STRING_ID_MESSAGE_*`, shown when a mode is armed: "Click an area to move there.", "... to repair.", "Click the unit to
+ * heal.", "... to convert.", "Click an area to attack ground." (scr_game.cpp:3840-4370).
+ */
+const MODE_MESSAGE: Record<ClickMode, number> = { move: 0x0be0, repair: 0x0bec, heal: 0x0be3, convert: 0x0be4, 'attack-ground': 0x0be5 };
+/** `unit_level` of the units `command_attack_ground` sends (`get_selected_objects_to_command(.., 4, -1, -1, 4)`). */
+const LEVEL_SOLDIER = 4;
+/** `OBJECT_GROUP_PRIEST`: a selected own priest gives `sel_object_properties` 0x16, and 0x80 with full faith. */
+const GROUP_PRIEST = 18;
+const FAITH_FULL = 100;
+/** The player's attributes 27 and 28 (Monotheism): converting priests and buildings. */
+const ATTR_PRIEST_CONVERSION = 27;
+const ATTR_BUILDING_CONVERSION = 28;
 /** `RGE_MASTER_TYPE_ACTION`, `TRIBE_MASTER_TYPE_BUILDING` and `_TREE`. */
 const MASTER_TYPE_ACTION = 40;
 const MASTER_TYPE_BUILDING = 80;
@@ -194,10 +227,8 @@ export class UnitLayer {
   private readonly groups = new Map<number, number>();
   /** `groups_used`: the ids the Group button has given out. */
   private readonly groupIds = new GroupIds();
-  /** `RGE_GAME_MODE_COMMAND_MOVE`: the next left click on the map moves the selection there. */
-  private commandMove = false;
-  /** `TRIBE_GAME_MODE_COMMAND_REPAIR`: the next click on the map names the building to repair. */
-  private commandRepair = false;
+  /** The order mode waiting for its click on the map, or null (the normal mode). */
+  private clickMode: ClickMode | null = null;
   /** The digits of groupnum.shp (frame = group number 1-9), once loaded, and the sprites over the selected objects. */
   private readonly groupDigits: (Texture | null)[] = [];
   private readonly groupMarks = new Container();
@@ -242,6 +273,10 @@ export class UnitLayer {
   private pointer: { x: number; y: number } | null = null;
   /** CSS cursor over an attack target: the original's sword, or the browser's crosshair without art. */
   private attackCursor = 'crosshair';
+  /** The owner whose colour each object is drawn in (its art's), by id: for the tests. */
+  private readonly drawnOwners = new Map<number, number>();
+  /** Each object's owner at the last frame: an own object that changed hands leaves the selection and its group. */
+  private readonly owners = new Map<number, number>();
   private revealedMap = false;
 
   constructor(private readonly o: UnitLayerOptions) {
@@ -315,8 +350,7 @@ export class UnitLayer {
   unselect(): void {
     this.selected.clear();
     this.primaryId = null;
-    this.commandMove = false;
-    this.commandRepair = false;
+    this.setClickMode(null);
   }
 
   /**
@@ -415,6 +449,11 @@ export class UnitLayer {
     return this.opaque(t.sprite, cx, cy) || !best ? { x: cx, y: cy } : { x: best.x, y: best.y };
   }
 
+  /** The player whose colour object `id` is drawn in now (its art's owner); null when it is not drawn. */
+  drawnOwner(id: number): number | null {
+    return this.tracks.get(id)?.sprite.visible ? (this.drawnOwners.get(id) ?? null) : null;
+  }
+
   /** How many drawn objects show pack art (not debug shapes). */
   get packSprites(): number {
     let n = 0;
@@ -510,6 +549,16 @@ export class UnitLayer {
         this.deselect(e.id);
         this.groups.delete(e.id);
       }
+      // `change_ownership` (a conversion, src/t_c_obj.cpp:254): the old owner's `unselect_one_object`. Its group number
+      // goes too: the old owner's group keys only ever take its own objects.
+      const before = this.owners.get(e.id);
+      if (before !== e.owner) {
+        this.owners.set(e.id, e.owner);
+        if (before === this.o.player) {
+          this.deselect(e.id);
+          this.groups.delete(e.id);
+        }
+      }
       let t = this.tracks.get(e.id);
       if (!t) {
         t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, under: null, frame: null, layer: DEFAULT_LAYER };
@@ -584,6 +633,7 @@ export class UnitLayer {
       }
       const frame = art.frames[pick.index] ?? art.frames[0]!;
       this.place(t.sprite, frame, pick.flipped, pos.x, pos.y - lift, fog === 'fogged');
+      this.drawnOwners.set(e.id, e.owner);
       const parent = fog === 'terrain' ? view.terrainLayer : view.layer;
       if (t.sprite.parent !== parent) parent.addChild(t.sprite);
       t.frame = frame;
@@ -614,6 +664,8 @@ export class UnitLayer {
       this.deselect(id);
       this.groups.delete(id);
       this.flashes.delete(id);
+      this.owners.delete(id);
+      this.drawnOwners.delete(id);
     }
     this.drawHighlight();
     this.drawGhost();
@@ -773,7 +825,8 @@ export class UnitLayer {
     const col = Math.min(Math.max(at.col, 0), world.map.width - 1);
     const row = Math.min(Math.max(at.row, 0), world.map.height - 1);
     const { x, y } = alignBuilding(t.radiusX, t.radiusY, col, row, world.map.width, world.map.height);
-    const fits = checkPlacement(world.gameContext(), t, x, y, true, true) === 0;
+    // `draw_place_object` checks with `check_vis` 1 (src/view.cpp:1195), as the `build` command does: red over unexplored tiles.
+    const fits = checkPlacement(world.gameContext(), t, x, y, true, true, player) === 0;
     this.ghostAt = { unit, x, y, fits };
     const art = this.loadArt(t.standing.graphic, player);
     if (!art) return;
@@ -989,8 +1042,8 @@ export class UnitLayer {
         } else if (e.button === 2) this.cancelPlacement();
         return;
       }
-      if (this.commandMove && e.button === 0) return this.moveTo(p.x, p.y);
-      if (this.commandRepair && (e.button === 0 || e.button === 2)) return this.repairAt(p.x, p.y);
+      // An order mode takes the next left click, or right click but in the Move mode (whose right click is a plain order).
+      if (this.clickMode && (e.button === 0 || (e.button === 2 && this.clickMode !== 'move'))) return this.commandAt(this.clickMode, p.x, p.y);
       if (e.button === 0) this.press = { ...p, boxing: false };
       else if (e.button === 2) this.orderAt(p.x, p.y);
     });
@@ -1007,7 +1060,9 @@ export class UnitLayer {
       }
       if (!this.press) {
         const enemy = this.attackTarget(p.x, p.y);
-        canvas.style.cursor = enemy ? this.attackCursor : this.workTarget(p.x, p.y) ? 'var(--cursor-work, pointer)' : '';
+        const work = enemy ? undefined : this.workTarget(p.x, p.y);
+        const ring = enemy || work ? false : this.priestTarget(p.x, p.y) !== undefined;
+        canvas.style.cursor = enemy ? this.attackCursor : work ? 'var(--cursor-work, pointer)' : ring ? 'var(--cursor-target, crosshair)' : '';
         this.rollover(enemy);
         return;
       }
@@ -1091,29 +1146,48 @@ export class UnitLayer {
    */
   private armMove(): void {
     if (this.selectedOwn().length === 0) return;
-    this.cancelPlacement();
-    this.commandMove = true;
-    this.o.onMessage?.(MESSAGE_MOVE);
+    this.armCommand('move');
   }
 
   /**
-   * The Repair button (`command_repair`, scr_game.cpp:3980): the next left or right click on the map picks the building
-   * to repair, and the message line says so.
+   * A grid button's order mode (`command_repair`, `command_attack_ground`, `command_heal`, `command_convert`,
+   * scr_game.cpp:3840-4370): the next left or right click on the map names its target, and the message line says so.
    */
-  armRepair(): void {
+  armCommand(mode: ClickMode): void {
     this.cancelPlacement();
-    this.commandMove = false;
-    this.commandRepair = true;
-    this.o.onMessage?.(MESSAGE_REPAIR);
+    this.setClickMode(mode);
+    this.o.onMessage?.(MODE_MESSAGE[mode]);
+  }
+
+  /** The order mode waiting for its click, or null. */
+  get commandMode(): ClickMode | null {
+    return this.clickMode;
+  }
+
+  /** `command_cancel` in an order mode (Cancel, Esc): back to the normal mode, the selection kept. */
+  cancelCommand(): void {
+    this.setClickMode(null);
+  }
+
+  private setClickMode(mode: ClickMode | null): void {
+    this.clickMode = mode;
+  }
+
+  /** The order mode's click (`TRIBE_Main_View::mouse_left_up_action` / `_right_`, src/tvw_main.cpp:376-600); the mode ends. */
+  private commandAt(mode: ClickMode, x: number, y: number): void {
+    this.setClickMode(null);
+    if (mode === 'move') this.moveTo(x, y);
+    else if (mode === 'repair') this.repairAt(x, y);
+    else if (mode === 'attack-ground') this.groundAt(x, y);
+    else this.doAt(x, y, mode === 'heal' ? ACTION_HEAL : ACTION_CONVERT);
   }
 
   /**
    * The click of the Repair mode (src/tvw_main.cpp:449, `command_make_repair`, src/tplayer.cpp:995): the picked object,
    * when it is an own building short of its hit points and not dying, is repaired by the selected Villagers, and flashes;
-   * anything else plays cantdo.wav. The mode ends either way.
+   * anything else plays cantdo.wav.
    */
   private repairAt(x: number, y: number): void {
-    this.commandRepair = false;
     const { world, player } = this.o;
     const target = this.topmostAt(x, y, () => true);
     const t = target && typeOf(world, target);
@@ -1128,22 +1202,62 @@ export class UnitLayer {
   }
 
   /**
-   * `get_selected_objects_to_command` (src/player.cpp:1648): the selected objects of the player that are active, of select
-   * level `minLevel` or more, of object group `group` (-1 any), and of an action master type other than a tree.
+   * The click of the Attack Ground mode: the map point under the pointer (`pick1` on the terrain, `fixup_pick_info`) goes
+   * to `command_attack_ground` (src/tplayer.cpp:963), which sends `attack-ground` for the selected units of `unit_level`
+   * 4. A click off the map, or no such unit, plays cantdo.wav.
    */
-  commandObjects(minLevel: number, group = -1): number[] {
-    const { world, player } = this.o;
+  private groundAt(x: number, y: number): void {
+    const { camera, ground } = this.o.view;
+    const { col, row } = ground.pointAt(x + camera.x, y + camera.y);
+    const { width, height } = this.o.world.map;
+    const units = col < 0 || row < 0 || col >= width || row >= height ? [] : this.commandObjects(SELECT_BOX, -1, LEVEL_SOLDIER);
+    if (units.length === 0) {
+      this.o.sounds?.cantDo();
+      return;
+    }
+    // `reset_display_object_selection(2)`: the flashing targets stop.
+    this.flashes.clear();
+    this.o.issue({ type: 'attack-ground', units, x: col, y: row });
+  }
+
+  /**
+   * The click of the Heal and Convert modes (`command_make_do(x, y, 0, action)`, src/vw_main.cpp:935): the object under
+   * the pointer that a selected unit's task list gives that action (`pick_best_target` with the action type, the
+   * selection's own objects included) is ordered (`command_make_do`: a `work` order, support-actions.md §4.7) for the
+   * selected units, and flashes; with none, cantdo.wav.
+   */
+  private doAt(x: number, y: number, action: number): void {
+    const { world } = this.o;
+    const units = this.orderedUnits();
+    const ordered = units.flatMap((id) => world.entities.get(id) ?? []);
+    const target = this.topmostAt(x, y, (e) => e.state < ObjectState.Dying && ordered.some((u) => targetActionType(world, u, e) === action), false);
+    if (!target || units.length === 0) {
+      this.o.sounds?.cantDo();
+      return;
+    }
+    this.flashes.clear();
+    this.flashes.set(target.id, performance.now());
+    this.o.issue({ type: 'work', units, target: target.id, x: target.x, y: target.y });
+  }
+
+  /**
+   * `get_selected_objects_to_command` (src/player.cpp:1648): the selected objects of the player that are active, of select
+   * level `minLevel` or more, of object group `group` (-1 any), of `unit_level` `unitLevel` (-1 any), and of an action
+   * master type other than a tree.
+   */
+  commandObjects(minLevel: number, group = -1, unitLevel = -1): number[] {
+    const { world, player, provider } = this.o;
     return [...this.selected].filter((id) => {
       const e = world.entities.get(id);
       if (!e || e.owner !== player || e.state !== ObjectState.Active || this.selectLevel(e) < minLevel) return false;
       const t = typeOf(world, e);
+      if (unitLevel !== -1 && levelOf(e.type, (unit) => provider.unitInfo(unit)?.level ?? null) !== unitLevel) return false;
       return (group === -1 || t.group === group) && t.masterType >= MASTER_TYPE_ACTION && t.masterType !== MASTER_TYPE_TREE;
     });
   }
 
   /** The left click of the Move mode: the selected units walk to the map point (a click off the map only ends the mode). */
   private moveTo(x: number, y: number): void {
-    this.commandMove = false;
     const { camera, ground } = this.o.view;
     const { col, row } = ground.pointAt(x + camera.x, y + camera.y);
     const { width, height } = this.o.world.map;
@@ -1328,6 +1442,45 @@ export class UnitLayer {
   }
 
   /** The object a work order can target (Gaia's or an own non-unit) picked at canvas point (x, y). */
+  /**
+   * The object under the pointer that shows the ring (`mcursors` facet 5) for a selection with an own priest
+   * (`priestCursor`); undefined without one.
+   */
+  private priestTarget(x: number, y: number): Entity | undefined {
+    const { world, player } = this.o;
+    const own = this.selectedOwn().flatMap((id) => world.entities.get(id) ?? []);
+    const priests = own.filter((e) => typeOf(world, e).group === GROUP_PRIEST);
+    if (priests.length === 0) return undefined;
+    const attributes = world.attributes[player]!;
+    const sel: PriestSelection = {
+      attack: own.some((e) => canAttack(typeOf(world, e))),
+      faith: priests.some((e) => e.heldType === RESOURCE_FAITH && e.heldAmount >= FAITH_FULL),
+      single: priests.length === 1 ? priests[0]!.id : -1,
+      priestConversion: attributes[ATTR_PRIEST_CONVERSION] !== 0,
+      buildingConversion: attributes[ATTR_BUILDING_CONVERSION] !== 0,
+    };
+    // `unitDiplomacy[owner]`: 0 Gaia, 1 self, 2 ally, 3 neutral, 4 enemy.
+    const stances = ['gaia', 'self', 'ally', 'neutral', 'enemy'] as const;
+    const stance = (owner: number) => stances[unitDiplomacy(world, player, owner)] ?? 'enemy';
+    return this.topmostAt(
+      x,
+      y,
+      (e) => {
+        const t = typeOf(world, e);
+        return priestCursor(sel, { id: e.id, type: t.id, group: t.group, hp: e.hp, maxHp: t.hitPoints, state: e.state }, stance(e.owner));
+      },
+      false,
+    );
+  }
+
+  /** The object under the pointer a selected own priest's task list heals or converts (a right click's `work` order). */
+  private priestOrderTarget(x: number, y: number): Entity | undefined {
+    const { world } = this.o;
+    const priests = this.orderedUnits().flatMap((id) => world.entities.get(id) ?? []).filter((e) => typeOf(world, e).group === GROUP_PRIEST);
+    if (priests.length === 0) return undefined;
+    return this.topmostAt(x, y, (e) => priests.some((p) => [ACTION_HEAL, ACTION_CONVERT].includes(targetActionType(world, p, e))), false);
+  }
+
   private workTarget(x: number, y: number): Entity | undefined {
     if (!this.hasOwnSelection()) return undefined;
     return this.topmostAt(x, y, (e) => e.owner === 0 || (e.owner === this.o.player && !isUnit(e)));
@@ -1379,7 +1532,8 @@ export class UnitLayer {
     // other flashes); a move ends them (`reset_display_object_selection(2)`).
     this.flashes.clear();
     const enemy = this.attackTarget(x, y);
-    const target = enemy ?? this.workTarget(x, y);
+    // A priest's heal or convert target is a `work` order on it (support-actions.md §4.7).
+    const target = enemy ?? this.workTarget(x, y) ?? this.priestOrderTarget(x, y);
     if (target) this.flashes.set(target.id, performance.now());
     if (enemy) return this.o.issue({ type: 'attack', units, target: enemy.id });
     if (target) this.o.issue({ type: 'work', units, target: target.id, x: col, y: row });

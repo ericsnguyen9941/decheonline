@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { ATTACK_ATTACKING, ATTACK_MOVING, ATTACK_WAITING, doAttack, launch, setAttackState, startAttack, updateMissile } from './combat';
+import { ATTACK_ATTACKING, ATTACK_MOVING, ATTACK_WAITING, attackWork, doAttack, launch, setAttackState, startAttack, updateMissile } from './combat';
 import type { Command } from './commands';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
@@ -203,6 +203,24 @@ describe('combat.md §8 Example 3: in range or not', () => {
       expect(a.state).toBe(inRange ? ATTACK_ATTACKING : ATTACK_MOVING);
     });
   }
+});
+
+describe('combat.md §3.1: RGE_Action_Attack::work names a new target without latching its position', () => {
+  test('a Bowman switched to another Clubman keeps the latched point and chases it (state 4)', () => {
+    const w = world(
+      { owner: 1, type: BOWMAN, x: 10.5, y: 10.5 },
+      { owner: 2, type: CLUBMAN, x: 14.5, y: 10.5 },
+      { owner: 2, type: CLUBMAN, x: 14.5, y: 14.5 },
+    );
+    const bowman = w.entities.get(1)!;
+    const ctx = stepContext(w);
+    const a = startAttack(ctx, bowman, w.entities.get(2)!, null, null, 0, false);
+    a.x = f32(3);
+    a.y = f32(4);
+    a.z = f32(0);
+    expect(attackWork(ctx, bowman, w.entities.get(3)!)).toBe(true);
+    expect([a.target, a.state, a.x, a.y, a.z]).toEqual([3, ATTACK_MOVING, f32(3), f32(4), 0]);
+  });
 });
 
 describe('combat.md §8 Example 4: arrow flight and hit step', () => {

@@ -1,7 +1,7 @@
 // What the command button grid holds, from TRIBE_Screen_Game::setup_buttons (src/scr_game.cpp:2409) and
 // TRIBE_Player::interface_item_avail (src/tplayer.cpp:731), for the commands the sim has: the villager's build menu and
-// repair, the buildings' train and research buttons with their queue counts, stop, stand ground, and cancelling a
-// foundation (docs/spec/hud.md).
+// repair, the buildings' train and research buttons with their queue counts, stop, stand ground, attack ground, the
+// priest's heal and convert, and cancelling a foundation (docs/spec/hud.md).
 // Every master is the player's own (`player->master_objects`), so ages and techs change what the grid offers.
 import {
   ACTION_BUILD,
@@ -24,8 +24,12 @@ import {
   type World,
 } from '@aoe/sim';
 
-/** `game_mode`: normal, the villager's build menu (`TRIBE_GAME_MODE_BUILD_MENU`), placing a building. */
-export type CommandMode = 'normal' | 'build-menu' | 'place';
+/**
+ * `game_mode`: normal, the villager's build menu (`TRIBE_GAME_MODE_BUILD_MENU`), placing a building, or an order mode
+ * waiting for its click on the map (move, repair, attack ground, heal, convert: `RGE_GAME_MODE_COMMAND_MOVE`,
+ * `TRIBE_GAME_MODE_COMMAND_*`).
+ */
+export type CommandMode = 'normal' | 'build-menu' | 'place' | 'command';
 
 export type CommandButton =
   /** `TRIBE_UI_COMMAND_BUILD`: opens the build menu. */
@@ -45,6 +49,11 @@ export type CommandButton =
   | { kind: 'repair'; slot: number }
   /** `TRIBE_UI_COMMAND_STAND_GROUND`: the selected units stop and hold their ground. */
   | { kind: 'stand-ground'; slot: number }
+  /** `TRIBE_UI_COMMAND_ATTACK_GROUND`: the next click on the map names the point the selected units fire at. */
+  | { kind: 'attack-ground'; slot: number }
+  /** `TRIBE_UI_COMMAND_HEAL`, `_CONVERT`: the next click on the map names the unit the selected priests heal or convert. */
+  | { kind: 'heal'; slot: number }
+  | { kind: 'convert'; slot: number }
   /** `TRIBE_UI_COMMAND_CANCEL_CONSTRUCTION`. */
   | { kind: 'cancel-construction'; slot: number }
   /** `TRIBE_UI_COMMAND_MORE`: the build menu's other page. */
@@ -59,7 +68,21 @@ export type CommandButton =
   | { kind: 'ungroup'; slot: number };
 
 /** btncmd.shp (interface SLP 50721) frames the grid uses at 800x600 and up. */
-export const COMMAND_FRAME = { repair: 0, build: 2, stop: 3, 'stand-ground': 4, 'cancel-construction': 3, group: 7, ungroup: 8, cancel: 10, unselect: 10, more: 11 } as const;
+export const COMMAND_FRAME = {
+  repair: 0,
+  build: 2,
+  stop: 3,
+  'stand-ground': 4,
+  'cancel-construction': 3,
+  group: 7,
+  ungroup: 8,
+  cancel: 10,
+  unselect: 10,
+  more: 11,
+  'attack-ground': 12,
+  heal: 13,
+  convert: 14,
+} as const;
 
 /** The grid's last slot: cancel or unselect (hotkey Esc). */
 export const FINAL_SLOT = 11;
@@ -86,6 +109,8 @@ const UNIT_LEVELS = new Set([4, 5, 6, 7, 9]);
 const MASTER_TYPE_ACTION = 40;
 /** `is_group_selected(4)`: the object group of the Villagers, which gives a mixed selection the build button. */
 const GROUP_VILLAGER = 4;
+/** `OBJECT_GROUP_PRIEST`: without a pack its level is guessed as the dat's (6). */
+const GROUP_PRIEST = 18;
 
 /** `calc_button_loc`: a dat `button_location` (1-5, 6-10 on the first page; 11-15, 16-20 on the second) to a grid slot. */
 export function buttonSlot(location: number): number {
@@ -161,7 +186,8 @@ function locations(known: (number | null)[]): number[] {
 export function commandButtons(c: CommandContext): CommandButton[] {
   const { world, player, object } = c;
   if (!object) return [];
-  if (c.mode === 'place') return [{ kind: 'cancel', slot: FINAL_SLOT }];
+  // Any mode but the normal one and the build menu leaves only Cancel (setup_buttons' last branch, scr_game.cpp:2994).
+  if (c.mode === 'place' || c.mode === 'command') return [{ kind: 'cancel', slot: FINAL_SLOT }];
   if (c.mode === 'build-menu') {
     const out: CommandButton[] = [];
     const ids = itemsMadeAt(world, player, BUILDER);
@@ -194,13 +220,25 @@ export function commandButtons(c: CommandContext): CommandButton[] {
     return [{ kind: 'build', slot: 0 }, { kind: 'repair', slot: 1 }, ...(busy ? [{ kind: 'stop', slot: 2 } as const] : []), ...grouping, unselect];
   }
   if (level === LEVEL_SOLDIER) {
-    // Attack Ground (slot 1, Stop then in 2) needs every selected unit to fire missiles with an area effect; the sim has
-    // no such unit (the Stone Thrower), so Stop is in slot 1.
-    return [{ kind: 'stand-ground', slot: 0 }, ...(busy ? [{ kind: 'stop', slot: 1 } as const] : []), ...grouping, unselect];
+    // Attack Ground (slot 1, Stop then in 2) when every selected unit fires a missile with an area effect (the gate tests
+    // `area_effect_range`, not the blast level: the Stone Thrower line, not the Ballista).
+    const ground = selected.every((e) => {
+      const combat = typeOf(world, e).combat;
+      return combat !== null && combat.projectileUnitId !== -1 && combat.blastWidth !== 0;
+    });
+    return [
+      { kind: 'stand-ground', slot: 0 },
+      ...(ground ? [{ kind: 'attack-ground', slot: 1 } as const] : []),
+      ...(busy ? [{ kind: 'stop', slot: ground ? 2 : 1 } as const] : []),
+      ...grouping,
+      unselect,
+    ];
   }
-  // Priests' Heal and Convert (slots 0, 1) and a transport's Unload are not ported (no such units in the sim); trade
-  // boats' and the rest's Stop is in slot 0.
-  if (UNIT_LEVELS.has(level)) return [...(busy ? [{ kind: 'stop', slot: level === LEVEL_PRIEST ? 2 : 0 } as const] : []), ...grouping, unselect];
+  if (level === LEVEL_PRIEST) {
+    return [{ kind: 'heal', slot: 0 }, { kind: 'convert', slot: 1 }, ...(busy ? [{ kind: 'stop', slot: 2 } as const] : []), ...grouping, unselect];
+  }
+  // A transport's Unload and the trade boats' buttons are not ported; their Stop and the rest's is in slot 0.
+  if (UNIT_LEVELS.has(level)) return [...(busy ? [{ kind: 'stop', slot: 0 } as const] : []), ...grouping, unselect];
   if (level === LEVEL_BUILDING && t.masterType === MASTER_TYPE_BUILDING) {
     if (object.state < ObjectState.Active) return [{ kind: 'cancel-construction', slot: 0 }, unselect];
     if (object.state > ObjectState.Active) return [unselect];
@@ -244,12 +282,13 @@ export function commandButtons(c: CommandContext): CommandButton[] {
 }
 
 /** A master's `unit_level`, from the pack or, without one, guessed from the sim's table. */
-function levelOf(unit: number, from?: (unit: number) => number | null): number {
+export function levelOf(unit: number, from?: (unit: number) => number | null): number {
   const known = from?.(unit);
   if (known !== null && known !== undefined) return known;
   const t = unitType(unit);
   if (t.masterType === MASTER_TYPE_BUILDING) return LEVEL_BUILDING;
-  return canBuild(t) ? LEVEL_VILLAGER : 4;
+  if (t.group === GROUP_PRIEST) return LEVEL_PRIEST;
+  return canBuild(t) ? LEVEL_VILLAGER : LEVEL_SOLDIER;
 }
 
 /** The movable units' levels (the special selection's `all_moveable_units` test). */

@@ -75,6 +75,12 @@ export interface NetDebug {
   techState(tech: number, player?: number): number;
   /** The name the object panel shows for object `id` (an upgrade's for an upgraded master); null without one or a HUD. */
   objectName(id: number): string | null;
+  /** The order mode waiting for its click on the map (move, repair, attack-ground, heal, convert), or null. */
+  commandMode(): string | null;
+  /** The player whose colour object `id` is drawn in now; null when it is not drawn. */
+  drawnOwner(id: number): number | null;
+  /** The game canvas's CSS cursor now (a `url(...)` of the original's art, or a browser cursor). */
+  cursor(): string;
   /** What `player` (default: this client's) knows of tile (col, row): 0x0F visible, 0x80 fogged, 0 unexplored. */
   tileVisibility(col: number, row: number, player?: number): number;
   /** `player`'s stance towards `other` (0 ally, 1 neutral, 3 enemy; docs/spec/diplomacy.md §1) and its allied victory flag. */
@@ -149,6 +155,7 @@ export interface DebugObject {
   /** Resource held (`attribute_type_held`, -1 none) and its amount. */
   heldType: number;
   heldAmount: number;
+  hp: number;
   /** Dat graphic of the active sprite and its frame in the sim. */
   graphic: number;
   frame: number;
@@ -549,6 +556,7 @@ function debugPanel(
           state: e.state,
           heldType: e.heldType,
           heldAmount: e.heldAmount,
+          hp: e.hp,
           graphic: e.sprite!.graphic,
           frame: e.sprite!.frame,
         })),
@@ -580,6 +588,12 @@ function debugPanel(
     age: (p = player) => game.world.attributes[p]![ATTR_CURRENT_AGE]!,
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
     objectName: (id) => hud()?.nameOf(id) ?? null,
+    commandMode: () => layer()?.commandMode ?? null,
+    drawnOwner: (id) => layer()?.drawnOwner(id) ?? null,
+    cursor: () => {
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid=game-canvas]');
+      return canvas ? getComputedStyle(canvas).cursor : '';
+    },
     tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
     relation: (p, q) => game.world.relation(p, q),
     alliedVictory: (p) => game.world.diplomacy.alliedVictory[p] ?? false,

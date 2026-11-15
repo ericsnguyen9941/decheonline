@@ -17,6 +17,7 @@ export * from './build';
 export * from './repair';
 export * from './transport';
 export * from './artifact';
+export { ACTION_CONVERT, ACTION_HEAL, RESOURCE_FAITH } from './priest';
 export { hasAction } from './unit-ai';
 export * from './buildings';
 export * from './masters';

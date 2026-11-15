@@ -769,15 +769,15 @@ export function combatAttack(ctx: GameContext, e: Entity, target: Entity, uncond
   return true;
 }
 
-/** `RGE_Action_Attack::work` (src/act_atak.cpp:405): the same target keeps a running attack; any other is chased. */
+/**
+ * `RGE_Action_Attack::work` (src/act_atak.cpp:405): the same target keeps a running attack; any other is chased.
+ * `set_target_obj` names the target only: the latched target position stays as it was (combat.md §3.1).
+ */
 export function attackWork(ctx: GameContext, e: Entity, target: Entity): boolean {
   const a = e.attack!;
   if (target.id === a.target && (a.state === ATTACK_MOVING || a.state === ATTACK_WAITING || a.state === ATTACK_ATTACKING)) return true;
   if (a.indirect) a.indirect = 0;
   a.target = target.id;
-  a.x = target.x;
-  a.y = target.y;
-  a.z = target.z;
   setAttackState(ctx, e, a, ATTACK_MOVING);
   return true;
 }

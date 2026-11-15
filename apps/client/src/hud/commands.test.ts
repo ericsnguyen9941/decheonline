@@ -189,3 +189,52 @@ test('the Tool Age at the Town Center: available after two Stone Age buildings, 
   world.techs[1]![102] = TECH_DISABLED;
   expect(commandButtons(context(tc.id)).some((b) => b.kind === 'research')).toBe(false);
 });
+
+// Stone Thrower, Ballista, Priest (empires.dat). Their `unit_level` is 4, 4 and 6 (`interfaceKind`; guessed without a pack).
+const STONE_THROWER = 35;
+const BALLISTA = 11;
+const PRIEST = 125;
+
+/** A world of Gaia and two players with these units of player 1; ids from 1 in list order. */
+function unitsGame(types: number[]): { world: World; context: (id: number, mode?: CommandContext['mode']) => CommandContext } {
+  const world = new World({ players: 3, units: types.map((type, i) => ({ owner: 1, type, x: 10.5 + i, y: 10.5 })) });
+  const context = (id: number, mode: CommandContext['mode'] = 'normal') => ({
+    world,
+    player: 1,
+    object: world.entities.get(id),
+    selected: [...world.entities.ofPlayer(1)],
+    mode,
+    page: 0,
+    buttonOf: () => null,
+  });
+  return { world, context };
+}
+
+test('a Stone Thrower gets Attack Ground in slot 1 (Stop in 2); with a Ballista, whose missile has no area effect, it does not', () => {
+  const thrower = unitsGame([STONE_THROWER]);
+  expect(commandButtons(thrower.context(1))).toEqual([
+    { kind: 'stand-ground', slot: 0 },
+    { kind: 'attack-ground', slot: 1 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+  thrower.world.addBatch(thrower.world.turn, 1, [{ type: 'move', units: [1], x: 20, y: 20 }]);
+  for (let i = 0; i < 40; i++) thrower.world.runStep();
+  expect(commandButtons(thrower.context(1)).find((b) => b.kind === 'stop')).toEqual({ kind: 'stop', slot: 2 });
+  const mixed = unitsGame([STONE_THROWER, BALLISTA]);
+  expect(commandButtons(mixed.context(1)).map((b) => b.kind)).toEqual(['stand-ground', 'group', 'ungroup', 'unselect']);
+});
+
+test('a Priest gets Heal in slot 0 and Convert in slot 1', () => {
+  const { context } = unitsGame([PRIEST]);
+  expect(commandButtons(context(1))).toEqual([
+    { kind: 'heal', slot: 0 },
+    { kind: 'convert', slot: 1 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+});
+
+test('an order mode (repair, attack ground, heal, convert, move) leaves only Cancel in the grid', () => {
+  const { context } = unitsGame([PRIEST, STONE_THROWER]);
+  expect(commandButtons(context(1, 'command'))).toEqual([{ kind: 'cancel', slot: 11 }]);
+  expect(commandButtons(context(2, 'command'))).toEqual([{ kind: 'cancel', slot: 11 }]);
+});

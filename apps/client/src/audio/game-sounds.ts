@@ -30,6 +30,7 @@ export type SoundEvent =
   | 'research'
   | 'attacked'
   | 'farm-died'
+  | 'converted'
   | 'button'
   | 'sprite'
   | 'message'
@@ -49,6 +50,9 @@ export interface SoundTrigger {
   source: number;
 }
 
+/** `OBJECT_GROUP_ARTIFACT`: relics and ruins change hands without a conversion. */
+const GROUP_ARTIFACT = 1;
+
 /** Triggers kept for the test hook. */
 const LOG_LIMIT = 2000;
 
@@ -66,6 +70,8 @@ export class GameSounds {
   readonly log: SoundTrigger[] = [];
   /** `object_state` of each object at the last step seen. */
   private readonly states = new Map<number, number>();
+  /** Owner of each object at the last step seen. */
+  private readonly owners = new Map<number, number>();
   private techs: number[];
   private alert: number;
   private depleted: number;
@@ -74,7 +80,10 @@ export class GameSounds {
   constructor(private readonly o: GameSoundsOptions) {
     const { world, player } = o;
     // What exists when the game starts was made without a sound.
-    for (const e of world.entities.all()) this.states.set(e.id, e.state);
+    for (const e of world.entities.all()) {
+      this.states.set(e.id, e.state);
+      this.owners.set(e.id, e.owner);
+    }
     this.techs = [...world.techs[player]!];
     this.alert = world.alertCooldown[player]!;
     this.depleted = world.depleted[player]!;
@@ -101,12 +110,21 @@ export class GameSounds {
       alive.add(e.id);
       const before = this.states.get(e.id);
       this.states.set(e.id, e.state);
+      // `GAME_NOTIFY_CONVERSION_SUCCEEDED` (the conversion's, src/tact_cnv.cpp:321, :380): the old owner hears convwarn.wav
+      // when another player converted the object. An artifact changing hands is not a conversion.
+      const owner = this.owners.get(e.id);
+      this.owners.set(e.id, e.owner);
+      if (owner === player && e.owner !== player && typeOf(world, e).group !== GROUP_ARTIFACT) this.game('converted', GameSound.Converted, e.id);
       if (e.owner !== player || !e.sprite) continue;
       if (before === undefined) this.unit('created', e, UnitSound.Created);
       else if (before === ObjectState.Unbuilt && e.state === ObjectState.Active) this.unit('built', e, UnitSound.Construction);
       else if (before <= ObjectState.Active && e.state >= ObjectState.Dying) this.unit('death', e, UnitSound.Death);
     }
-    for (const id of this.states.keys()) if (!alive.has(id)) this.states.delete(id);
+    for (const id of this.states.keys()) {
+      if (alive.has(id)) continue;
+      this.states.delete(id);
+      this.owners.delete(id);
+    }
     const techs = world.techs[player]!;
     techs.forEach((state, tech) => {
       if (this.techs[tech] === TECH_RESEARCHING && state === TECH_DONE) this.game('research', researchSound(tech), tech);
@@ -165,7 +183,9 @@ export class GameSounds {
         if (e) this.unit('command', e, UnitSound.Command);
         return;
       }
-      case 'stand-ground': {
+      case 'stand-ground':
+      case 'attack-ground': {
+        // `command_attack_ground` plays the first unit's command sound (src/tplayer.cpp:968).
         const e = first(c.units);
         if (e) this.unit('command', e, UnitSound.Command);
         return;

@@ -25,6 +25,11 @@ export const GameSound = {
   Button: 1,
   /** cantdo.wav: an order mode's click on nothing it can take (`error_a`, src/tvw_main.cpp:420). */
   CantDo: 3,
+  /**
+   * convwarn.wav: one of the player's objects was converted by another player (`GAME_NOTIFY_CONVERSION_SUCCEEDED`,
+   * src/tribegam.cpp:2134-2138; the converter hears nothing, convdone.wav (14) is never played).
+   */
+  Converted: 13,
   /** resdone.wav: an age reached (`TRIBE_Game::notification`, research completed, tech 101-103). */
   AgeDone: 5,
   /** res.wav: any other research completed. */

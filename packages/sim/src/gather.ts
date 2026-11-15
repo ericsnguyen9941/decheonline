@@ -776,6 +776,20 @@ export function workTaskType(ctx: PlayerMasters & DiplomacyContext, e: Entity, t
 }
 
 /**
+ * The action type of the task `e` would take for `target`: its own task list's, else one of its task group's (as
+ * `workTaskType`); -1 when none has one. The check `RGE_Main_View::pick_best_target` makes for an order mode's action
+ * type (src/vw_main.cpp:1117): Heal 105, Convert 104. A read for the client; it changes nothing.
+ */
+export function targetActionType(ctx: PlayerMasters & DiplomacyContext, e: Entity, target: Entity): number {
+  const t = typeOf(ctx, e);
+  for (const type of [t, ...(t.action && t.action.taskSwapGroup !== 0 ? swapTypes(ctx, e.owner, t) : [])]) {
+    const i = targetTask(ctx, type, e, target);
+    if (i !== -1) return type.action!.tasks[i]!.actionType;
+  }
+  return -1;
+}
+
+/**
  * `RGE_Action_Object::getTask` (src/act_obj.cpp:455): the unit's own task for `target`, else the first task of a type
  * of its task group (in id order), which the unit then becomes. -1 when none has one.
  */

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { ATTR_HEADROOM, ATTR_POPULATION } from './buildings';
 import type { Command } from './commands';
 import { ObjectState, type Entity } from './entities';
-import type { WorkAction } from './gather';
+import { targetActionType, type WorkAction } from './gather';
 import { master, typeOf } from './masters';
 import { f32 } from './num';
 import { ACTION_CONVERT, ACTION_HEAL, conversionSucceeds, FAITH_MAX, RESOURCE_FAITH } from './priest';
@@ -472,5 +472,22 @@ describe('determinism with priests', () => {
     const a = runReplay(log, w);
     expect(runReplay(log)).toEqual(a);
     expect(w.attributes[1]![ATTR_CONVERSIONS]! + w.attributes[2]![ATTR_CONVERSIONS]!).toBeGreaterThan(0);
+  });
+});
+
+describe('targetActionType: the action a work order on an object starts (pick_best_target with an action type)', () => {
+  test("a Priest converts an enemy's Clubman, heals its own hurt Villager, and has nothing for a whole one or a Barracks", () => {
+    const w = world([
+      { owner: 1, type: PRIEST, x: 10.5, y: 10.5 },
+      { owner: 2, type: CLUBMAN, x: 14.5, y: 10.5 },
+      { owner: 1, type: VILLAGER, x: 10.5, y: 12.5 },
+      { owner: 1, type: VILLAGER, x: 11.5, y: 12.5 },
+      { owner: 1, type: BARRACKS, x: 6.5, y: 6.5 },
+    ]);
+    entity(w, 3).hp = f32(10);
+    const priest = entity(w, 1);
+    expect([2, 3, 4, 5].map((id) => targetActionType(w, priest, entity(w, id)))).toEqual([ACTION_CONVERT, ACTION_HEAL, -1, -1]);
+    // A Clubman has no heal or convert for anything.
+    expect(targetActionType(w, entity(w, 2), priest)).not.toBe(ACTION_CONVERT);
   });
 });

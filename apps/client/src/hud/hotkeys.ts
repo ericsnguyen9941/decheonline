@@ -14,9 +14,12 @@ export const HOTKEY_STRING = {
   ungroup: 0x103a,
   more: 0x103b,
   'stand-ground': 0x103d,
+  'attack-ground': 0x103e,
   viewTownCenter: 0x103f,
   /** `STRING_ID_HOTKEY_SELECT_BUILDING_BASE` + 0..7. */
   selectBuilding: 0x1040,
+  heal: 0x1048,
+  convert: 0x1049,
   move: 0x104a,
   repair: 0x104d,
 } as const;
@@ -47,6 +50,9 @@ export function buttonLetter(provider: AssetProvider, b: CommandButton, world: W
     case 'more':
     case 'stand-ground':
     case 'repair':
+    case 'attack-ground':
+    case 'heal':
+    case 'convert':
       return hotkeyLetter(provider, HOTKEY_STRING[b.kind]);
     case 'place':
     case 'train':
