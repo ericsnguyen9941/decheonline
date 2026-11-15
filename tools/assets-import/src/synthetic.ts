@@ -2,7 +2,7 @@
 // Microsoft files. Everything here is invented, so it can live in git as code.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildSyntheticDat, writeDat } from '@aoe/data';
+import { buildSyntheticDat, syntheticUnit, UnitType, writeDat } from '@aoe/data';
 import { buildDrs, buildPe, buildSlp, syntheticPalette } from '@aoe/formats/fixtures';
 import { buildBmp8, buildTileEdgeFile, EDGE_COUNT, MINIMAP_BMP_ID } from './map-art';
 import type { TileSpan } from './manifest';
@@ -30,8 +30,21 @@ export const SYNTHETIC = {
   interfaceSlp: 50730,
   /** Overridden by data2/Interfac.drs with a single frame. */
   overriddenInterfaceSlp: 50741,
-  /** language.dll's strings; languagex.dll replaces `overriddenString`. */
-  strings: { 10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age' },
+  /** The Villager's id in the real dat: the synthetic dat has a unit of it, with `hotKeyId` `villagerHotkeyId`. */
+  villager: 83,
+  villagerHotkeyId: 16132,
+  /** `groupnum.shp` (the digits over a selected object of group 1-9): 11 frames of 4x4. */
+  groupNumberSlp: 50403,
+  /**
+   * language.dll's strings; languagex.dll replaces `overriddenString`. 4151-4170 are the hotkeys (`STRING_ID_HOTKEY_*`,
+   * the real letters), 16132 the Villager's.
+   */
+  strings: {
+    10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
+    4151: 'B', 4152: 'S', 4153: 'G', 4154: 'U', 4155: 'X', 4157: 'D', 4158: 'T', 4159: 'H',
+    4160: 'N', 4161: 'B', 4162: 'D', 4163: 'A', 4164: 'K', 4165: 'L', 4166: 'P', 4167: 'Y',
+    4170: 'M', 16132: 'C', 3040: 'Click an area to move there.',
+  } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */
   minimap: { width: 220, height: 114 },
@@ -112,6 +125,7 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
     { type: 'bina', id: MINIMAP_BMP_ID, data: syntheticMapBmp() },
     { type: 'slp', id: SYNTHETIC.interfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
     { type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
+    { type: 'slp', id: SYNTHETIC.groupNumberSlp, data: buildSlp(Array.from({ length: 11 }, () => ({ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }))) },
     ...SYNTHETIC.wavs.interface.map((id) => ({ type: 'wav', id, data: buildWav() })),
   ]);
   // data2's copy of the overridden wav is longer, so the pack shows which one it kept.
@@ -134,5 +148,19 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'languagex.dll'), buildPe({ [SYNTHETIC.overriddenString[0]]: SYNTHETIC.overriddenString[1] }));
   const dat = buildSyntheticDat();
   dat.terrainBlock.terrains[0]!.terrainDimensions = [1, 2];
+  for (const civ of dat.civs) {
+    // The trailing null stays last; the Villager sits at its real id.
+    const villager = Object.assign(syntheticUnit(UnitType.Creatable, SYNTHETIC.villager, 'Man'), {
+      // The rest is what the client assumes for a Villager without a record, so the pack changes nothing but its hotkey.
+      hotKeyId: SYNTHETIC.villagerHotkeyId,
+      iconId: -1,
+      interactionMode: 4,
+      interfaceKind: 3,
+      minimapMode: 2,
+      outlineSize: [Math.fround(0.2), Math.fround(0.2), Math.fround(1.7)],
+    });
+    civ.units = [...Array.from({ length: SYNTHETIC.villager }, (_, i) => civ.units[i] ?? null), villager, null];
+    civ.unitPointers = civ.units.map((u, i) => (u ? 0x1000 + i : 0));
+  }
   await writeFile(join(dir, 'data2', 'empires.dat'), writeDat(dat));
 }

@@ -1,7 +1,8 @@
-import { buildingFacet, checkObjCost, checkTechCost, master, TECHS, type Command, type Entity, type World } from '@aoe/sim';
+import { BUILDER, buildingFacet, checkObjCost, checkTechCost, master, TECHS, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import { paintFrame } from './frame-image';
-import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, type CommandButton, type CommandMode } from './commands';
+import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, itemsMadeAt, type CommandButton, type CommandMode } from './commands';
+import { buttonLetter, pressedLetter, unitLetter } from './hotkeys';
 import { SLP } from './layout';
 import { infoOf } from './records';
 import { commandMessage, objectName, shortMessage, techName } from './text';
@@ -99,10 +100,20 @@ export class CommandPanel {
       on('contextmenu', (e) => e.preventDefault());
     });
     const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       if (e.key === 'Escape' && this.buttons[FINAL_SLOT]) {
         this.o.onButton?.();
         this.press(FINAL_SLOT, false);
+        return;
       }
+      // `TButtonPanel::handle_key_down`: a held button's key, with no Alt or Ctrl (Shift is ignored), once per press.
+      const letter = pressedLetter(e);
+      if (letter === null || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
+      const b = this.keyed(letter);
+      if (!b) return;
+      this.o.onButton?.();
+      this.run(b, false);
     };
     window.addEventListener('keydown', onKey);
     this.cleanup.push(() => window.removeEventListener('keydown', onKey));
@@ -226,11 +237,29 @@ export class CommandPanel {
     return b.kind === 'research' ? techName(provider, b.tech) : commandMessage(provider, b, world, player);
   }
 
-  /** `do_button_action`. */
+  /**
+   * The button a letter presses. In the build menu `key_down_action` (scr_game.cpp:1586) runs through every building of the
+   * list, the other page's too, before the buttons; otherwise the first button in slot order whose key it is (a disabled
+   * one takes no key).
+   */
+  private keyed(letter: string): CommandButton | undefined {
+    const { world, player, provider } = this.o;
+    if (this.mode === 'build-menu') {
+      const unit = itemsMadeAt(world, player, BUILDER).find((u) => unitLetter(provider, world, player, u) === letter);
+      if (unit !== undefined) return { kind: 'place', slot: -1, unit };
+    }
+    return this.buttons.find((b) => b && !(b.kind === 'research' && b.disabled) && buttonLetter(provider, b, world, player) === letter);
+  }
+
   private press(slot: number, right: boolean): void {
     const b = this.buttons[slot];
+    if (b) this.run(b, right);
+  }
+
+  /** `do_button_action`. */
+  private run(b: CommandButton, right: boolean): void {
     const object = this.object;
-    if (!b || !object) return;
+    if (!object) return;
     const { world, player, issue } = this.o;
     switch (b.kind) {
       case 'build':
@@ -295,7 +324,12 @@ export class CommandPanel {
       else if ((a[c.type] ?? 0) < c.amount) short = c.type;
       if (short >= 0) break;
     }
-    this.o.message.textContent = shortMessage(this.o.provider, short);
+    this.say(shortMessage(this.o.provider, short));
+  }
+
+  /** `TMessagePanel::show_message`: `text` on the message line for a few seconds. */
+  say(text: string): void {
+    this.o.message.textContent = text;
     this.o.message.hidden = false;
     delete this.o.message.dataset.hover;
     clearTimeout(this.messageTimer);

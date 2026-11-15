@@ -33,6 +33,10 @@ export interface NetDebug {
   issueMove(units: number[], x: number, y: number): void;
   /** Ids the selection holds; null before the map is drawn. */
   selection(): number[] | null;
+  /** `selected_obj`, the object the panel shows; null for none. */
+  primary(): number | null;
+  /** The group numbers drawn over selected own objects now (frame 1-9 of groupnum.shp). */
+  groupNumbers(): { id: number; group: number }[];
   /** Canvas pixel where unit `id` stands, as drawn now; null before the map is drawn. */
   unitScreenPos(id: number): { x: number; y: number } | null;
   /** Objects drawn with pack sprites (not debug shapes). */
@@ -257,6 +261,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         stepMs: () => game.stepMs(),
         onPlacement: (unit) => hud?.commands.placementChanged(unit),
         onRollover: (text) => hud?.rollover(text),
+        inBuildMenu: () => hud?.commands.gameMode === 'build-menu',
+        onMessage: (id) => hud?.say(id),
         sounds: gameSounds,
       });
       units = layer;
@@ -341,6 +347,8 @@ function debugPanel(
       const l = layer();
       return l ? [...l.selected] : null;
     },
+    primary: () => layer()?.primary ?? null,
+    groupNumbers: () => layer()?.groupNumbers ?? [],
     unitScreenPos: (id) => layer()?.screenPos(id) ?? null,
     packSprites: () => layer()?.packSprites ?? 0,
     shownObjects: () => layer()?.shownObjects ?? 0,

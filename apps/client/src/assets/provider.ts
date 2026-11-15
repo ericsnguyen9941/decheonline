@@ -70,6 +70,8 @@ export interface UnitInfo {
   nameId: number;
   /** `string_id2`: the train or build button's text. */
   creationId: number;
+  /** `hotkey_id`: the string id of the key that trains or builds it; 0 or less, none. */
+  hotkeyId: number;
   /** `unit_level` (the dat's interface kind): 2 building, 3 villager, 4 soldier, ... */
   level: number;
   /** `orig_weapon`, `orig_armor`, `orig_pierce_armor`, `orig_weapon_range`: the object panel's base values. */

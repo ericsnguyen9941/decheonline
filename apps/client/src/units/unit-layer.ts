@@ -1,10 +1,11 @@
-import { Graphics, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
+import { Assets, Container, Graphics, Rectangle, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
 import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, TILE_FOGGED, TILE_VISIBLE, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, FramePart, GraphicInfo, SpriteFrame } from '../assets';
 import type { GameSounds } from '../audio/game-sounds';
 import { canBuild } from '../hud/commands';
 import { frameCursor } from '../hud/frame-image';
+import { HOTKEY_STRING, hotkeyLetter, pressedLetter } from '../hud/hotkeys';
 import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
 import { attackRollover } from '../hud/text';
 import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
@@ -12,7 +13,9 @@ import type { MapView } from '../map/map-view';
 import { composeGraphic, GROUND_LAYER, splitsShadow, type PartSet } from './composite';
 import { facingFrame } from './facing';
 import { Doppelgangers, fogDraw, type Doppelganger } from './fog-objects';
+import { FIRST_GROUP, GroupIds } from './group-ids';
 import { groupKey } from './group-keys';
+import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
 import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
 import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
 import { alignBuilding } from './placement';
@@ -28,10 +31,10 @@ const BAR_EMPTY = 0xff0101;
 const FLASH_MS = 1500;
 /** `update_display_selected_objects`: the flash is on while bit 8 of the elapsed milliseconds is clear. */
 const FLASH_BIT = 0x100;
+/** `STRING_ID_MESSAGE_MOVE`: shown when the Move key arms the next click. */
+const MESSAGE_MOVE = 0x0be0;
 /** `sel_list` holds 25 objects (`select_one_object`). */
 const MAX_SELECTED = 25;
-/** `select_object` brings in the rest of a group from this id up (the Group button's groups; 1-10 are hotkey groups). */
-const FIRST_GROUP = 11;
 /** `select_level`s: a left click picks from 2 up, a selection box picks 4 (`pick_multi(4, ...)`). */
 const SELECT_CLICK = 2;
 const SELECT_BUILDING = 3;
@@ -129,6 +132,10 @@ export interface UnitLayerOptions {
   onRollover?: (text: string | null) => void;
   /** Selection and sprite sounds; none without. */
   sounds?: GameSounds;
+  /** Is the grid showing the build menu? The Move and Ungroup keys do nothing there (`scr_game.cpp:1757`). */
+  inBuildMenu?: () => boolean;
+  /** A message for the message line (a language string id, `show_message`): the Move key's. */
+  onMessage?: (stringId: number) => void;
 }
 
 /** The building following the pointer while placing: the aligned map point and whether it fits there. */
@@ -165,7 +172,14 @@ export class UnitLayer {
   private primaryId: number | null = null;
   /** `selected_group` of own objects put in a group, by id; the client's own, as in the original. */
   private readonly groups = new Map<number, number>();
-  private nextGroup = FIRST_GROUP;
+  /** `groups_used`: the ids the Group button has given out. */
+  private readonly groupIds = new GroupIds();
+  /** `RGE_GAME_MODE_COMMAND_MOVE`: the next left click on the map moves the selection there. */
+  private commandMove = false;
+  /** The digits of groupnum.shp (frame = group number 1-9), once loaded, and the sprites over the selected objects. */
+  private readonly groupDigits: (Texture | null)[] = [];
+  private readonly groupMarks = new Container();
+  private readonly groupSprites = new Map<number, Sprite>();
   /** Ordered targets flashing (`DispSel_List`, select type 2): when each started. */
   private readonly flashes = new Map<number, number>();
   /** The canvas point of the last click that selected something, to pick the next object under it on a second click. */
@@ -210,6 +224,9 @@ export class UnitLayer {
     o.view.layer.addChild(this.outlines);
     this.highlight.zIndex = Number.MAX_SAFE_INTEGER;
     o.view.layer.addChild(this.highlight);
+    this.groupMarks.zIndex = Number.MAX_SAFE_INTEGER;
+    o.view.layer.addChild(this.groupMarks);
+    this.loadGroupDigits();
     this.ghostSprite.zIndex = Number.MAX_SAFE_INTEGER - 1;
     this.ghostSprite.visible = false;
     o.view.layer.addChild(this.ghostSprite);
@@ -220,6 +237,24 @@ export class UnitLayer {
     this.draw();
     const sword = o.provider.interfaceFrame(SLP.cursors, ATTACK_CURSOR_FRAME);
     if (sword) void frameCursor(sword, 'crosshair').then((c) => (this.attackCursor = c)).catch(() => undefined);
+  }
+
+  /** Loads groupnum.shp's frames 1-9 from the pack (`get_shape(0)`); without them no number is drawn. */
+  private loadGroupDigits(): void {
+    for (let n = 1; n <= 9; n++) {
+      const frame = this.o.provider.interfaceFrame(SLP.groupNumbers, n);
+      if (!frame) continue;
+      void Assets.load<Texture>(frame.url)
+        .then((atlas) => {
+          this.groupDigits[n] = new Texture({ source: atlas.source, frame: new Rectangle(frame.x, frame.y, frame.w, frame.h) });
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  /** The group numbers drawn over selected own objects now: object id and group (1-9), for the tests. */
+  get groupNumbers(): { id: number; group: number }[] {
+    return [...this.groupSprites].flatMap(([id, sprite]) => (sprite.visible ? [{ id, group: this.groups.get(id)! }] : []));
   }
 
   /** `selected_obj`: the last object selected, or after it left the selection the first one left; null for none. */
@@ -233,6 +268,21 @@ export class UnitLayer {
   unselect(): void {
     this.selected.clear();
     this.primaryId = null;
+    this.commandMove = false;
+  }
+
+  /**
+   * `unselect_one_object`: the last object of `sel_list` takes the leaver's slot, so the order of the rest changes (Tab
+   * walks it); `selected_obj` goes to the first one when it was the leaver.
+   */
+  private deselect(id: number): void {
+    if (!this.selected.has(id)) return;
+    const order = [...this.selected];
+    const at = order.indexOf(id);
+    if (at < order.length - 1) order[at] = order[order.length - 1]!;
+    order.pop();
+    this.selected.clear();
+    for (const o of order) this.selected.add(o);
   }
 
   /** Is object `id` in a group? */
@@ -242,7 +292,9 @@ export class UnitLayer {
 
   /** `group_objects(-1)`: the selected own objects form a new group, which a click on any of them selects whole. */
   group(): void {
-    const group = this.nextGroup++;
+    if (this.selected.size === 0) return;
+    const group = this.groupIds.next(this.groups.values());
+    if (group === null) return;
     for (const id of this.selected) if (this.o.world.entities.get(id)?.owner === this.o.player) this.groups.set(id, group);
   }
 
@@ -401,7 +453,7 @@ export class UnitLayer {
       alive.add(e.id);
       // `die_die_die` and `destroy_obj` unselect the object: a dying one leaves the selection and its group.
       if (e.state >= ObjectState.Dying) {
-        this.selected.delete(e.id);
+        this.deselect(e.id);
         this.groups.delete(e.id);
       }
       let t = this.tracks.get(e.id);
@@ -481,7 +533,7 @@ export class UnitLayer {
       t.sprite.destroy();
       t.shadow?.destroy();
       this.tracks.delete(id);
-      this.selected.delete(id);
+      this.deselect(id);
       this.groups.delete(id);
       this.flashes.delete(id);
     }
@@ -651,6 +703,7 @@ export class UnitLayer {
   private drawHighlight(): void {
     const g = this.highlight.clear();
     const lines = this.outlines.clear();
+    for (const sprite of this.groupSprites.values()) sprite.visible = false;
     const { world, provider } = this.o;
     const now = performance.now();
     const flashing = new Set<number>();
@@ -670,6 +723,7 @@ export class UnitLayer {
       const corners = [outlinePoint(o, rx, -ry, 0), outlinePoint(o, rx, ry, 0), outlinePoint(o, -rx, ry, 0), outlinePoint(o, -rx, -ry, 0)];
       lines.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: flashing.has(id) ? BAR_FILLED : SELECTION_COLOUR });
       if (!this.selected.has(id)) continue;
+      this.drawGroupNumber(id, e, corners[3]!);
       const hp = Math.floor(e.hp);
       if (type.hitPoints <= 0 || hp <= 0) continue;
       const bar = outlinePoint(o, rx, -ry, rz);
@@ -679,6 +733,28 @@ export class UnitLayer {
       g.rect(left, top, BAR_WIDTH, 2).fill(BAR_EMPTY);
       g.rect(left, top, filled, 2).fill(BAR_FILLED);
     }
+  }
+
+  /**
+   * The number of a selected own object's group 1-9, drawn over the diamond (`RGE_Static_Object::draw`,
+   * src/stat_obj.cpp:707): frame `selected_group` of groupnum.shp at the diamond's fourth corner, 6 px left and 8 up, at
+   * draw level 30.
+   */
+  private drawGroupNumber(id: number, e: Entity, corner: { x: number; y: number }): void {
+    const group = this.groups.get(id);
+    if (group === undefined || group < 1 || group > 9 || e.owner !== this.o.player) return;
+    const texture = this.groupDigits[group];
+    const frame = this.o.provider.interfaceFrame(SLP.groupNumbers, group);
+    if (!texture || !frame) return;
+    let sprite = this.groupSprites.get(id);
+    if (!sprite) {
+      sprite = new Sprite();
+      this.groupMarks.addChild(sprite);
+      this.groupSprites.set(id, sprite);
+    }
+    sprite.texture = texture;
+    sprite.position.set(corner.x - 6 - frame.hotspotX, corner.y - 8 - frame.hotspotY);
+    sprite.visible = true;
   }
 
   private listen(canvas: HTMLCanvasElement): void {
@@ -706,6 +782,7 @@ export class UnitLayer {
         } else if (e.button === 2) this.cancelPlacement();
         return;
       }
+      if (this.commandMove && e.button === 0) return this.moveTo(p.x, p.y);
       if (e.button === 0) this.press = { ...p, boxing: false };
       else if (e.button === 2) this.orderAt(p.x, p.y);
     });
@@ -728,10 +805,20 @@ export class UnitLayer {
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       const k = groupKey(e);
-      if (!k) return;
+      if (k) {
+        e.preventDefault();
+        if (k.action === 'assign') this.assignGroup(k.id);
+        else this.recallGroup(k.id, k.add, k.centre);
+        return;
+      }
+      if (e.repeat) return;
+      const s = selectKey(e, pressedLetter(e), this.selectLetters(), this.o.inBuildMenu?.() ?? false);
+      if (!s) return;
       e.preventDefault();
-      if (k.action === 'assign') this.assignGroup(k.id);
-      else this.recallGroup(k.id, k.add, k.centre);
+      if (s.kind === 'building') this.selectBuilding(s.master);
+      else if (s.kind === 'tab') this.tab(s.forward);
+      else if (s.kind === 'ungroup') this.ungroup();
+      else this.armMove();
     };
     window.addEventListener('keydown', onKey);
     this.cleanup.push(() => window.removeEventListener('keydown', onKey));
@@ -745,6 +832,66 @@ export class UnitLayer {
       this.press = null;
       this.box.clear();
     });
+  }
+
+  /** The letters of the selection keys, read from the language strings each time like the original reads them at setup. */
+  private selectLetters(): SelectLetters {
+    const { provider } = this.o;
+    return {
+      townCenter: hotkeyLetter(provider, HOTKEY_STRING.viewTownCenter),
+      buildings: SELECT_BUILDING_MASTERS.map((_, i) => hotkeyLetter(provider, HOTKEY_STRING.selectBuilding + i)),
+      ungroup: hotkeyLetter(provider, HOTKEY_STRING.ungroup),
+      move: hotkeyLetter(provider, HOTKEY_STRING.move),
+    };
+  }
+
+  /**
+   * `command_select_building` (scr_game.cpp:4177): selects the player's next finished building of master `unit` (after
+   * the panel's object when that is one, wrapping to the first; `find_obj`, src/tplayer.cpp:627, which takes one still
+   * being built after it) and scrolls the view there. Nothing changes when there is none.
+   */
+  selectBuilding(unit: number): void {
+    const own = [...this.o.world.entities.ofPlayer(this.o.player)];
+    const current = this.primary === null ? undefined : this.o.world.entities.get(this.primary);
+    const after = current?.type === unit ? own.findIndex((e) => e.id === current.id) : -1;
+    const next =
+      (after >= 0 ? own.slice(after + 1).find((e) => e.type === unit && e.state <= ObjectState.Active) : undefined) ??
+      own.find((e) => e.type === unit && e.state === ObjectState.Active);
+    if (!next) return;
+    this.unselect();
+    this.selectObject(next);
+    const p = tileCoordsToPixel(next.x, next.y, this.o.world.map.width);
+    this.o.view.centerOn(p.x, p.y);
+  }
+
+  /** `command_tab_selected`: `selected_obj` steps through the selection. */
+  tab(forward: boolean): void {
+    const to = tabTarget([...this.selected], this.primary, forward);
+    if (to !== null) this.primaryId = to;
+  }
+
+  /**
+   * The Move key (`command_move`, scr_game.cpp:4060): with an own object selected, the next left click orders the
+   * selection there (`command_make_move`), and the message line says so. Esc or unselecting leaves the mode.
+   */
+  private armMove(): void {
+    if (this.selectedOwn().length === 0) return;
+    this.cancelPlacement();
+    this.commandMove = true;
+    this.o.onMessage?.(MESSAGE_MOVE);
+  }
+
+  /** The left click of the Move mode: the selected units walk to the map point (a click off the map only ends the mode). */
+  private moveTo(x: number, y: number): void {
+    this.commandMove = false;
+    const { camera } = this.o.view;
+    const { col, row } = pixelToTileCoords(x + camera.x, y + camera.y, this.o.world.map.width);
+    const { width, height } = this.o.world.map;
+    if (col < 0 || row < 0 || col >= width || row >= height) return;
+    const units = this.selectedOwn().filter((id) => isUnit(this.o.world.entities.get(id)!));
+    if (units.length === 0) return;
+    this.flashes.clear();
+    this.o.issue({ type: 'move', units, x: col, y: row });
   }
 
   /**
@@ -793,7 +940,7 @@ export class UnitLayer {
     if (toggle) {
       if (!hit) return;
       if (this.selected.has(hit.id)) {
-        this.selected.delete(hit.id);
+        this.deselect(hit.id);
         return;
       }
       const primary = this.primary === null ? undefined : this.o.world.entities.get(this.primary);

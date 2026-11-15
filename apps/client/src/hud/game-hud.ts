@@ -216,6 +216,12 @@ export class GameHud {
     this.update();
   }
 
+  /** `show_message` of language string `id` on the message line (nothing when the pack has no such string). */
+  say(id: number): void {
+    const text = this.o.provider.string(id);
+    if (text) this.commands.say(text);
+  }
+
   /**
    * The rollover text of the object under the pointer (`get_mouse_pointer_action_vars`' `text_id` on the view's message
    * panel), or null to take it away. A button's message replaces it while the pointer is on the grid.

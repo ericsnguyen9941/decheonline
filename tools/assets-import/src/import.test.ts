@@ -36,7 +36,7 @@ test('imports interface slps, a data2 Interfac.drs overriding the base one, and 
   const unit = manifest.units[SYNTHETIC.unitId]!;
   expect(unit).toMatchObject({ hitPoints: expect.any(Number), icon: expect.any(Number), button: expect.any(Number) });
   expect(unit.outline).toHaveLength(3);
-  expect(unit).toMatchObject({ nameId: expect.any(Number), creationId: expect.any(Number), level: expect.any(Number) });
+  expect(unit).toMatchObject({ nameId: expect.any(Number), creationId: expect.any(Number), hotkeyId: expect.any(Number), level: expect.any(Number) });
   expect(unit.displayed).toHaveLength(4);
 });
 
@@ -56,6 +56,12 @@ test("imports map.bmp's lines, the tile edges, the minimap colours and each unit
   expect(manifest.playerColours).toEqual([0, 16]);
   expect(manifest.terrains[0]?.minimap).toHaveLength(3);
   expect(manifest.units[SYNTHETIC.unitId]).toMatchObject({ minimap: [1, 0], doppelganger: expect.any(Number) });
+});
+
+test("imports the Villager's hotkey string id and the hotkey strings", () => {
+  expect(manifest.units[SYNTHETIC.villager]).toMatchObject({ hotkeyId: SYNTHETIC.villagerHotkeyId });
+  expect(manifest.strings[SYNTHETIC.villagerHotkeyId]).toBe('C');
+  expect(manifest.slps[slpKey('interface', SYNTHETIC.groupNumberSlp)]?.frames).toHaveLength(11);
 });
 
 test("imports each tech's name and research button ids, icon and button location", () => {

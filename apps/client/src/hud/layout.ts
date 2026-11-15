@@ -30,6 +30,8 @@ export const SLP = {
   itemIcons: 50731,
   /** `health`: 26 frames of the hit point bar, full first. */
   health: 50745,
+  /** `groupnum`: the digits drawn over a selected object of group 1-9 (frame = group number). */
+  groupNumbers: 50403,
   /** `mcursors`: the mouse cursors. */
   cursors: 51000,
 } as const;

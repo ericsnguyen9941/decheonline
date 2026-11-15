@@ -71,7 +71,7 @@ class PackProvider implements AssetProvider {
   unitInfo(unitId: number): UnitInfo | null {
     const u = this.manifest.units[unitId];
     return u
-      ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline, nameId: u.nameId, creationId: u.creationId, level: u.level, displayed: u.displayed, selectLevel: u.selectLevel }
+      ? { icon: u.icon, hitPoints: u.hitPoints, button: u.button, outline: u.outline, nameId: u.nameId, creationId: u.creationId, hotkeyId: u.hotkeyId, level: u.level, displayed: u.displayed, selectLevel: u.selectLevel }
       : null;
   }
 

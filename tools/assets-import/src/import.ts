@@ -236,6 +236,7 @@ function buildManifest(
         outline: [x, y, z],
         nameId: u.languageDllName,
         creationId: u.languageDllCreation,
+        hotkeyId: u.hotKeyId,
         level: u.interfaceKind,
         displayed: u.combat
           ? [u.combat.displayedAttack, u.combat.displayedMeleeArmour, u.creatable?.displayedPierceArmour ?? 0, u.combat.displayedRange]

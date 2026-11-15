@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 9;
+export const PACK_VERSION = 10;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -79,6 +79,8 @@ export interface PackUnit {
   nameId: number;
   /** `string_id2`: the train or build button's text ("Create Villager (C)"). */
   creationId: number;
+  /** `hotkey_id`: the string id of the key that trains or builds it (`PackManifest.strings`; its first letter); 0 or less: none (pack version 10). */
+  hotkeyId: number;
   /** `unit_level` (the dat's interface kind): which rows the object panel shows (2 building, 3 villager, 4 soldier...). */
   level: number;
   /** `orig_weapon`, `orig_armor`, `orig_pierce_armor`, `orig_weapon_range`: the panel's base values; zeros without combat. */

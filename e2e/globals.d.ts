@@ -21,6 +21,8 @@ interface Window {
     units(): { id: number; owner: number; type: number; x: number; y: number; col: number; row: number; facet: number; moving: boolean }[];
     issueMove(units: number[], x: number, y: number): void;
     selection(): number[] | null;
+    primary(): number | null;
+    groupNumbers(): { id: number; group: number }[];
     unitScreenPos(id: number): { x: number; y: number } | null;
     packSprites(): number;
     shownObjects(): number;
