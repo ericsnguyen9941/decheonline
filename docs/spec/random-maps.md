@@ -481,7 +481,10 @@ Leftovers fill only horizontal gaps (the vertical test compares
 All draws are `rand()`; "log" draws only feed a log line but still advance
 the stream. **Every object created** (cliff pieces, terrain decorations,
 placed objects) runs `rand()` then `srand(that value)`
-(`src/stat_obj.cpp:169-179`), which leaves the stream equal to one draw.
+(`src/stat_obj.cpp:169-179`, the draw at line 387 of the original file). That
+is one draw, but the state after it is the 15-bit value, not the 32-bit LCG
+state a plain draw leaves; the sim already does `rng.srand(rng.rand())` for
+object creation (`objects.ts`, `buildings.ts`).
 
 | # | site | when | use |
 | --- | --- | --- | --- |
@@ -676,3 +679,96 @@ Exclusion zones: land rows 59/65/66/102 → 12; avoid rows 65 → 12,
   need retail recordings.
 - Generation is heavy (two full-map passes per terrain and elevation row);
   it runs once at game start, so a straightforward port is fine.
+
+## 12. Port status
+
+### 12.1 Terrain module (`packages/sim/src/rmm-terrain.ts`)
+
+Ported: `generate`, `generate_modifiers` (exported as `hotSpotModifiers`; the
+elevation module's copy is the same computation), `check_terrain`,
+`check_borders`, `link_stack_randomly`, `remove_area_from_lists` and
+`base_terrain_generate` with its seed, fairness (avoid 2), growth and
+horizontal-gap phases. Input: `TerrainInfo` (the rows and hot spots the
+controller builds, §4.2); the controller itself is not ported. Tests:
+`rmm-terrain.test.ts` (hand-built 96×96 layout with the §9.2 land centres and
+the §9.4 rows).
+
+Checked against the decomp:
+
+- The terrain writes (`tile->terrain_type = …` in `base_terrain_generate`
+  and `check_borders`) go to the 5-bit bit-field of `RGE_Tile`
+  (`include/map.h:32`), and both functions are M, so the binary keeps the
+  height bits. The port writes `RmmMap.terrain` only and leaves height alone
+  (test "map 3 rows"). This settles the terrain/height trap for this module;
+  the land module's writes are its own question.
+- These writes bypass `set_terrain`: the terrain module makes no objects.
+- The zone map is grass (0) against every other terrain (table `t ↦ t`, 99
+  entries, `> 0` passable), built once per `generate` before the rows.
+- Growth skips the pop entirely once the row has its size; the modifier draw
+  happens only for avoid ≠ 0 and before the tile's terrain test; neighbours
+  are pushed left, right, up, down (seeds: left, up, right, down).
+- The gap fill drains only the first `clumps` lists (fairness clumps past
+  that index keep their leftovers).
+
+Unverified: `check_terrain` is N; the port follows the decomp's reading.
+A row with `clumps` 0 would divide by zero for `base_area`; it never seeds,
+so the value is unused.
+
+### 12.2 Object module (`packages/sim/src/rmm-objects.ts`)
+
+Ported: `generate` (terrain objects through `RmmMap.setTerrainArea` with
+set-flag 0, `clear_stack`, rows in order, `delete_zone_maps`),
+`generate_objects` (scale flag written back to the row), `add_quick_obj`,
+`make_placement_stack`, `place_land_objects`, `place_objects`,
+`place_avoid_objects`, `place_group`, `place_cluster`, `set_search_area`,
+`remove_area_from_lists`; and the relic/ruin block of
+`TRIBE_World::new_game` for a random game (`placeRelicsAndRuins`). Input:
+`ObjectInfo` (rows and land points); `objectRowFromDat` turns a dat row into a
+row as `RGE add_object_module` copies it (exclusion 1). The TRIBE controller's
+changes (§4.3: nomad, lake, islands, exclusion zones) and the land-point
+player numbering are controller work, not ported. Tests:
+`rmm-objects.test.ts` (hand-built 96×96 layout: grass, a water channel with
+deep water and beaches, a forest patch; lands (20, 48) and (76, 48); map 3's
+dat rows with the §4.3 exclusion zones applied by hand).
+
+Checked against the decomp:
+
+- Every placement loop pops before testing the count, so one extra node is
+  popped when the count reaches 0 (`while (pop && count > 0)`).
+- Positions: tile corner plus 0.5 on each axis whose radius has a fraction.
+  `check_placement` flags: flat on, construction radius on, objects on;
+  "can be built on" only for land rows. Clusters snap with `alignment`.
+- Land rows: the start must be in the land centre's zone for the object's
+  terrain restriction, outside the open inner square, and the search map is
+  0 within `inner` of every land centre (so with inner 0 only the centre
+  tile is excluded). A town centre (outer 1) has no random moves (`w`, `h`
+  are 1), so it lands on the first fitting tile in row order: on open ground
+  `(cx − 0.5, cy − 0.5)` (test vector). A single object that fails on the
+  last candidate is still placed there (test vector).
+- A group's and a cluster's lists take their tiles out of the row's list
+  (one list per node), and a cluster sets its square searchable first.
+- The player for a negative row player is Gaia (anywhere rows) or the land's
+  player (land rows, Gaia when it is 0).
+- Map type 3's rows include lion 126 (avoid row, inner 18, 7 groups per
+  144², group 1 ± 2) and alligator 1 on shallows (4) and beach (2).
+- Terrain-object lists: the "old terrain" lookup in `create_terrain_object`
+  reads one slot past the list. In the captain's dat every unused slot is 0
+  (terrains 0, 1, 2, 4, 6, 10, 13, 19, 20, 22 checked with `dat:dump`), so
+  the extra slot only matches objects of type 0, which the generator never
+  places; `RmmMap` treating it as not found gives the same result.
+
+Unverified or inferred:
+
+- `place_avoid_objects` is N and `place_objects`/`place_cluster` are L; the
+  port follows the decomp's reading. `place_objects` reads the master without
+  a null check (the original would crash); the port throws.
+- `place_land_objects` without a master returns without releasing its list;
+  the port does the same, which only matters if a later list reuses the
+  original's stack address (never with the dat's rows).
+- Relics and ruins: the scenario's wanted artifacts, discoveries and ruins
+  are the victory amounts `TRIBE_World::new_game` sets for a random game
+  (`src/tworld.cpp:576-611`); the caller passes them and the count of objects
+  already owned. The campaign/scenario branch is not ported.
+- The area `set_terrain` per-tile shape check (`src/map.cpp:2230`) is still
+  taken as always passing (`RmmMap`); the object module's terrain-object pass
+  goes through it.
