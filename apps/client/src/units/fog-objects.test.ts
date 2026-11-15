@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { ObjectState, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, type Entity, type World } from '@aoe/sim';
 import { Doppelgangers, fogDraw } from './fog-objects';
 
-test('fog_flag picks what a fogged tile shows; a visible tile shows all, an unexplored one only low layers', () => {
+test('fog_flag picks what a fogged tile shows; a visible tile shows all; an unexplored one nothing above draw level 5', () => {
   const { Active, Dying } = ObjectState;
   expect(fogDraw(0, Active, TILE_VISIBLE, 20, false)).toBe('plain');
   expect(fogDraw(0, Active, TILE_FOGGED, 20, false)).toBe('hidden');
@@ -12,7 +12,17 @@ test('fog_flag picks what a fogged tile shows; a visible tile shows all, an unex
   expect(fogDraw(4, Active, TILE_FOGGED, 20, true)).toBe('hidden');
   expect(fogDraw(4, Active, TILE_FOGGED, 20, false)).toBe('fogged');
   expect(fogDraw(1, Active, TILE_BLACK, 20, false)).toBe('hidden');
-  expect(fogDraw(0, Active, TILE_BLACK, 5, false)).toBe('fogged');
+  expect(fogDraw(1, Active, TILE_BLACK, 6, false)).toBe('hidden');
+});
+
+test('draw levels 0-5 are clipped to the terrain: never drawn over unexplored terrain, fog_flag still read on a fogged tile', () => {
+  const { Active } = ObjectState;
+  // Under the fog overlay, which is all black on an unexplored tile and dotted on a fogged one.
+  expect(fogDraw(0, Active, TILE_BLACK, 0, false)).toBe('terrain');
+  expect(fogDraw(1, Active, TILE_BLACK, 5, false)).toBe('terrain');
+  expect(fogDraw(1, Active, TILE_FOGGED, 0, false)).toBe('terrain');
+  expect(fogDraw(0, Active, TILE_FOGGED, 0, false)).toBe('hidden');
+  expect(fogDraw(0, Active, TILE_VISIBLE, 0, false)).toBe('terrain');
 });
 
 const TREE = 134;

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { EDGE_NUMBER, edgeNumber, FOG_W, fogPixels, PLAIN_EDGES, TILE_FOGGED, TILE_VISIBLE } from './fog';
+import { EDGE_NUMBER, edgeNumber, FOG_W, fogPixels, PLAIN_EDGES, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE } from './fog';
 
 test('the 256 neighbour masks map to the 47 edges of the tile edge files', () => {
   expect(new Set(EDGE_NUMBER).size).toBe(47);
@@ -36,4 +36,12 @@ test('black edge spans are left black over the fog and the plain part', () => {
   expect([...visible.slice(16 * FOG_W, 16 * FOG_W + 6)]).toEqual([255, 255, 255, 255, 0, 0]);
   const fogged = fogPixels(edges, TILE_FOGGED, 0, 1, 0)!;
   expect([...fogged.slice(16 * FOG_W, 16 * FOG_W + 6)]).toEqual([255, 255, 255, 255, 0, 255]);
+});
+
+test('an unexplored tile is black over its whole diamond, so the low objects under the overlay do not show there', () => {
+  const black = fogPixels(PLAIN_EDGES, TILE_BLACK, 0, 0, 0)!;
+  expect([...black.slice(16 * FOG_W, 16 * FOG_W + 4)]).toEqual([255, 255, 255, 255]);
+  expect(black[32]).toBe(255);
+  // Outside the diamond (top-left corner) the neighbours' terrain is left alone.
+  expect(black[0]).toBe(0);
 });

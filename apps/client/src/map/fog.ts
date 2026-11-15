@@ -65,12 +65,16 @@ export const PLAIN_EDGES: PackTileEdges = (() => {
  * either leaves its `black_UNdraw` (by the edge of its unexplored neighbours) undrawn, so black. Fogged pixels are the
  * black dots of the shadowing mask (0x00FF00FF / 0xFF00FF00 on alternate rows, `ASMSet_Shadowing`, src/drawarea.cpp:67):
  * a pixel is black where `x + y + parity` is odd, x and y from the tile box's top left.
+ * An unexplored tile is all black (its terrain is not drawn, so the objects of draw level 5 or lower under the overlay
+ * do not show there either: `RGE_View::draw` clips them to the terrain, src/view.cpp:2335-2377). Its edge-0 diamond
+ * only overlaps a neighbour's pixels that the neighbour's own `black_UNdraw` already leaves black.
  * Returns the alpha of black over each pixel of the 65x33 box (row major), or null when the tile has no fog.
  */
 export function fogPixels(edges: PackTileEdges, state: number, visibleEdge: number, exploredEdge: number, parity: number): Uint8Array | null {
-  const fog = state === TILE_VISIBLE ? edges.fog[visibleEdge]! : edges.normal[0]!;
+  const unexplored = state === TILE_BLACK;
+  const fog = unexplored ? [] : state === TILE_VISIBLE ? edges.fog[visibleEdge]! : edges.normal[0]!;
   const normal = state === TILE_VISIBLE ? edges.normal[visibleEdge]! : [];
-  const black = exploredEdge > 0 ? edges.black[exploredEdge]! : [];
+  const black = unexplored ? edges.normal[0]! : exploredEdge > 0 ? edges.black[exploredEdge]! : [];
   if (fog.length === 0 && black.length === 0) return null;
   const out = new Uint8Array(FOG_W * FOG_H);
   const each = (spans: TileSpan[], fn: (i: number, x: number, y: number) => void) => {

@@ -2,31 +2,45 @@
 // trees, mines and bushes a player last saw. docs/spec/hud.md "Fog of war".
 import { ObjectState, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, type World } from '@aoe/sim';
 
-/** How an object is drawn: not at all, as it is, or with every other pixel black (`fog_next_shape` 1). */
-export type FogDraw = 'hidden' | 'plain' | 'fogged';
+/**
+ * How an object (or the parts of its graphic at one draw level) is drawn: not at all, as it is, with every other pixel
+ * black (`fog_next_shape` 1), or clipped to the terrain (`terrain`): plain under the fog overlay, so it shows plain on
+ * visible terrain, fogged on fogged terrain and not at all on unexplored terrain.
+ */
+export type FogDraw = 'hidden' | 'plain' | 'fogged' | 'terrain';
 
-/** `SetCaptureLevel(0, 5)`: on an unexplored tile only the graphics drawn at `draw_level` 5 or lower are kept. */
-const BLACK_TILE_LAYER = 5;
+/**
+ * The draw levels `RGE_View::draw` draws through the terrain's clip masks (src/view.cpp:2335-2377, levels 0 to 5): each
+ * part plain where the terrain is drawn plain, fogged where it is drawn fogged, and nowhere on unexplored terrain.
+ */
+export const TERRAIN_LAYER = 5;
 
 /**
  * `RGE_Object_List::draw` (src/obj_list.cpp:117) as `view_function_terrain` calls it per tile (src/view.cpp:2170-2185):
- * on a visible tile every object draws plain; elsewhere fogged, and on a fogged tile by its master's `fog_flag`: 0 not
- * drawn (units, buildings), 1 drawn (mines, bushes, animals, corpses), 2 drawn until it dies (trees), 4 not drawn where a
- * doppelganger stands on the tile (stumps). On an unexplored tile the fog flag is not read, but only low layers draw.
+ * on a fogged tile by its master's `fog_flag`: 0 not drawn (units, buildings), 1 drawn (mines, bushes, animals,
+ * corpses), 2 drawn until it dies (trees), 4 not drawn where a doppelganger stands on the tile (stumps). On an unexplored
+ * tile the fog flag is not read, but only draw levels up to 5 are queued (`SetCaptureLevel(0, 5)`), and those are
+ * clipped to the terrain, so only their pixels over explored terrain show. Levels above 5 draw plain on a visible tile
+ * and fogged on a fogged one.
  */
 export function fogDraw(fogFlag: number, state: number, tile: number, layer: number, doppelgangerOnTile: boolean): FogDraw {
+  if (tile === TILE_FOGGED && hiddenInFog(fogFlag, state, doppelgangerOnTile)) return 'hidden';
+  if (layer <= TERRAIN_LAYER) return 'terrain';
   if (tile === TILE_VISIBLE) return 'plain';
-  if (tile === TILE_BLACK) return layer <= BLACK_TILE_LAYER ? 'fogged' : 'hidden';
+  return tile === TILE_BLACK ? 'hidden' : 'fogged';
+}
+
+function hiddenInFog(fogFlag: number, state: number, doppelgangerOnTile: boolean): boolean {
   switch (fogFlag) {
     case 0:
     case 3:
-      return 'hidden';
+      return true;
     case 2:
-      return state > ObjectState.Active ? 'hidden' : 'fogged';
+      return state > ObjectState.Active;
     case 4:
-      return doppelgangerOnTile ? 'hidden' : 'fogged';
+      return doppelgangerOnTile;
     default:
-      return 'fogged';
+      return false;
   }
 }
 

@@ -8,11 +8,11 @@ import { frameCursor } from '../hud/frame-image';
 import { HOTKEY_STRING, hotkeyLetter, pressedLetter } from '../hud/hotkeys';
 import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
 import { attackRollover } from '../hud/text';
-import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
+import { mapPixelSize, pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
-import { composeGraphic, GROUND_LAYER, splitsShadow, type PartSet } from './composite';
+import { composeGraphic, GROUND_LAYER, splitsShadow, splitsTerrain, type PartSet } from './composite';
 import { facingFrame } from './facing';
-import { Doppelgangers, fogDraw, type Doppelganger } from './fog-objects';
+import { Doppelgangers, fogDraw, TERRAIN_LAYER, type Doppelganger } from './fog-objects';
 import { FIRST_GROUP, GroupIds } from './group-ids';
 import { groupKey } from './group-keys';
 import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
@@ -73,6 +73,8 @@ interface Track {
   pack: boolean;
   /** The parts of a flying object's graphic drawn on the ground under it (its shadow), when it has any. */
   shadow: Sprite | null;
+  /** The parts of the graphic clipped to the terrain (`draw_level` 5 or less) when it has others too: a tree's shadow. */
+  under: Sprite | null;
   /** The frame drawn and its graphic's `draw_level`, for picking. */
   frame: SpriteFrame | null;
   layer: number;
@@ -202,6 +204,8 @@ export class UnitLayer {
   /** The player's remembered trees, mines and bushes, and their sprites. */
   readonly doppelgangers: Doppelgangers;
   private readonly copySprites = new Map<number, Sprite>();
+  /** The copies' parts clipped to the terrain, for a copy whose graphic has others too. */
+  private readonly copyUnder = new Map<number, Sprite>();
   /** Each texture with every other pixel black, by the parity of its top-left screen pixel. */
   private readonly foggedTextures = new WeakMap<Texture, (Texture | null | undefined)[]>();
   private press: { x: number; y: number; boxing: boolean } | null = null;
@@ -421,8 +425,13 @@ export class UnitLayer {
     this.o.app.ticker.remove(this.tick);
     this.o.app.canvas.style.cursor = '';
     for (const fn of this.cleanup) fn();
-    for (const t of this.tracks.values()) t.sprite.destroy();
+    for (const t of this.tracks.values()) {
+      t.sprite.destroy();
+      t.shadow?.destroy();
+      t.under?.destroy();
+    }
     for (const s of this.copySprites.values()) s.destroy();
+    for (const s of this.copyUnder.values()) s.destroy();
     this.outlines.destroy();
     this.highlight.destroy();
     this.ghostSprite.destroy();
@@ -473,7 +482,7 @@ export class UnitLayer {
       }
       let t = this.tracks.get(e.id);
       if (!t) {
-        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, frame: null, layer: DEFAULT_LAYER };
+        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, under: null, frame: null, layer: DEFAULT_LAYER };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
       } else if (newStep) {
@@ -499,19 +508,27 @@ export class UnitLayer {
       let lift = Math.round(e.z * Z_PIXELS);
       if (graphicInfo && graphicInfo.deltas.length === 0 && graphicInfo.layer <= GROUND_LAYER) lift = 0;
       const split = lift !== 0 && graphicInfo !== null && splitsShadow(this.o.provider, graphicInfo);
+      // A tree's shadow part goes through the terrain's clip masks, the tree itself over them (src/view.cpp:2335-2377).
+      const clipped = !split && graphicInfo !== null && splitsTerrain(this.o.provider, graphicInfo);
       const tile = this.tileState(e.x, e.y);
-      const fog = fogDraw(type.fogFlag, e.state, tile, graphicInfo?.layer ?? DEFAULT_LAYER, type.fogFlag === 4 && this.doppelgangers.onTile(Math.floor(e.x), Math.floor(e.y)));
+      const layer = graphicInfo?.layer ?? DEFAULT_LAYER;
+      const doppelganger = type.fogFlag === 4 && this.doppelgangers.onTile(Math.floor(e.x), Math.floor(e.y));
+      const fog = fogDraw(type.fogFlag, e.state, tile, clipped ? Math.max(layer, TERRAIN_LAYER + 1) : layer, doppelganger);
+      const underFog = clipped ? fogDraw(type.fogFlag, e.state, tile, 0, doppelganger) : 'hidden';
       if (fog !== 'hidden') this.shown++;
-      const art = fog === 'hidden' ? null : this.loadArt(graphic, e.owner, split ? 'air' : 'all');
+      const art = fog === 'hidden' ? null : this.loadArt(graphic, e.owner, split ? 'air' : clipped ? 'above' : 'all');
       const shadow = split && art ? this.loadArt(graphic, e.owner, 'ground') : null;
+      const under = underFog === 'hidden' ? null : this.loadArt(graphic, e.owner, 'terrain');
       if (t.shadow) t.shadow.visible = false;
+      if (t.under) t.under.visible = false;
       t.sprite.visible = art !== null;
-      if (!art) {
+      const drawn = art ?? under;
+      if (!drawn) {
         t.lastFrame = -1;
         continue;
       }
-      t.pack = art.pack;
-      const info = art.info;
+      t.pack = drawn.pack;
+      const info = drawn.info;
       let frameStep = 0;
       if (info && info.frameCount > 1) {
         const last = info.frameCount - 1;
@@ -523,15 +540,26 @@ export class UnitLayer {
       const pick = info
         ? facingFrame(facetOf(e, info.angleCount), frameStep, info.angleCount, info.frameCount, info.mirroringMode)
         : { index: 0, flipped: false };
+      if (under) {
+        const s = (t.under ??= view.layer.addChild(new Sprite()));
+        this.place(s, under.frames[pick.index] ?? under.frames[0]!, pick.flipped, pos.x, pos.y, false);
+        s.zIndex = this.terrainZ(0, pos.y);
+        s.visible = true;
+      }
+      if (!art) {
+        t.lastFrame = -1;
+        continue;
+      }
       const frame = art.frames[pick.index] ?? art.frames[0]!;
       this.place(t.sprite, frame, pick.flipped, pos.x, pos.y - lift, fog === 'fogged');
       t.frame = frame;
       t.layer = info?.layer ?? DEFAULT_LAYER;
-      // Above every terrain tile; nearer the bottom of the screen draws later.
-      t.sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
+      // Above every terrain tile; nearer the bottom of the screen draws later. Draw levels 0-5 go under the fog overlay.
+      t.sprite.zIndex = fog === 'terrain' ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y);
       // `RGE_Active_Animated_Sprite::draw`: a frame change plays the sprite's sounds when it is drawn, and not fogged.
       const sounds = this.o.sounds;
-      if (t.lastFrame !== -1 && frameStep !== t.lastFrame && fog === 'plain' && sounds?.spriteHasSounds(graphic) && this.onScreen(t.sprite)) {
+      const unfogged = fog === 'plain' || (fog === 'terrain' && tile === TILE_VISIBLE);
+      if (t.lastFrame !== -1 && frameStep !== t.lastFrame && unfogged && sounds?.spriteHasSounds(graphic) && this.onScreen(t.sprite)) {
         sounds.sprite(graphic, t.lastFrame, frameStep, info ? facetOf(e, info.angleCount) : 0);
       }
       t.lastFrame = frameStep;
@@ -547,6 +575,7 @@ export class UnitLayer {
       if (alive.has(id)) continue;
       t.sprite.destroy();
       t.shadow?.destroy();
+      t.under?.destroy();
       this.tracks.delete(id);
       this.deselect(id);
       this.groups.delete(id);
@@ -561,6 +590,17 @@ export class UnitLayer {
     const b = sprite.getBounds();
     const { width, height } = this.o.app.screen;
     return b.maxX > 0 && b.minX < width && b.maxY > TOP_HEIGHT && b.minY < height - BOTTOM_HEIGHT;
+  }
+
+  /**
+   * `zIndex` of a sprite drawn through the terrain's clip masks (`RGE_View::draw`, src/view.cpp:2335-2377, levels 0-5):
+   * over every terrain tile and under the fog overlay (map-view.ts), by draw level, then nearer the bottom later.
+   */
+  private terrainZ(layer: number, y: number): number {
+    const { width, height } = this.o.world.map;
+    const level = Math.min(Math.max(layer, 0), TERRAIN_LAYER);
+    const h = mapPixelSize(width, height).h;
+    return width * height - 1 + 0.05 + 0.07 * level + (0.06 * Math.min(Math.max(y, 0), h)) / h;
   }
 
   /** What the player knows of the tile under map point (x, y): `TILE_VISIBLE`, `TILE_FOGGED` or `TILE_BLACK`. */
@@ -638,6 +678,8 @@ export class UnitLayer {
       if (copies.has(id)) continue;
       s.destroy();
       this.copySprites.delete(id);
+      this.copyUnder.get(id)?.destroy();
+      this.copyUnder.delete(id);
     }
     for (const c of copies.values()) {
       let sprite = this.copySprites.get(c.id);
@@ -645,14 +687,30 @@ export class UnitLayer {
         sprite = view.layer.addChild(new Sprite());
         this.copySprites.set(c.id, sprite);
       }
-      const art = this.tileState(c.x, c.y) === TILE_FOGGED ? this.loadArt(c.graphic, c.owner) : null;
+      const graphicInfo = this.o.provider.graphicInfo(c.graphic);
+      const clipped = graphicInfo !== null && splitsTerrain(this.o.provider, graphicInfo);
+      const layer = graphicInfo?.layer ?? DEFAULT_LAYER;
+      const fogged = this.tileState(c.x, c.y) === TILE_FOGGED;
+      const art = fogged ? this.loadArt(c.graphic, c.owner, clipped ? 'above' : 'all') : null;
+      const under = fogged && clipped ? this.loadArt(c.graphic, c.owner, 'terrain') : null;
       sprite.visible = art !== null;
-      if (!art) continue;
-      const info = art.info;
+      const underSprite = this.copyUnder.get(c.id);
+      if (underSprite) underSprite.visible = false;
+      const info = (art ?? under)?.info;
       const pick = info ? facingFrame(copyFacet(c, info.angleCount), c.frame % Math.max(1, info.frameCount), info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
       const pos = tileCoordsToPixel(c.x, c.y, world.map.width);
-      this.place(sprite, art.frames[pick.index] ?? art.frames[0]!, pick.flipped, pos.x, pos.y, true);
-      sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
+      if (under) {
+        const s = underSprite ?? view.layer.addChild(new Sprite());
+        this.copyUnder.set(c.id, s);
+        this.place(s, under.frames[pick.index] ?? under.frames[0]!, pick.flipped, pos.x, pos.y, false);
+        s.zIndex = this.terrainZ(0, pos.y);
+        s.visible = true;
+      }
+      if (!art) continue;
+      // Draw levels 0-5 go plain under the fog overlay, which fogs them with the terrain.
+      const low = !clipped && layer <= TERRAIN_LAYER;
+      this.place(sprite, art.frames[pick.index] ?? art.frames[0]!, pick.flipped, pos.x, pos.y, !low);
+      sprite.zIndex = low ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y);
     }
   }
 

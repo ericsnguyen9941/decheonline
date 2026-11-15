@@ -163,8 +163,8 @@ export class MapView {
   }
 
   /**
-   * `view_function_terrain`'s fog (src/view.cpp:1940-2110): an unexplored tile is not drawn; an explored one gets the
-   * fog of its state and the edges of its neighbours. The dots follow the screen (`parity` is the camera's).
+   * `view_function_terrain`'s fog (src/view.cpp:1940-2110): an unexplored tile is not drawn (and covered black, for the
+   * low objects under the overlay); an explored one gets the fog of its state and the edges of its neighbours. The dots follow the screen (`parity` is the camera's).
    */
   private drawFog(version: number, parity: number): void {
     this.fogDrawn = { version, parity };
@@ -186,15 +186,12 @@ export class MapView {
       const row = (index - col) / width;
       const state = fog.state(col, row);
       sprite.visible = state !== TILE_BLACK;
-      const texture =
-        state === TILE_BLACK
-          ? null
-          : this.fogTexture(
-              state,
-              state === TILE_VISIBLE ? edgeNumber(visible, col, row, width, map.height) : 0,
-              edgeNumber(explored, col, row, width, map.height),
-              parity,
-            );
+      const texture = this.fogTexture(
+        state,
+        state === TILE_VISIBLE ? edgeNumber(visible, col, row, width, map.height) : 0,
+        state === TILE_BLACK ? 0 : edgeNumber(explored, col, row, width, map.height),
+        parity,
+      );
       let overlay = this.overlays.get(index);
       if (!texture) {
         if (overlay) overlay.visible = false;

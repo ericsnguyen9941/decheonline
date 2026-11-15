@@ -1,6 +1,7 @@
 import { Container, Rectangle, Sprite, Texture, type Renderer } from 'pixi.js';
 import type { AssetProvider, FramePart, GraphicInfo, SpriteFrame } from '../assets';
 import { facingFrame } from './facing';
+import { TERRAIN_LAYER } from './fog-objects';
 
 /** `RGE_Sprite::draw` draws a part whose `draw_level` is at most this at the object's shadow point. */
 export const GROUND_LAYER = 10;
@@ -12,13 +13,26 @@ export const GROUND_LAYER = 10;
  */
 const OFF_SCREEN = 1 << 16;
 
-/** Which parts to bake: all of them, the ones drawn at the object (`air`), or the ones drawn on the ground. */
-export type PartSet = 'all' | 'air' | 'ground';
+/**
+ * Which parts to bake: all of them, the ones drawn at the object (`air`) or on the ground (`ground`), the ones clipped
+ * to the terrain (`terrain`: `draw_level` 5 or less, `TERRAIN_LAYER`) or the others (`above`).
+ */
+export type PartSet = 'all' | 'air' | 'ground' | 'terrain' | 'above';
+
+function partLayers(provider: AssetProvider, info: GraphicInfo): number[] {
+  return info.deltas.map((d) => (d.graphic === -1 ? info : provider.graphicInfo(d.graphic))?.layer ?? info.layer);
+}
 
 /** Does graphic `info`'s draw list have parts that draw on the ground as well as parts that do not? */
 export function splitsShadow(provider: AssetProvider, info: GraphicInfo): boolean {
-  const layers = info.deltas.map((d) => (d.graphic === -1 ? info : provider.graphicInfo(d.graphic))?.layer ?? info.layer);
+  const layers = partLayers(provider, info);
   return layers.some((l) => l <= GROUND_LAYER) && layers.some((l) => l > GROUND_LAYER);
+}
+
+/** Does graphic `info`'s draw list have parts clipped to the terrain as well as parts that are not (a tree's shadow)? */
+export function splitsTerrain(provider: AssetProvider, info: GraphicInfo): boolean {
+  const layers = partLayers(provider, info);
+  return layers.some((l) => l <= TERRAIN_LAYER) && layers.some((l) => l > TERRAIN_LAYER);
 }
 
 /**
@@ -42,8 +56,10 @@ export async function composeGraphic(
       // Graphic -1 is the graphic's own SLP; a part's own draw list is not followed (`do_draw` draws its SLP only).
       const id = delta.graphic === -1 ? graphic : delta.graphic;
       const partInfo = id === graphic ? info : provider.graphicInfo(id);
-      const ground = (partInfo?.layer ?? info.layer) <= GROUND_LAYER;
-      const wanted = parts === 'all' || (parts === 'ground') === ground;
+      const layer = partInfo?.layer ?? info.layer;
+      const wanted =
+        parts === 'all' ||
+        (parts === 'terrain' || parts === 'above' ? (parts === 'terrain') === layer <= TERRAIN_LAYER : (parts === 'ground') === layer <= GROUND_LAYER);
       return { delta, info: partInfo, frames: partInfo && wanted ? await provider.graphicFrames(id, owner) : [] };
     }),
   );
