@@ -223,7 +223,11 @@ transformed into master `MASTER_OBJECT_MAN` (`:548-552`). Task-driven
 attacks (right-click resolved through the task list) use the task's
 `work_range` instead (`src/act_list.cpp:137-150`). A range of 0 is replaced
 by `weapon_range`, and if that is 0 too by **0.4** (`src/act_atak.cpp:82-87`,
-N constructor).
+N constructor). The object constructor leaves the latched target position at
+(−1, −1, −1) (`src/act_atak.cpp:55-57`), so the first `ready_to_attack`
+measures the target where it is (`startAttack`; `attackWork` still latches,
+commands.md §3). A unit whose order is STAND_GROUND never moves to its target
+(`:168-187`, `:499-530`; commands.md §3).
 
 ### 3.2 States (`set_state`, `src/act_atak.cpp:195`, M; `update`, `:263`, L)
 

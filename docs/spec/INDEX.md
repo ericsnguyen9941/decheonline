@@ -38,6 +38,8 @@ Spec: [core.md](core.md).
 
 Turn length, latency and speed retuning, and the relay protocol for a broken socket, a dropped player and Quit Game (§9): [turn-timing.md](turn-timing.md).
 
+Unit commands stop, stand ground and repair, and the ones not ported (attack ground, heal, convert, unload): [commands.md](commands.md).
+
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |
 | `src/com_hand.cpp` | 136/3/7/0 | `TCommunications_Handler::DoCycle` :453 [D], `NewCommand` :399 [M], `get_command` :385 [M], `AddCommand` :379 [M], `CommOut` (stamps execute-turn, :2810) [D], `ExecuteIncoming` :2106 [M] | core.md §2 |

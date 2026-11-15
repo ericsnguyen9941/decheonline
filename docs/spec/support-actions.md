@@ -258,6 +258,10 @@ made directly in these bodies.
 
 ## 6. Repair (`src/tact_rep.cpp`, `update` is N)
 
+Port status: ported in `packages/sim/src/repair.ts` (the command and its
+other ways in: commands.md §4), boats excepted. Convert, heal and trade are
+not ported (no Priests, no boats in the sim).
+
 ### 6.1 Start
 
 - `TRIBE_Combat_Object::repair` turns the unit into the owner's Repair_Man
@@ -322,8 +326,9 @@ So repairing a full bar costs half the target's build cost, and the rate is
 Town centre: cost row "attribute 30 × 1, flag 0" is a requirement only: the
 repair fails while attr 30 < `modifier`. In real data attr 30 starts 0, each
 age tech adds 8 (effects 94-97) and every building master holds `−1`, flag
-2. Whether attr 30 can reach ≤ 0 in normal play is **unverified** (it would
-block all building repair).
+2. `new_game` then sets attr 30 to 500 for every player (economy.md §6.4,
+`world.ts` `NEW_GAME_ATTRIBUTES`), so it does not block repair at the start;
+whether play can bring it to ≤ 0 is **unverified**.
 
 No `rand()` call in the repair path itself; the boat `moveTo` orders and the
 move-to sub-actions draw as `movement.md` §11 describes.
