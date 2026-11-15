@@ -372,3 +372,14 @@ and `lockstep/lockstep.ts`.
    its batches, so the resign executes two turns later on the other client,
    which wins and shows "%s resigned.". After the game is over the quitting
    client sends no resign.
+
+### 9.1 Sync check in the port
+
+The original exchanges checksums every 4 turns (`com_sync.cpp:132`); a mismatch is `COMM_SYNC_ERROR`, which
+`tribegam.cpp` `case 0x17b0` answers with sound 2 and the system message "Out of sync detected by comm..." on the game
+screen (the host also saves the game; the popup `STRING_ID_ERROR_SYNC` and a loss only come with the `SKIPSYNCSAVE`
+argument). The port reports a hash every turn: `Lockstep.endTurn` sends `hash {turn}` just before the batch of
+`turn`, so the relay gets a player's hash before it has released that turn. `rooms.ts` `reportHash` therefore accepts a
+hash for any turn up to the member's `nextTurn` and holds it until every other connected member has reported that turn;
+a mismatch is broadcast as `desync {turn, hashes}`. The client stops its loop and shows the system message
+(`GameHud.outOfSync`), keeping the game screen; Menu still works.

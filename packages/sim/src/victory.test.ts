@@ -141,6 +141,21 @@ describe('resign', () => {
     expect(w.worldTime).toBe(time);
   });
 
+  // tplayer.cpp:394 is the only place attribute 45 (survival) goes to 0, and only when the player has no active object
+  // left; `do_resign` (player.cpp:267) sets only the status and the resigned flag. So the original's achievements screen
+  // (scr_ach.cpp:445) says "Yes" for a player who resigned with objects left, and "" for one who was eliminated.
+  test('survival of a resigned player stays 100 while it has objects; an eliminated one has 0 (tplayer.cpp:394, player.cpp:267)', () => {
+    const w = world(startingObjects(3));
+    order(w, 1, { type: 'resign' });
+    expect(w.playerStatus(1)).toBe(STATUS_LOST);
+    expect(w.attributes[1]![45]).toBe(1);
+    expect(w.score(1).survival).toBe(100);
+    expect(w.score(2).survival).toBe(100);
+    const eliminated = world([villager(1, 10.5, 10.5)]);
+    stepsUntil(eliminated, () => eliminated.gameOver, 100);
+    expect(eliminated.score(2).survival).toBe(0);
+  });
+
   test('both resigning in the same turn: game over with no winner', () => {
     const w = world(startingObjects(3));
     w.addBatch(0, 1, [{ type: 'resign' }]);

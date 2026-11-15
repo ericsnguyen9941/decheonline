@@ -416,7 +416,7 @@ visibility (`src/tworld.cpp:885-887`). At the same place attribute 45 ←
 | 18 | 3 Tech | highest | 21 | 1 | 50 | " |
 | 19 | 3 Tech | first | 6 | 3 | 25 | current age; Stone/Tool/Bronze/Iron Age techs 100–103 set it to 1/2/3/4 (effects 94–97, set mode, captain's dat): first to **Bronze** |
 | 20 | 3 Tech | first | 6 | 4 | 25 | first to **Iron** |
-| 22 | 4 bonus | amount | 45 | 1 | 100 | survival: 1.0 from start, 0 on elimination (§6) |
+| 22 | 4 bonus | amount | 45 | 1 | 100 | survival: 1.0 from start, 0 on elimination only (§6, `tplayer.cpp:394`); a resign (`do_resign`, `player.cpp:267`) does not touch it, so a player who resigned with objects left keeps 100 and the achievements screen says Yes |
 | 23 | 4 bonus | amount | 42 | 1 | 100 | standing wonders (§8), 100 per wonder |
 
 Notes:

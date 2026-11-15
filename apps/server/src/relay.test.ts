@@ -287,6 +287,35 @@ describe('turn relay', () => {
     expect(rooms.rooms.get(code)?.desyncs).toEqual([1]);
   });
 
+  test('hashes sent before their turn is released, as the client sends them, are held and compared', async () => {
+    const { host, guest, code } = await pair();
+    await startGame(host, guest);
+    // Lockstep.endTurn: the hash of turn N goes out just before the batch of turn N.
+    host.send({ t: 'hash', turn: 0, hash: 7 });
+    host.send({ t: 'turn', turn: 0, commands: [] });
+    guest.send({ t: 'hash', turn: 0, hash: 7 });
+    guest.send({ t: 'turn', turn: 0, commands: [] });
+    expect((await host.expect('turn')).turn).toBe(0);
+    expect((await guest.expect('turn')).turn).toBe(0);
+    await host.expectSilence();
+    expect(rooms.rooms.get(code)?.desyncs).toEqual([]);
+
+    host.send({ t: 'hash', turn: 1, hash: 7 });
+    host.send({ t: 'turn', turn: 1, commands: [] });
+    guest.send({ t: 'hash', turn: 1, hash: 8 });
+    guest.send({ t: 'turn', turn: 1, commands: [] });
+    expect(await host.next()).toEqual({ t: 'desync', turn: 1, hashes: [7, 8] });
+    expect(await guest.next()).toEqual({ t: 'desync', turn: 1, hashes: [7, 8] });
+    expect(rooms.rooms.get(code)?.desyncs).toEqual([1]);
+  });
+
+  test('a hash for a turn the player has not run yet is refused', async () => {
+    const { host, guest } = await pair();
+    await startGame(host, guest);
+    host.send({ t: 'hash', turn: 1, hash: 7 });
+    expect((await host.expect('error')).code).toBe('bad-turn');
+  });
+
   test('a player leaving a started game ends it for the other', async () => {
     const { host, guest, code } = await pair();
     await startGame(host, guest);

@@ -309,6 +309,15 @@ export class GameHud {
   }
 
   /**
+   * The relay found the two games' hashes different (`COMM_SYNC_ERROR`, tribegam.cpp `case 0x17b0`): sound 2 and the
+   * system message, in the game screen. The turn loop has stopped, as the original's does; Menu still works.
+   */
+  outOfSync(): void {
+    this.o.sounds?.message(SOUND_CHAT);
+    this.chat.show('Out of sync detected by comm...');
+  }
+
+  /**
    * This player was dropped from the game (`STRING_ID_PLAYER_DROPPED_NOTICE`): the game is over for it, OK goes to the
    * end of the game's achievements.
    */

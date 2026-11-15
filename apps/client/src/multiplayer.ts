@@ -254,7 +254,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       }
     }
     setGameVisible(true);
-    game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
+    // The original keeps the game screen and says so there; the dialog is only for a game that has no screen yet.
+    game.onDesync = (turn) => (hud ? hud.outOfSync() : end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`));
     game.onEnded = (reason) => {
       if (reason === 'lost') {
         // The server dropped this player (or the link never came back): the game is over for it.

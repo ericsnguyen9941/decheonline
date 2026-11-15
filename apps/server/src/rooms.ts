@@ -371,7 +371,9 @@ export class RoomRegistry {
 
   private reportHash(room: Room, member: Member, peer: Peer, turn: number, hash: number): void {
     if (!room.started) return reject(peer, 'not-started', 'game has not started');
-    if (turn >= room.log.length) return reject(peer, 'bad-turn', 'turn not released yet');
+    // A client reports the hash of turn N just before it submits the batch of turn N (Lockstep.endTurn), so the report
+    // reaches the relay before turn N is released: it is held until the other player's hash arrives.
+    if (turn > member.nextTurn) return reject(peer, 'bad-turn', `turn ${turn} has not run yet`);
     member.hashes.set(turn, hash);
     if (room.members.some((m) => !m.dropped && !m.hashes.has(turn))) return;
     const hashes = room.members.map((m) => m.hashes.get(turn) ?? 0);
