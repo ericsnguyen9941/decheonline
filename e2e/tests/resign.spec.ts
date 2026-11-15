@@ -44,14 +44,16 @@ const gameOverWavs = (page: Page) => page.evaluate(() => window.__game!.sounds()
 
 /** Both games over: host (player 1) won, guest (player 2) lost, the same result on both, with its text and sound. */
 async function expectHostWon(host: Page, guest: Page): Promise<void> {
-  for (const page of [host, guest]) await page.waitForFunction(() => window.__game!.gameResult() !== null);
+  // The chat line lives 8 s: assert it right after the host's result, before the slower checks below.
+  await host.waitForFunction(() => window.__game!.gameResult() !== null);
+  await expect(host.getByTestId('chat-line').filter({ hasText: 'Bob resigned.' })).toBeVisible();
+  await guest.waitForFunction(() => window.__game!.gameResult() !== null);
   const [h, g] = [await result(host), await result(guest)];
   expect(h).toEqual(g);
   expect(h!.winners).toEqual([1]);
   expect(h!.status.slice(1)).toEqual([WON, LOST]);
   await expect(host.getByTestId('game-over-text')).toHaveText('You are victorious!');
   await expect(guest.getByTestId('game-over-text')).toHaveText('You have been defeated!');
-  await expect(host.getByTestId('chat-line').filter({ hasText: 'Bob resigned.' })).toBeVisible();
   await expect.poll(() => gameOverWavs(host)).toEqual([WAV_WON]);
   await expect.poll(() => gameOverWavs(guest)).toEqual([WAV_LOST]);
   await expect(host.getByTestId('opponent-left')).toHaveCount(0);
@@ -105,8 +107,8 @@ test('Quit Game in the middle of a game resigns the player: the other one wins',
   await menuConfirm(guest, 'menu-quit');
   await expect(guest.getByTestId('achievements')).toBeVisible();
   await host.waitForFunction(() => window.__game!.gameResult() !== null);
+  await expect(host.getByTestId('chat-line').filter({ hasText: 'Bob resigned.' })).toBeVisible();
   expect((await result(host))!.winners).toEqual([1]);
   await expect(host.getByTestId('game-over-text')).toHaveText('You are victorious!');
-  await expect(host.getByTestId('chat-line').filter({ hasText: 'Bob resigned.' })).toBeVisible();
   await expect(host.getByTestId('opponent-left')).toHaveCount(0);
 });
