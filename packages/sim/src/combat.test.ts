@@ -7,6 +7,7 @@ import { facetOf, currentSprite } from './movement';
 import { f32, mul32, MS_TO_SECONDS, sub32 } from './num';
 import { updateObject } from './objects';
 import { CrtRand } from './rng';
+import { VICTORY_SPECIAL } from './victory';
 import {
   AI_ACTION_ATTACK,
   AI_ORDER_ATTACK,
@@ -35,9 +36,10 @@ function runUntil(world: World, done: () => boolean, limit = 400): void {
   expect(done()).toBe(true);
 }
 
-/** A world of Gaia and two players with these units; ids follow the list order from 1. */
+/** A world of Gaia and two players with these units; ids follow the list order from 1. Conquest off, so a side that
+ * loses its last unit does not end the game. */
 function world(...units: StartUnit[]): World {
-  return new World({ players: 3, units });
+  return new World({ players: 3, units, victory: { type: VICTORY_SPECIAL } });
 }
 
 /** Each combat object's first update records what its player sees (visibility.md §4.1), as before any unit AI runs. */

@@ -66,7 +66,9 @@ const SKIRMISH: readonly StartUnit[] = [
  * rarely a `cancel` of an object made during the game; and, from a third generator, now and then a `research` at their
  * Town Center (sometimes the other's or an object made during the game) of a building's 2-second tech (Granary,
  * Storage Pit or Barracks built: two make the Tool Age available), the Tool Age or any tech id, and rarely a `stop` of
- * their Town Center. The step size and buffer frames change on the way (`SAMPLE_SPEEDS`).
+ * their Town Center. The step size and buffer frames change on the way (`SAMPLE_SPEEDS`). With `war`, 20 turns before
+ * the end player 2 deletes every object it may own (a `cancel` of every id the game can have reached): it is defeated
+ * at its next per-second check and player 1 wins (docs/spec/victory.md §6).
  */
 export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLog {
   const players = 3;
@@ -132,6 +134,10 @@ export function sampleReplay(turns = 120, seed = 20260101, war = true): ReplayLo
         commands.push({ type: 'research', building, tech: techs[study.rand() % techs.length]! });
       }
       if (study.rand() % 150 === 0) commands.push({ type: 'stop', objects: [own.id] });
+      // Ids so far: the start objects, at most 3 probes per player per turn, and what the game made (well under 2 a turn).
+      if (war && player === 2 && turn === turns - 20) {
+        for (let id = 1; id <= units.length + 8 * turn; id++) commands.push({ type: 'cancel', target: id });
+      }
       if (commands.length > 0) batches.push({ turn, player, commands });
     }
   }

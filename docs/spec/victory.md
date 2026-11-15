@@ -510,8 +510,8 @@ Groups: Military 30, Economy 45, Religion 47, Technology 111; Total
 P2's last villager dies in step K while P2 owns only two walls and a fishing
 boat. With `update_time` = 0.5 after step K−1, P2's next per-second ticks
 happen when `update_time` exceeds 1.0. In float32: 0.5900000334,
-0.6800000668, 0.7700001001, 0.8600001335, 0.9500001669, 1.0400002003 → in
-step **K+6** P2 gets status 2 and attribute 45 = 0
+0.6800000668, 0.7700001001, 0.8600001335, 0.9500001669, 1.0400002003 after
+steps K to K+5 → in step **K+5** P2 gets status 2 and attribute 45 = 0
 (ID 22 → 0 points), and P1 wins in that step's `check_game_state` with
 `game_end_condition = 1`. A pending foundation would not save P2; one
 active house would.
@@ -575,3 +575,36 @@ later draw shifts by one.
   each hit if it is still targetable; whether it can be is the combat spec's.
 - x87 extended precision vs float32 store for the timers follows `core.md`
   §3's assumption; the step counts in §12 are only as good as it.
+
+## 15. Port status (`packages/sim/src/victory.ts`)
+
+Ported, with vectors in `victory.test.ts`:
+
+- Game status, `set_game_status`, `victory_if_game_on` / `loss_if_game_on`,
+  `win_game_now`, `do_resign` (command `resign`; the sender resigns).
+- The per-second block's attribute 22 (% explored; the game has no full
+  visibility) and 44, and the elimination check (§6). Example 5.
+- Attributes 37 and 40 (civilian and military counts) at creation and
+  removal (§11.2 IDs 3, 5, 6).
+- The score list, its five entry kinds and totals (§11). Example 4.
+- `check_for_victory` and the "victory points" condition (Score game, §7).
+- `TRIBE_World::check_game_state`'s time limit (§9, Example 3) and
+  `RGE_Game_World::check_game_state` (§5). Once `game_state` is 1 the world is
+  not updated again (`TRIBE_Screen_Game` stops calling `update`); the port's
+  turn counters still advance.
+- Victory types 0 Standard, 1 Conquest, 2 time limit, 3 Score (world option
+  `victory`, default Standard). Type 4 is accepted with no condition: conquest
+  off, the game never ends (the sim's tests of other rules use it).
+
+Not ported, for want of objects or systems the sim does not have yet:
+
+- Wonder victory (§8): no Wonder (unit 276) or `TRIBE_Action_Wonder` in the sim;
+  attribute 42 stays 0. Example 1 has no test.
+- Relics and ruins (§3, §10): no relic (159) or ruin (158, 163) objects and no
+  random-map generator; the two game-start rolls belong with the generator and
+  are not drawn; attributes 7, 14, 54, 55 stay 0. Examples 2 and 6 have no test.
+- The scenario and MP special conditions of §7 other than "victory points"
+  (ruins, artifacts, discoveries, exploration, gold settings): none of their
+  lobby settings exist yet.
+- Diplomacy and allied victory: the sim has none, so every team is one player.
+- Attributes fed by systems not in the sim: 41 conversions, 53 tribute.

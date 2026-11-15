@@ -9,10 +9,12 @@ import { doEffect } from './techs';
 import { bestUnitToAttack, VISIBLE_DISTANCE } from './unit-ai';
 import { BARRACKS, CLUBMAN, TOWN_CENTER, VILLAGER, WATCH_TOWER } from './units';
 import { losDistanceTable, losShape, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE } from './visibility';
+import { VICTORY_SPECIAL } from './victory';
 import { World, type StartUnit } from './world';
 
+/** Conquest off: these worlds often leave a player with nothing, which would end the game. */
 function world(...units: StartUnit[]): World {
-  return new World({ players: 3, units });
+  return new World({ players: 3, units, victory: { type: VICTORY_SPECIAL } });
 }
 
 function order(w: World, player: number, command: Command): void {

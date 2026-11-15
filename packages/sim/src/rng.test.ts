@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { CrtRand } from './rng';
+import { VICTORY_SPECIAL } from './victory';
 import { World } from './world';
 
 test('rand() matches the core.md §4.3 worked example (seed 14 -> 84, 27125, ...)', () => {
@@ -9,7 +10,8 @@ test('rand() matches the core.md §4.3 worked example (seed 14 -> 84, 27125, ...
 });
 
 test('world steps carry random_seed as in core.md §4.3 (14 -> 312 -> 3490 -> 4612)', () => {
-  const world = new World({ players: 1, randomSeed: 14 });
+  // Conquest off: with no player in it the game would be over after the first step.
+  const world = new World({ players: 1, randomSeed: 14, victory: { type: VICTORY_SPECIAL } });
   const seeds: number[] = [];
   for (let i = 0; i < 3; i++) {
     world.runTurn();

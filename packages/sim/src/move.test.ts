@@ -7,6 +7,7 @@ import { runReplay, sampleReplay } from './replay';
 import { CrtRand } from './rng';
 import { TECH_DONE, TECH_RESEARCHING } from './techs';
 import { BARRACKS, CLUBMAN, HOUSE, unitType, VILLAGER } from './units';
+import { END_CONQUEST, STATUS_LOST, STATUS_WON } from './victory';
 import { startingUnits, World, type StartUnit } from './world';
 
 const length = (dx: number, dy: number): number => Math.sqrt(dx * dx + dy * dy);
@@ -210,16 +211,29 @@ describe('fuzz: random move, work, build, queue, cancel, research and stop order
 
 describe('fuzz: the same orders plus a mid-map skirmish and attack orders', () => {
   for (const seed of [1, 2, 3, 4]) {
-    test(`seed ${seed}: replaying twice gives the same hashes; both sides' units get killed`, () => {
+    test(`seed ${seed}: replaying twice gives the same hashes; both sides' units get killed; P2 deletes everything and is defeated`, () => {
       const log = sampleReplay(240, seed);
       const first = runReplay(log);
       expect(runReplay(log)).toEqual(first);
       const world = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units });
-      runReplay(log, world);
+      let endTurn = -1;
+      while (world.turn < log.turns) {
+        for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
+        for (const c of log.speeds ?? []) if (c.turn === world.turn) world.setSpeedChange(c);
+        world.runTurn();
+        if (world.gameOver && endTurn < 0) endTurn = world.turn - 1;
+      }
       expect(world.hash()).toBe(first.at(-1));
       // Kills (player attribute 20) only count combat deaths of another player's objects, not cancels.
       expect(world.attributes[1]![20]!).toBeGreaterThan(0);
       expect(world.attributes[2]![20]!).toBeGreaterThan(0);
+      // P2's deletes run on turn turns - 18; it is defeated at its next per-second check (a turn is 11 steps, ~1 s), and
+      // P1 wins by conquest in that step.
+      expect(endTurn).toBeGreaterThanOrEqual(log.turns - 18);
+      expect(endTurn).toBeLessThanOrEqual(log.turns - 16);
+      expect(world.gameResult()).toEqual({ endCondition: END_CONQUEST, winners: [1], status: [0, STATUS_WON, STATUS_LOST] });
+      expect(world.score(2).survival).toBe(0);
+      expect(world.score(1).total).toBeGreaterThan(world.score(2).total);
     }, FUZZ_TIMEOUT);
   }
 });

@@ -37,6 +37,7 @@ import {
   VILLAGER,
   WATCH_TOWER,
 } from './units';
+import { VICTORY_SPECIAL } from './victory';
 import { ATTR_FOOD, ATTR_GOLD, ATTR_WOOD, COMMAND_DELAY_TURNS, startingObjects, STEP_MS, stepsInTurn, World } from './world';
 
 const CIV_BABYLONIAN = 3;
@@ -77,7 +78,8 @@ function stepsToResearch(work: number, research: number): [steps: number, sum: n
 
 /** A Town Center for player 1 with the Tool Age available (Granary and Storage Pit techs done as if built). */
 function toolAgeReady(): { world: World; tc: Entity } {
-  const world = new World({ players: 3, units: [{ owner: 1, type: TOWN_CENTER, x: 20.5, y: 20.5 }] });
+  // Conquest off: player 2 has nothing and would otherwise lose at step 12, which ends the game.
+  const world = new World({ players: 3, units: [{ owner: 1, type: TOWN_CENTER, x: 20.5, y: 20.5 }], victory: { type: VICTORY_SPECIAL } });
   const ctx = world.gameContext();
   expect(world.techs[1]![TOOL_AGE]).toBe(TECH_LOCKED);
   doTech(ctx, 1, GRANARY_BUILT);
@@ -315,7 +317,9 @@ describe('techs.md §7.5 vector R2: the Tool Age through commands', () => {
     // Player 2 issued nothing: its masters, techs and attributes are as they started.
     expect(world.masters[2]).toEqual(start.masters[2]);
     expect(world.techs[2]).toEqual(start.techs[2]);
-    expect(world.attributes[2]).toEqual(start.attributes[2]);
+    // Except attribute 22, % explored, which the per-second block rewrites (victory.md §4).
+    const unexplored = (a: number[]) => a.map((v, i) => (i === 22 ? 0 : v));
+    expect(unexplored(world.attributes[2]!)).toEqual(unexplored(start.attributes[2]!));
     expect(world.masters[1]).not.toEqual(start.masters[1]);
     expect([isEnabled(world, 2, ARCHERY_RANGE), buildingFacet(world, 2, TOWN_CENTER)]).toEqual([false, 1]);
   });

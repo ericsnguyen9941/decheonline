@@ -26,6 +26,20 @@ import { orderResearch, stopBuilding } from './research';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
 import { checkForNewTech, doEffect, newResearchDone, newTechStates } from './techs';
+import {
+  checkGameState,
+  copyVictory,
+  countPopulation,
+  newVictory,
+  perSecond,
+  resign,
+  scoreOf,
+  STATUS_WON,
+  updateConditions,
+  type Score,
+  type VictorySettings,
+  type VictoryState,
+} from './victory';
 import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState } from './unit-ai';
 import { forgetSighting, stateChanged, Visibility, type VisibilitySnapshot } from './visibility';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
@@ -70,6 +84,17 @@ export interface WorldOptions {
   populationLimit?: number;
   /** Each player's civ (empires.dat civ index), Gaia's included; a missing entry is Egyptian (Gaia: civ 0). */
   civs?: readonly number[];
+  /** The lobby's victory setting (victory.md §2); default Standard. */
+  victory?: VictorySettings;
+}
+
+/** How the game ended (`game_end_condition`) and who won, once it is over. */
+export interface GameResult {
+  endCondition: number;
+  /** Players with status won; empty when everyone lost. */
+  winners: number[];
+  /** `game_status` per player, Gaia's included: 0 playing, 1 won, 2 lost. */
+  status: number[];
 }
 
 export interface StartUnit {
@@ -155,7 +180,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 9;
+  version: 10;
   players: number;
   turn: number;
   granularity: number;
@@ -190,9 +215,10 @@ export interface Snapshot {
   /** Each player's `fog_update`. */
   fogUpdate: number[];
   visibility: VisibilitySnapshot;
+  victory: VictoryState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
@@ -252,6 +278,8 @@ export class World {
   fogUpdate: number[];
   /** Fog of war: each player's explored and visible tiles and the visible-unit records (docs/spec/visibility.md). */
   visibility: Visibility;
+  /** Game statuses, score lists and the time-limit countdown (docs/spec/victory.md). */
+  victory: VictoryState;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
   private mastersDigest: (number | undefined)[] = [];
   private queue = new CommandQueue();
@@ -291,6 +319,8 @@ export class World {
     for (let p = 1; p < this.players; p++) {
       for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
     }
+    // Then the victory type and each player's score table (victory.md §2, §11); no RNG.
+    this.victory = newVictory(this.players, options.victory);
   }
 
   /**
@@ -328,7 +358,8 @@ export class World {
    * `make_new_obj` + `setup` (src/stat_obj.cpp:200-286): place the object, show its standing sprite (one draw if it
    * has a random start frame, sprites.md §4), load its own starting resource, give the owner its flag 1/2 storages,
    * draw one `rand()` and reseed with it (economy.md §7); a moving object then draws its facing (movement.md §11). Units
-   * and buildings then get their unit AI, which draws its idle timeouts (unit-ai.md §1.2). Animated objects, and static
+   * and buildings then get their unit AI, which draws its idle timeouts (unit-ai.md §1.2), and count in the owner's
+   * civilian or military population (victory.md §11.2). Animated objects, and static
    * ones without hit points, join the owner's updated list at the front; living trees sleep.
    */
   createObject(owner: number, type: number, x: number, y: number, z: number): Entity {
@@ -353,6 +384,7 @@ export class World {
     this.rng.srand(this.rng.rand());
     if (e.mover) initialFacing(e, t, e.mover, this.rng);
     if (t.masterType === 70 || t.masterType === 80) e.ai = createUnitAI(this.gameContext(), t);
+    countPopulation(this.attributes[owner]!, t, 1);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));
     return e;
@@ -385,9 +417,13 @@ export class World {
     };
   }
 
-  /** Remove an object that is ready (`recycle_out_of_game`): off the obstruction map, the lists and the store. */
+  /**
+   * Remove an object that is ready (`recycle_out_of_game`): off the obstruction map, the lists and the store; a unit or
+   * building leaves the owner's civilian or military population (its destructor).
+   */
   private removeObject(e: Entity): void {
     const t = typeOf(this, e);
+    countPopulation(this.attributes[e.owner]!, t, -1);
     this.pathing.unstamp(e, t);
     if (t.masterType >= 50) forgetSighting(this, e, t);
     const list = this.awake[e.owner]!;
@@ -426,12 +462,35 @@ export class World {
       this.granularity = granularity;
       this.frames = frames;
     }
-    this.step(this.granularity);
+    // Once the game is over the screen stops calling the world's update; the turn counters are the comm handler's.
+    if (!this.gameOver) this.step(this.granularity);
     this.turnStep++;
     if (this.turnStep >= stepsInTurn(this.turn, this.frames)) {
       this.turnStep = 0;
       this.turn++;
     }
+  }
+
+  /** The game is over (`game_state` 1): the world is no longer updated (`TRIBE_Screen_Game` stops calling `update`). */
+  get gameOver(): boolean {
+    return this.victory.gameState === 1;
+  }
+
+  /** The end of the game for the client's end screen, or null while it is on. */
+  gameResult(): GameResult | null {
+    if (!this.gameOver) return null;
+    const status = [...this.victory.status];
+    return { endCondition: this.victory.endCondition, winners: status.flatMap((s, p) => (p > 0 && s === STATUS_WON ? [p] : [])), status };
+  }
+
+  /** `player`'s `game_status`: 0 playing, 1 won, 2 lost. */
+  playerStatus(player: number): number {
+    return this.victory.status[player] ?? 0;
+  }
+
+  /** `player`'s victory points, in the achievements screen's groups (victory.md §11). */
+  score(player: number): Score {
+    return scoreOf(this.victory, player);
   }
 
   /** `(G, F)` the current turn runs at once its boundary step applies the changes agreed before it. */
@@ -460,6 +519,13 @@ export class World {
           while (this.playerUpdateTime[i]! > 1) {
             this.playerUpdateTime[i] = sub32(this.playerUpdateTime[i]!, 1);
             if (this.alertCooldown[i]! > 0) this.alertCooldown[i]!--;
+            perSecond(this.victory, i, {
+              attributes: this.attributes[i]!,
+              exploredTiles: this.visibility.explored[i]!,
+              totalTiles: this.map.width * this.map.height,
+              objects: ctx.objectsOf(i),
+              groupOf: (e) => typeOf(this, e).group,
+            });
           }
         }
         // `RGE_Player::update` (src/player.cpp:870): the path search counter restarts, then the object list updates
@@ -469,6 +535,8 @@ export class World {
           const e = this.entities.get(id);
           if (e && updateObject(ctx, e)) this.removeObject(e);
         }
+        // Then the player's victory points and conditions (`RGE_Player::update`, victory.md §4).
+        updateConditions(this.victory, i, this.attributes);
         // `TRIBE_Player::update` ends by fencing its computer-player AI off the stream (src/tplayer.cpp:607-631): one
         // draw becomes the seed. Gaia's update (`TRIBE_Gaia::update`) has no fence.
         if (i > 0) rng.srand(rng.rand());
@@ -478,6 +546,7 @@ export class World {
       rng.srand(rng.rand());
       this.playerTimeDelta[this.playerTurn] = 0;
       this.playerTurn = (this.playerTurn + 1) % this.players;
+      checkGameState(this.victory, this.deltaSeconds);
     }
     this.randomSeed = rng.rand();
   }
@@ -504,6 +573,8 @@ export class World {
         return this.doCommandResearch(player, command);
       case 'stop':
         return this.doCommandStop(player, command);
+      case 'resign':
+        return resign(this.victory, player);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
@@ -725,6 +796,7 @@ export class World {
     for (let p = 0; p < this.players; p++) h.u32((this.mastersDigest[p] ??= digest(this.masters[p])));
     for (const f of this.fogUpdate) h.u32(f);
     this.visibility.hashInto(h);
+    hashValue(h, this.victory);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -748,7 +820,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 9,
+      version: 10,
       players: this.players,
       turn: this.turn,
       granularity: this.granularity,
@@ -775,11 +847,12 @@ export class World {
       masters: copyMasters(this.masters),
       fogUpdate: [...this.fogUpdate],
       visibility: this.visibility.toJSON(),
+      victory: copyVictory(this.victory),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 9) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 10) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -809,6 +882,7 @@ export class World {
     w.mastersDigest = [];
     w.fogUpdate = [...s.fogUpdate];
     w.visibility = Visibility.fromJSON(s.visibility);
+    w.victory = copyVictory(s.victory);
     return w;
   }
 }

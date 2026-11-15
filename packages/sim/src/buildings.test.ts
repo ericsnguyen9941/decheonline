@@ -8,6 +8,7 @@ import { MS_TO_SECONDS, mul32 } from './num';
 import { CrtRand } from './rng';
 import { isEnabled, TECH_DONE } from './techs';
 import { BARRACKS, BUILDER, CLUBMAN, HOUSE, TOWN_CENTER, unitType, VILLAGER } from './units';
+import { VICTORY_SPECIAL } from './victory';
 import { ATTR_FOOD, ATTR_WOOD, World } from './world';
 
 const ATTR_BUILDING_ALLOWANCE = 30;
@@ -163,7 +164,7 @@ describe('economy.md §8.4 vector E4: cancelling a Barracks at 12 build points',
   });
 
   test('the cancel command on a new foundation refunds half its cost', () => {
-    const world = new World({ players: 2 });
+    const world = new World({ players: 2, victory: { type: VICTORY_SPECIAL } });
     // The site must be explored (placement reason 5): player 1 has seen it before.
     world.visibility.explore(1, 20, 20, 4, false);
     order(world, 1, { type: 'build', units: [], unitType: BARRACKS, x: 20.5, y: 20.5 });

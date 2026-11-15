@@ -96,10 +96,15 @@ export interface StopCommand {
   objects: number[];
 }
 
+/** Resign (`RGE_Command::do_command_resign`, victory.md §4): the sender loses. */
+export interface ResignCommand {
+  type: 'resign';
+}
+
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand | ResearchCommand | StopCommand;
+export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand | ResearchCommand | StopCommand | ResignCommand;
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
@@ -171,6 +176,8 @@ export function parseCommand(v: unknown): Command | null {
       if (!Array.isArray(objects) || objects.length === 0 || objects.length > MAX_ORDER_UNITS || !objects.every(isId)) return null;
       return { type: 'stop', objects: [...(objects as number[])] };
     }
+    case 'resign':
+      return { type: 'resign' };
     default:
       return null;
   }

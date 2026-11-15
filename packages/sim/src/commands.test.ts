@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { CommandQueue, parseCommand } from './commands';
+import { VICTORY_SPECIAL } from './victory';
 import { STEP_MS, World } from './world';
 
 test('commands run ordered by sender player, then sequence; passed turns are dropped', () => {
@@ -30,8 +31,11 @@ test('a command issued on turn N runs on turn N + 2', () => {
   expect(world.pendingCommands).toBe(0);
 });
 
+/** No objects: with conquest on, player 1 would lose at step 12 and the world would stop. */
+const EMPTY = { players: 2, victory: { type: VICTORY_SPECIAL } };
+
 test('turns 0..6 are one step, later turns the boundary step plus 10 buffer frames', () => {
-  const world = new World({ players: 2 });
+  const world = new World(EMPTY);
   for (let i = 0; i < 7; i++) world.runTurn();
   expect(world.worldTime).toBe(7 * STEP_MS);
   world.runTurn();
@@ -39,7 +43,7 @@ test('turns 0..6 are one step, later turns the boundary step plus 10 buffer fram
 });
 
 test('a speed change agreed for turn E runs from turn E + 1: boundary step and buffer frames at the new G and F', () => {
-  const world = new World({ players: 2 });
+  const world = new World(EMPTY);
   for (let i = 0; i < 10; i++) world.runTurn();
   world.setSpeedChange({ turn: 10, granularity: 30, frames: 9 });
   const before = world.worldTime;
