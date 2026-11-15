@@ -680,8 +680,8 @@ Neither comes from a start tech or the civ table as one might expect:
   to attribute 30.
 - After the start objects are placed, `TRIBE_World::new_game` sets for every
   player except Gaia (players 1 and up) `attributes[32] = population limit`
-  (`RGE_Game_Info` default **50**; the port exposes the `populationLimit`
-  option), `attributes[33] = 0`, `attributes[30] = 500` and
+  (`RGE_Game_Info` default **50**; the lobby's Population Limit, 25 to 200,
+  `lobby.md` §2; the port's `populationLimit` option), `attributes[33] = 0`, `attributes[30] = 500` and
   `attributes[45] = 1`. These overwrite the start techs' values.
 
 Training is capped twice (§6.1): by headroom (attribute 4, `+4` per House or

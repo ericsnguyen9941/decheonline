@@ -60,12 +60,14 @@ async function main(): Promise<void> {
   if (!lobbyHost) throw new Error('missing #multiplayer element');
   const resources = params.has('resources') ? Number(params.get('resources')) : undefined;
   const bowmen = Number(params.get('bowmen') ?? 0);
+  const houses = Number(params.get('houses') ?? 0);
   await startMultiplayer(lobbyHost, app, {
     debug: params.get('debug') === 'net',
     speed: Number(params.get('speed') ?? 1) || 1,
     resources: resources !== undefined && Number.isFinite(resources) ? resources : undefined,
     bowmen: Number.isInteger(bowmen) && bowmen > 0 ? bowmen : undefined,
     market: params.get('market') === '1',
+    houses: Number.isInteger(houses) && houses > 0 ? houses : undefined,
     testMap: params.get('map') === 'test',
     seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
     perturb: params.has('perturb') && Number.isInteger(Number(params.get('perturb'))) ? Number(params.get('perturb')) : undefined,

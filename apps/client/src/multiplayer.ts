@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, MARKET, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, HOUSE, MARKET, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { SoundPlayer } from './audio/sound-player';
@@ -186,6 +186,12 @@ export interface MultiplayerOptions {
    * ask for it.
    */
   market?: boolean;
+  /**
+   * Debug only (`?debug=net&houses=N`): every player starts with N built Houses in a column left of its Town Center,
+   * for population room without building them. Placed without a placement check: for the test map. Both clients must
+   * ask for the same N.
+   */
+  houses?: number;
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
   /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
@@ -207,7 +213,7 @@ const BOWMAN = 4;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -290,6 +296,12 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       for (let p = 1; p < game.world.players; p++) {
         const tc = [...game.world.entities.ofPlayer(p)].find((e) => e.type === TOWN_CENTER);
         if (tc) game.world.createUnit({ owner: p, type: MARKET, x: tc.x - 4, y: tc.y });
+      }
+    }
+    if (debug && houses) {
+      for (let p = 1; p < game.world.players; p++) {
+        const tc = [...game.world.entities.ofPlayer(p)].find((e) => e.type === TOWN_CENTER);
+        for (let i = 0; tc && i < houses; i++) game.world.createUnit({ owner: p, type: HOUSE, x: Math.floor(tc.x) - 8, y: Math.floor(tc.y) - 6 + 2 * i });
       }
     }
     setGameVisible(true);

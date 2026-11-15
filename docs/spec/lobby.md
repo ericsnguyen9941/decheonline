@@ -20,6 +20,7 @@ D accepted_drift, L accepted_logic, N nonmatching, from
 | `TribeGameSettingsScreen::TribeGameSettingsScreen` | `src/scr_set.cpp:19` | M | the host's Game Settings dialog: every drop-down and check box (§2) |
 | `TribeGameSettingsScreen::action` | `src/scr_set.cpp:487` | M | OK, Cancel; Time Limit / Score pick their default line |
 | `TribeGameSettingsScreen::getSettings` / `sendSettings` | `src/scr_set.cpp:656`, `:712` | M | dialog ↔ game options |
+| `TRIBE_Game::popLimit` | `src/tribegam.cpp:3736` | M | the Population Limit, 50 outside multiplayer (§2) |
 | `TRIBE_Game::create_game` | `src/tribegam.cpp:2739` | L | resolves a Random civ from the game seed (§5) |
 
 ## 2. The host's settings (Game Settings dialog, `src/scr_set.cpp`)
@@ -42,7 +43,7 @@ makes them, with the multiplayer defaults `init_vars` sets
 | Starting Age | Default, Nomad, Stone, Tool, Bronze, Iron | Default |
 | Resources | Default, Medium, High; inactive and forced Default for Death Match (`scr_set.cpp:737-741`, `:785-791`) | Default |
 | Path Finding | Default, Medium, High (MP: `mpPathFinding`) | Default (`basegame.cpp:101`) |
-| Population Limit (MP only) | 25, 50, ..., 200 | 50 (`tribegam.cpp:198`) |
+| Population Limit (MP only) | 25, 50, 75, 100, 125, 150, 175, 200 (`scr_set.cpp:181-194`, made only when `multiplayerGame()`) | 50 (`tribegam.cpp:198`, `:2230`) |
 | Difficulty Level | Easiest .. Hardest (computer players) | single player's |
 | Fixed Positions (check) | on = `randomizePositions` 0 | on |
 | Full Tech Tree (check) | | off |
@@ -58,6 +59,24 @@ drop-down to its line 3 or 7 (`scr_set.cpp:512-521`). The lobby enum maps to
 the world's `victory_type` in `TRIBE_World::new_game` (`victory.md` §2):
 Default/Standard → 0, Conquest → 1, Time → 2 with `countdown_clock` = years,
 Score → 3 with the points condition.
+
+Population Limit. `getSettings` selects the drop-down line of `popLimit()`
+and `sendSettings` stores the picked line's id, the number itself
+(`scr_set.cpp:701-703`, `:757-759`). `TRIBE_Game::popLimit` returns the
+stored value in a multiplayer game and 50 otherwise (`tribegam.cpp:3736-3741`);
+a command-line value is clamped to 25..200 (`tribegam.cpp:535-547`).
+`TRIBE_World::new_game` gives every player but Gaia `attributes[32] =
+popLimit()` after the start objects (`tworld.cpp:869-872`; the `nofoodcap`
+and `system2` program arguments force 50 instead, `:857-867`), and nothing
+changes it later: no tech or House touches attribute 32 (`economy.md` §6.4).
+It caps training twice: a production queue does not start its next unit
+while `population >= limit` (`t_b_obj.cpp:978-986`, "You have reached your
+population limit.", 3046) and `check_obj_cost` refuses a headroom cost the
+same way (`tplayer.cpp:1054-1059`); Houses past the limit still add headroom,
+which nothing can use. The House's object panel row shows `population /
+min(population + headroom, limit)` (`tpnl_obj.cpp:463-470`), as does the F11
+population overlay (`tpnl_pop.cpp:155-160`). The setup screen's summary ends
+with "Population Limit: %d" (`scr_mps.cpp:2069`, `:2543`).
 
 ## 3. Players and civilizations
 
@@ -105,7 +124,10 @@ civ 17, past the dat's 16 civs (behaviour in the exe unverified).
 ## 6. Port status (`packages/sim/src/game-settings.ts`, the lobby)
 
 Ported: the host's Map Size, Map Type and Victory Condition with the Time
-Limit and Score amounts and their default lines; each player's civ with
+Limit and Score amounts and their default lines; the Population Limit
+(`GameSettings.populationLimit`, the world's `populationLimit` option, so
+attribute 32; the sim's caps are `buildings.ts` `updateQueue` and
+`checkObjCost`); each player's civ with
 Random; the defaults (Large, Mostly Land, Standard); the who-may-change
 rules of §4 (server: `apps/server/src/rooms.ts` refuses with `not-host` or
 `locked`); Random resolved as §5 (`resolveCivs`; a 0x7FFF draw is kept at
@@ -133,13 +155,13 @@ Offered values (only what the sim can play):
   every amount (`victory.md` §15: wonder, relic and ruin wins are not
   ported, so Standard plays as Conquest).
 - Civs: all 16 and Random.
+- Population Limit: all eight, default 50.
 
 Not offered (each needs the noted work first): Death Match (its start
 resources), scenarios (scenario loading), Starting Age (Nomad: the
 generator's nomad rows and `random_start`'s fallback; ages: the age techs at
 start), Resources Medium/High (`resourceLevel` start amounts), Path Finding
-(MP `pathingIterations` wiring), Population Limit (wiring of the sim's
-`populationLimit`), Difficulty (computer players), Fixed Positions off
+(MP `pathingIterations` wiring), Difficulty (computer players), Fixed Positions off
 (randomized positions in the generator), Full Tech Tree, Reveal Map (full
 visibility), Enable Cheating (chat and cheat codes), colours, teams and more
 than 2 players.
@@ -157,4 +179,5 @@ than 2 players.
 | civs 1-12 | 10230 + civ |
 | Roman, Carthaginian, Palmyran 15, Macedonian 16 | 10246, 10247, 10249, 10248 |
 | "Random" (civ 17) | 10250 |
-| summary: "Map Size: %s", "Map Type: %s", "Victory: %s", "Victory: %s (%d)" | 9690, 9654, 9660, 9662 |
+| "Population Limit" (label), its help text | 9747, 30271 |
+| summary: "Map Size: %s", "Map Type: %s", "Victory: %s", "Victory: %s (%d)", "Population Limit: %d" | 9690, 9654, 9660, 9662, 9712 |

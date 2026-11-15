@@ -7,7 +7,10 @@ export type Text = (id: number, fallback: string) => string;
 
 export const englishText: Text = (_id, fallback) => fallback;
 
-/** `STRING_ID_MP_SETTINGS_LABEL`, `_MP_CIV_LABEL`, `_MAP_SIZE_LABEL`, `_MAP_TYPE_LABEL`, `_VICTORY_CONDITION_LABEL`. */
+/**
+ * `STRING_ID_MP_SETTINGS_LABEL`, `_MP_CIV_LABEL`, `_MAP_SIZE_LABEL`, `_MAP_TYPE_LABEL`, `_VICTORY_CONDITION_LABEL`,
+ * `_POPULATION_LIMIT_LABEL`.
+ */
 export const LABELS = {
   settings: [9682, 'Settings'],
   civ: [9681, 'Civ'],
@@ -16,6 +19,7 @@ export const LABELS = {
   victory: [10804, 'Victory Condition'],
   timeLimit: [4329, 'Time Limit'],
   score: [4330, 'Score'],
+  populationLimit: [9747, 'Population Limit'],
 } as const;
 
 /** `STRING_ID_CIVILIZATION_*` by civ 1-16 (Palmyran 15 and Macedonian 16 swap ids), 17 "Random" (scr_mps.cpp:133-150). */
@@ -79,7 +83,8 @@ export function timeLimitName(text: Text, years: number): string {
 
 /**
  * The setup screen's summary lines (`TribeMPSetupScreen::updateSummary`): "Map Size: %s" (9690), "Map Type: %s" (9654),
- * "Victory: %s" (9660), with the years or points "Victory: %s (%d)" (9662).
+ * "Victory: %s" (9660), with the years or points "Victory: %s (%d)" (9662), and, the screen's last line,
+ * "Population Limit: %d" (9712, scr_mps.cpp:2069).
  */
 export function summaryLines(text: Text, s: GameSettings): string[] {
   const fill = (format: string, ...values: (string | number)[]) => {
@@ -91,5 +96,6 @@ export function summaryLines(text: Text, s: GameSettings): string[] {
     fill(text(9690, 'Map Size: %s'), mapSizeName(text, s.mapSize)),
     fill(text(9654, 'Map Type: %s'), mapTypeName(text, s.mapType)),
     s.victory.amount === undefined ? fill(text(9660, 'Victory: %s'), victory) : fill(text(9662, 'Victory: %s (%d)'), victory, s.victory.amount),
+    fill(text(9712, 'Population Limit: %d'), s.populationLimit),
   ];
 }

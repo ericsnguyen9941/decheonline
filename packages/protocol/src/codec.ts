@@ -43,11 +43,11 @@ function commands(v: unknown): Command[] | null {
 /** A setting the lobby offers (`isLobbySettings`); unknown fields are dropped. */
 function settings(v: unknown): GameSettings | null {
   if (!isObj(v) || !isObj(v['victory'])) return null;
-  const { mapType, mapSize } = v;
+  const { mapType, mapSize, populationLimit } = v;
   const { type, amount } = v['victory'];
-  if (typeof mapType !== 'number' || typeof mapSize !== 'number' || typeof type !== 'number') return null;
+  if (typeof mapType !== 'number' || typeof mapSize !== 'number' || typeof type !== 'number' || typeof populationLimit !== 'number') return null;
   if (amount !== undefined && typeof amount !== 'number') return null;
-  const s: GameSettings = { mapType, mapSize, victory: amount === undefined ? { type } : { type, amount } };
+  const s: GameSettings = { mapType, mapSize, victory: amount === undefined ? { type } : { type, amount }, populationLimit };
   return isLobbySettings(s) ? s : null;
 }
 

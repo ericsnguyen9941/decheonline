@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { ClientMessage, Command, ServerMessage, SpeedChange } from '@aoe/protocol';
-import { CIV_RANDOM, DEFAULT_RANDOM_MAP, MAP_HILLY, resolveCivs, VICTORY_TIME_LIMIT, World } from '@aoe/sim';
+import { ATTR_POPULATION_LIMIT, CIV_RANDOM, DEFAULT_RANDOM_MAP, MAP_HILLY, resolveCivs, VICTORY_TIME_LIMIT, World } from '@aoe/sim';
 import type { Link } from '../net/link';
 import { Lockstep, NOT_RESPONDING_MS, type Timers } from './lockstep';
 
@@ -68,14 +68,16 @@ function runThrough(link: FakeLink, timers: FakeTimers, lockstep: Lockstep, turn
 }
 
 describe('lockstep', () => {
-  test("the world plays the lobby's map type, size, victory and civs, Random resolved from the seed", () => {
-    const settings = { mapType: MAP_HILLY, mapSize: 72, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 } };
+  test("the world plays the lobby's map type, size, victory, population limit and civs, Random resolved from the seed", () => {
+    const settings = { mapType: MAP_HILLY, mapSize: 72, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 }, populationLimit: 100 };
     const lockstep = new Lockstep({ link: new FakeLink(), start: { ...start, settings, civs: [10, CIV_RANDOM] }, timers: new FakeTimers() });
     const { world } = lockstep;
     expect([world.map.width, world.map.height]).toEqual([72, 72]);
     expect(world.civs).toEqual([0, 10, resolveCivs(start.seed, [10, CIV_RANDOM])[1]]);
     expect(world.victory.type).toBe(VICTORY_TIME_LIMIT);
-    expect(world.hash()).toBe(new World({ players: 3, randomSeed: start.seed, randomMap: { type: MAP_HILLY, size: 72 }, civs: world.civs, victory: settings.victory }).hash());
+    expect([world.attributes[1]![ATTR_POPULATION_LIMIT], world.attributes[2]![ATTR_POPULATION_LIMIT]]).toEqual([100, 100]);
+    const options = { players: 3, randomSeed: start.seed, randomMap: { type: MAP_HILLY, size: 72 }, civs: world.civs, victory: settings.victory, populationLimit: 100 };
+    expect(world.hash()).toBe(new World(options).hash());
     lockstep.stop();
   });
 

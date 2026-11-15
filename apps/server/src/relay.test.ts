@@ -135,7 +135,7 @@ describe('rooms', () => {
     expect(isValidCode(created.code)).toBe(true);
     expect(created.you).toBe(0);
     expect(created.players).toEqual([{ slot: 0, name: 'Eric', ready: false, civ: 5 }]);
-    expect(created.settings).toEqual({ mapType: 3, mapSize: 144, victory: { type: 0 } });
+    expect(created.settings).toEqual({ mapType: 3, mapSize: 144, victory: { type: 0 }, populationLimit: 50 });
 
     // Lower-case and dashes are accepted.
     guest.send({ t: 'join', code: created.code.toLowerCase().replace(/^(..)/, '$1-'), name: 'Bao' });
@@ -185,7 +185,7 @@ describe('rooms', () => {
 
   test('the host sets map and victory, each player its civ, both see them and the start carries them', async () => {
     const { host, guest } = await pair();
-    const settings = { mapType: 7, mapSize: 96, victory: { type: 2, amount: 5000 } };
+    const settings = { mapType: 7, mapSize: 96, victory: { type: 2, amount: 5000 }, populationLimit: 125 };
     guest.send({ t: 'settings', settings });
     expect((await guest.expect('error')).code).toBe('not-host');
     host.send({ t: 'settings', settings });
@@ -199,7 +199,7 @@ describe('rooms', () => {
     for (const c of [host, guest]) await c.expect('lobby');
     host.send({ t: 'civ', civ: 1 });
     expect((await host.expect('error')).code).toBe('locked');
-    host.send({ t: 'settings', settings: { mapType: 3, mapSize: 144, victory: { type: 0 } } });
+    host.send({ t: 'settings', settings: { mapType: 3, mapSize: 144, victory: { type: 0 }, populationLimit: 50 } });
     expect((await host.expect('error')).code).toBe('locked');
     guest.send({ t: 'ready', ready: true });
     for (const c of [host, guest]) await c.expect('lobby');
@@ -213,7 +213,7 @@ describe('rooms', () => {
 
   test('settings the sim cannot play are refused by the codec', async () => {
     const { host } = await pair();
-    host.send({ t: 'settings', settings: { mapType: 0, mapSize: 144, victory: { type: 0 } } });
+    host.send({ t: 'settings', settings: { mapType: 0, mapSize: 144, victory: { type: 0 }, populationLimit: 50 } });
     expect((await host.expect('error')).code).toBe('bad-message');
     host.send({ t: 'civ', civ: 0 });
     expect((await host.expect('error')).code).toBe('bad-message');

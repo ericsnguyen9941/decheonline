@@ -4,6 +4,7 @@ import {
   DEFAULT_TIME_LIMIT,
   LOBBY_MAP_SIZES,
   LOBBY_MAP_TYPES,
+  LOBBY_POPULATION_LIMITS,
   LOBBY_SCORE_LIMITS,
   LOBBY_TIME_LIMITS,
   LOBBY_VICTORY_TYPES,
@@ -136,8 +137,8 @@ export class LobbyView {
   }
 
   /**
-   * The host, while not ready, picks the map size, map type and victory condition (the Game Settings screen,
-   * src/scr_set.cpp); otherwise the setup screen's summary of them.
+   * The host, while not ready, picks the map size, map type, victory condition and population limit (the Game Settings
+   * screen, src/scr_set.cpp); otherwise the setup screen's summary of them.
    */
   private settings(s: GameSettings, editable: boolean): HTMLElement {
     const box = el('div', { className: 'settings', testid: 'settings' }, el('h3', {}, this.label('settings')));
@@ -165,6 +166,9 @@ export class LobbyView {
       const pick = select('victory-amount', this.label(type === VICTORY_TIME_LIMIT ? 'timeLimit' : 'score'), options, amount ?? 0, (a) => change({ victory: { type, amount: a } }));
       box.append(field(type === VICTORY_TIME_LIMIT ? 'timeLimit' : 'score', pick));
     }
+    // The dialog's numbers, "25" .. "200" (scr_set.cpp:189-192).
+    const limits: [number, string][] = LOBBY_POPULATION_LIMITS.map((v) => [v, String(v)]);
+    box.append(field('populationLimit', select('population-limit', this.label('populationLimit'), limits, s.populationLimit, (populationLimit) => change({ populationLimit }))));
     return box;
   }
 

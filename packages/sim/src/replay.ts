@@ -19,6 +19,8 @@ export interface ReplayLog {
   civs?: number[];
   /** The lobby's victory setting; default Standard. */
   victory?: VictorySettings;
+  /** The lobby's population limit; default 50. */
+  populationLimit?: number;
   turns: number;
   batches: { turn: number; player: number; commands: Command[] }[];
   /** Step size and buffer frame changes, each given to the world on the turn it was agreed for (turn-timing.md §8.7). */
@@ -35,6 +37,7 @@ export function runReplay(
     ...(log.randomMap ? { randomMap: log.randomMap } : {}),
     ...(log.civs ? { civs: log.civs } : {}),
     ...(log.victory ? { victory: log.victory } : {}),
+    ...(log.populationLimit !== undefined ? { populationLimit: log.populationLimit } : {}),
   }),
 ): number[] {
   const hashes: number[] = [];
@@ -118,16 +121,16 @@ export function sampleRandomMapReplay(turns = 60, seed = 20261115, lobby?: { ran
     resources: objects.flatMap((e) => (e.owner === 0 && e.heldAmount > 0 ? [{ id: e.id, x: e.x, y: e.y }] : [])),
     at: (id) => world.entities.get(id),
   };
-  const settings = lobby ? { civs: [...world.civs], victory: options.victory! } : {};
+  const settings = lobby ? { civs: [...world.civs], victory: options.victory!, populationLimit: options.populationLimit! } : {};
   return { players, randomSeed, randomMap, ...settings, turns, batches: sampleBatches(start, turns, seed, false), speeds: sampleSpeeds(turns) };
 }
 
 /**
  * The same on a game with lobby settings other than the defaults (docs/spec/lobby.md): Medium Hill Country, a
- * 3,000-year time limit, a Random civ (resolved from the seed) against Shang.
+ * 3,000-year time limit, a population limit of 25, a Random civ (resolved from the seed) against Shang.
  */
 export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
-  const settings: GameSettings = { mapType: MAP_HILLY, mapSize: MAP_MEDIUM, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 } };
+  const settings: GameSettings = { mapType: MAP_HILLY, mapSize: MAP_MEDIUM, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 }, populationLimit: 25 };
   return sampleRandomMapReplay(turns, seed, { randomSeed: 4244, settings, civs: [CIV_RANDOM, 10] });
 }
 

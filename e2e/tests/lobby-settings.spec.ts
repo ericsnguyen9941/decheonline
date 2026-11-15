@@ -40,7 +40,7 @@ const setup = (page: Page) =>
 test("the host's map size, map type and victory and each player's civ show live on both screens and are what both games play", async ({ browser }) => {
   const [host, guest] = await pair(browser);
   // The original's multiplayer defaults (scr_mps.cpp init_vars); the e2e server starts every player Egyptian.
-  await expect(summary(guest)).toHaveText(['Map Size: Large', 'Map Type: Inland', 'Victory: Standard']);
+  await expect(summary(guest)).toHaveText(['Map Size: Large', 'Map Type: Inland', 'Victory: Standard', 'Population Limit: 50']);
   await expect(host.getByTestId('map-size')).toHaveValue('144');
   await expect(host.getByTestId('civ-0')).toHaveValue('1');
   await expect(guest.getByTestId('civ-0')).toHaveText('Egyptian');
@@ -57,13 +57,13 @@ test("the host's map size, map type and victory and each player's civ show live 
   await host.getByTestId('civ-0').selectOption({ label: 'Shang' });
   await guest.getByTestId('civ-1').selectOption({ label: 'Yamato' });
 
-  await expect(summary(guest)).toHaveText(['Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)']);
+  await expect(summary(guest)).toHaveText(['Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)', 'Population Limit: 50']);
   await expect(guest.getByTestId('civ-0')).toHaveText('Shang');
   await expect(host.getByTestId('civ-1')).toHaveText('Yamato');
 
   // Ready locks a player's civ and the host's settings: the host sees its summary.
   await host.getByTestId('ready').click();
-  await expect(summary(host)).toHaveText(['Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)']);
+  await expect(summary(host)).toHaveText(['Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)', 'Population Limit: 50']);
   await expect(host.getByTestId('civ-0')).toHaveText('Shang');
 
   await startAndWait(host, guest);

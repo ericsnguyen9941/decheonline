@@ -1,22 +1,34 @@
 /**
- * The multiplayer setup screen's settings (docs/spec/lobby.md): the host's map type, map size and victory condition,
- * each player's civilization, and the game they start. Only the values the sim can play are offered (lobby.md §6).
+ * The multiplayer setup screen's settings (docs/spec/lobby.md): the host's map type, map size, victory condition and
+ * population limit, each player's civilization, and the game they start. Only the values the sim can play are offered (lobby.md §6).
  */
 import { CrtRand } from './rng';
 import { MAP_CONTINENTAL, MAP_HILLY, MAP_HUGE, MAP_HUMONGOUS, MAP_LARGE, MAP_MEDIUM, MAP_MOSTLY_LAND, MAP_ALL_LAND, MAP_SMALL, MAP_TINY } from './rmm-controller';
 import { CIV_GAIA } from './units';
 import { VICTORY_CONQUEST, VICTORY_SCORE, VICTORY_STANDARD, VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
-import { startingObjects, type WorldOptions } from './world';
+import { DEFAULT_POPULATION_LIMIT, startingObjects, type WorldOptions } from './world';
 
-/** The host's settings: map type (`MAP_*`), map side in tiles, and the victory type with its years or points. */
+/**
+ * The host's settings: map type (`MAP_*`), map side in tiles, the victory type with its years or points, and the
+ * population limit, each player's attribute 32 at game start.
+ */
 export interface GameSettings {
   mapType: number;
   mapSize: number;
   victory: VictorySettings;
+  populationLimit: number;
 }
 
-/** `TribeMPSetupScreen::init_vars` (src/scr_mps.cpp:436-438): Large, Mostly Land, Default victory (Standard). */
-export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = { mapType: MAP_MOSTLY_LAND, mapSize: MAP_LARGE, victory: { type: VICTORY_STANDARD } };
+/**
+ * `TribeMPSetupScreen::init_vars` (src/scr_mps.cpp:436-438): Large, Mostly Land, Default victory (Standard); the
+ * population limit `TRIBE_Game`'s constructor sets, 50 (src/tribegam.cpp:198).
+ */
+export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
+  mapType: MAP_MOSTLY_LAND,
+  mapSize: MAP_LARGE,
+  victory: { type: VICTORY_STANDARD },
+  populationLimit: DEFAULT_POPULATION_LIMIT,
+};
 
 /**
  * The map types offered, in the drop-down's order (src/scr_set.cpp:63-71): those whose two start positions a land
@@ -33,16 +45,22 @@ export const DEFAULT_TIME_LIMIT = 9000;
 /** The score drop-down, points (src/scr_set.cpp:110-123); picking Score selects line 7. */
 export const LOBBY_SCORE_LIMITS: readonly number[] = [3000, 2700, 2400, 2100, 1800, 1500, 1200, 900, 800, 700, 600, 500, 400, 300];
 export const DEFAULT_SCORE_LIMIT = 900;
+/** The multiplayer Population Limit drop-down, 25 to 200 by 25 (src/scr_set.cpp:181-194). */
+export const LOBBY_POPULATION_LIMITS: readonly number[] = [25, 50, 75, 100, 125, 150, 175, 200];
 
 /** `CIVILIZATION_COUNT`: Egyptian (1) .. Macedonian (16). */
 export const CIV_COUNT = 16;
 /** The civ drop-down's last line (string "Random", src/scr_mps.cpp:150): resolved when the game starts. */
 export const CIV_RANDOM = 17;
 
-/** Whether `s` is a setting the lobby offers: a listed map type and size, victory type and, for time or score, amount. */
+/**
+ * Whether `s` is a setting the lobby offers: a listed map type and size, population limit, victory type and, for time
+ * or score, amount.
+ */
 export function isLobbySettings(s: GameSettings): boolean {
   const { type, amount } = s.victory;
   if (!LOBBY_MAP_TYPES.includes(s.mapType) || !LOBBY_MAP_SIZES.includes(s.mapSize) || !LOBBY_VICTORY_TYPES.includes(type)) return false;
+  if (!LOBBY_POPULATION_LIMITS.includes(s.populationLimit)) return false;
   if (type === VICTORY_TIME_LIMIT) return amount !== undefined && LOBBY_TIME_LIMITS.includes(amount);
   if (type === VICTORY_SCORE) return amount !== undefined && LOBBY_SCORE_LIMITS.includes(amount);
   return amount === undefined;
@@ -66,10 +84,17 @@ export function resolveCivs(seed: number, civs: readonly number[]): number[] {
 
 /**
  * The world a lobby game starts: the random map of `settings` from `seed` (or, `testMap`, the fixed test map and its
- * start objects), each player's civ (by slot, Random resolved) and the victory setting.
+ * start objects), each player's civ (by slot, Random resolved), the victory setting and the population limit
+ * (`TRIBE_World::new_game` sets it as attribute 32, src/tworld.cpp:869-872).
  */
 export function lobbyWorldOptions(seed: number, settings: GameSettings, civs: readonly number[], testMap = false): WorldOptions {
   const players = civs.length + 1;
-  const common = { players, randomSeed: seed, civs: [CIV_GAIA, ...resolveCivs(seed, civs)], victory: { ...settings.victory } };
+  const common = {
+    players,
+    randomSeed: seed,
+    civs: [CIV_GAIA, ...resolveCivs(seed, civs)],
+    victory: { ...settings.victory },
+    populationLimit: settings.populationLimit,
+  };
   return testMap ? { ...common, units: startingObjects(players) } : { ...common, randomMap: { type: settings.mapType, size: settings.mapSize } };
 }

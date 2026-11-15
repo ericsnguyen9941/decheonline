@@ -6,31 +6,40 @@ import {
   isLobbySettings,
   LOBBY_MAP_SIZES,
   LOBBY_MAP_TYPES,
+  LOBBY_POPULATION_LIMITS,
   lobbyWorldOptions,
   resolveCivs,
 } from './game-settings';
 import { MAP_ALL_WATER, MAP_HILLY, MAP_ISTHMAS, MAP_MOSTLY_WATER } from './rmm-controller';
 import { runReplay, sampleLobbyReplay } from './replay';
+import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT } from './buildings';
+import { ObjectState } from './entities';
 import { CrtRand } from './rng';
+import { BOWMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SCORE, VICTORY_SPECIAL, VICTORY_STANDARD, VICTORY_TIME_LIMIT } from './victory';
-import { DEFAULT_RANDOM_MAP, startingObjects, World } from './world';
+import { ATTR_FOOD, DEFAULT_RANDOM_MAP, startingObjects, World } from './world';
 
 describe('lobby settings (docs/spec/lobby.md)', () => {
-  test('the defaults are the multiplayer screen\'s: Large, Mostly Land, Standard', () => {
-    expect(DEFAULT_GAME_SETTINGS).toEqual({ mapType: DEFAULT_RANDOM_MAP.type, mapSize: DEFAULT_RANDOM_MAP.size, victory: { type: VICTORY_STANDARD } });
+  test('the defaults are the multiplayer screen\'s: Large, Mostly Land, Standard, population limit 50', () => {
+    expect(DEFAULT_GAME_SETTINGS).toEqual({ mapType: DEFAULT_RANDOM_MAP.type, mapSize: DEFAULT_RANDOM_MAP.size, victory: { type: VICTORY_STANDARD }, populationLimit: 50 });
     expect(isLobbySettings(DEFAULT_GAME_SETTINGS)).toBe(true);
   });
 
   test('only what the sim can play is offered', () => {
     for (const water of [MAP_ALL_WATER, MAP_MOSTLY_WATER, MAP_ISTHMAS]) expect(LOBBY_MAP_TYPES).not.toContain(water);
     expect(LOBBY_MAP_SIZES).toEqual([72, 96, 120, 144, 200, 250]);
-    const s = (mapType: number, mapSize: number, type: number, amount?: number) => isLobbySettings({ mapType, mapSize, victory: amount === undefined ? { type } : { type, amount } });
+    const s = (mapType: number, mapSize: number, type: number, amount?: number, populationLimit = 50) =>
+      isLobbySettings({ mapType, mapSize, victory: amount === undefined ? { type } : { type, amount }, populationLimit });
     expect(s(MAP_HILLY, 72, VICTORY_TIME_LIMIT, 3000)).toBe(true);
     expect(s(MAP_HILLY, 72, VICTORY_SCORE, 900)).toBe(true);
     expect(s(MAP_HILLY, 72, VICTORY_SCORE, 950)).toBe(false);
     expect(s(MAP_HILLY, 72, VICTORY_SPECIAL)).toBe(false);
     expect(s(MAP_ALL_WATER, 72, VICTORY_STANDARD)).toBe(false);
     expect(s(MAP_HILLY, 73, VICTORY_STANDARD)).toBe(false);
+    // The multiplayer Population Limit drop-down: 25 to 200 by 25 (scr_set.cpp:181-194).
+    expect(LOBBY_POPULATION_LIMITS).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
+    for (const limit of LOBBY_POPULATION_LIMITS) expect(s(MAP_HILLY, 72, VICTORY_STANDARD, undefined, limit)).toBe(true);
+    for (const limit of [0, 24, 30, 225, 50.5]) expect(s(MAP_HILLY, 72, VICTORY_STANDARD, undefined, limit)).toBe(false);
     expect([0, 1, 16, 17, 18, 1.5].map(isLobbyCiv)).toEqual([false, true, true, true, false, false]);
   });
 
@@ -59,12 +68,14 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
   });
 
   test('settings and civs change the world', () => {
-    const options = lobbyWorldOptions(99, { mapType: MAP_HILLY, mapSize: 96, victory: { type: VICTORY_SCORE, amount: 300 } }, [9, CIV_RANDOM]);
+    const options = lobbyWorldOptions(99, { mapType: MAP_HILLY, mapSize: 96, victory: { type: VICTORY_SCORE, amount: 300 }, populationLimit: 150 }, [9, CIV_RANDOM]);
     expect(options.randomMap).toEqual({ type: MAP_HILLY, size: 96 });
     expect(options.civs).toEqual([0, 9, resolveCivs(99, [9, CIV_RANDOM])[1]]);
     expect(options.victory).toEqual({ type: VICTORY_SCORE, amount: 300 });
+    expect(options.populationLimit).toBe(150);
     const world = new World(options);
     expect(world.map.width).toBe(96);
+    expect(world.attributes.map((a) => a[ATTR_POPULATION_LIMIT])).toEqual([0, 150, 150]);
     expect([...world.civs]).toEqual(options.civs);
   });
 
@@ -73,6 +84,38 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     expect(log.randomMap).toEqual({ type: MAP_HILLY, size: 120 });
     expect(log.civs).toEqual([0, ...resolveCivs(log.randomSeed, [CIV_RANDOM, 10])]);
     expect(log.victory).toEqual({ type: VICTORY_TIME_LIMIT, amount: 3000 });
+    expect(log.populationLimit).toBe(25);
     expect(runReplay(log)).toHaveLength(20);
+  });
+
+  // `TRIBE_World::new_game` gives every player the lobby's limit as attribute 32 (tworld.cpp:869-872); a production
+  // queue does not start a unit while population >= that limit (t_b_obj.cpp:978-986), whatever headroom the Houses
+  // left; `check_obj_cost` refuses headroom costs the same way (tplayer.cpp:1054-1059).
+  test.each([25, 50])('population limit %i: training stops at the cap with headroom left', (limit) => {
+    const world = new World(lobbyWorldOptions(7, { ...DEFAULT_GAME_SETTINGS, populationLimit: limit }, [1, 1], true));
+    const a = world.attributes[1]!;
+    expect([a[ATTR_POPULATION_LIMIT], world.attributes[2]![ATTR_POPULATION_LIMIT]]).toEqual([limit, limit]);
+    a[ATTR_FOOD] = 10000;
+    const mine = () => [...world.entities.ofPlayer(1)];
+    const tc = mine().find((e) => e.type === TOWN_CENTER)!;
+    // limit - 5 Bowmen: population limit - 2. Houses for more room than the cap (each +4 headroom).
+    for (let i = 0; i < limit - 5; i++) world.createUnit({ owner: 1, type: BOWMAN, x: 1.5 + (i % 30), y: 40.5 + Math.trunc(i / 30) });
+    const houses = Math.trunc(limit / 4) + 2;
+    for (let i = 0; i < houses; i++) world.createUnit({ owner: 1, type: HOUSE, x: 2 + 2 * (i % 15), y: 2 + 2 * Math.trunc(i / 15) });
+    expect(a[ATTR_POPULATION]).toBe(limit - 2);
+    expect(a[ATTR_POPULATION]! + a[ATTR_HEADROOM]!).toBeGreaterThan(limit + 3);
+
+    world.addBatch(world.turn, 1, [{ type: 'queue', building: tc.id, unit: VILLAGER, count: 5 }]);
+    const villagers = () => mine().filter((e) => e.type === VILLAGER && e.state <= ObjectState.Active).length;
+    for (let i = 0; i < 2000 && a[ATTR_POPULATION]! < limit; i++) world.runTurn();
+    expect(a[ATTR_POPULATION]).toBe(limit);
+    expect(villagers()).toBe(5);
+    // Past the cap: nothing more is trained, the last 3 wait in the queue, the headroom stays unused.
+    for (let i = 0; i < 600; i++) world.runTurn();
+    expect(a[ATTR_POPULATION]).toBe(limit);
+    expect(villagers()).toBe(5);
+    expect(tc.queue).toEqual([{ unit: VILLAGER, count: 3 }]);
+    expect(tc.train).toBeNull();
+    expect(a[ATTR_HEADROOM]).toBeGreaterThan(3);
   });
 });
