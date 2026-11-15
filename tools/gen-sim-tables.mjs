@@ -15,11 +15,11 @@ const hook = `export async function resolve(s, c, n) {
 register('data:text/javascript,' + encodeURIComponent(hook), import.meta.url);
 
 /**
- * Unit types the sim runs; the dead objects, projectiles and upgrade sources they reach are added. Villager task types,
- * Town Center, Barracks, House, Granary, Storage Pit, Clubman, Bowman, Scout, flare, spear, gazelle, elephant, mines,
+ * Unit types the sim runs; the dead objects, projectiles and upgrade sources they reach are added. Villager task types
+ * (the Repair_Man 156 among them), Town Center, Barracks, House, Granary, Storage Pit, Clubman, Bowman, Scout, flare, spear, gazelle, elephant, mines,
  * forage, trees; what the Tool Age opens: Market, Archery Range, Stable, Small Wall, Watch Tower, Slinger, Farm.
  */
-const ROOTS = [83, 118, 119, 120, 122, 123, 124, 251, 259, 109, 12, 70, 68, 103, 73, 4, 299, 112, 100, 65, 48, 66, 102, 59, 134, 141, 143, 84, 87, 101, 72, 79, 347, 50, 126, 1];
+const ROOTS = [83, 118, 119, 120, 122, 123, 124, 156, 251, 259, 109, 12, 70, 68, 103, 73, 4, 299, 112, 100, 65, 48, 66, 102, 59, 134, 141, 143, 84, 87, 101, 72, 79, 347, 50, 126, 1];
 
 const dir = process.env.AOE1_DIR;
 if (!dir) {

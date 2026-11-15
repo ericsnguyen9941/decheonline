@@ -12,8 +12,8 @@ import { ActionResult, currentSprite, endAction, facetOf, maximumSpeed, startMov
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt } from './num';
 import { framePassed, newSprite } from './sprites';
 import { atan2, cos, sin } from './trig';
-import { AI_ACTION_ATTACK, GROUP_BUILDING, GROUP_WALL, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
-import { spriteInfo, type SpriteInfo } from './units';
+import { AI_ACTION_ATTACK, AI_ORDER_STAND_GROUND, GROUP_BUILDING, GROUP_WALL, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
+import { spriteInfo, type SpriteInfo, type UnitType } from './units';
 import { TILE_BLACK, TILE_FOGGED } from './visibility';
 
 /** `RGE_Action_Attack` states (combat.md §3.2). */
@@ -155,9 +155,11 @@ export function startAttack(
   const a: AttackAction = {
     state: 0,
     target: target.id,
-    x: target.x,
-    y: target.y,
-    z: target.z,
+    // Not latched: an attack on an object starts at (-1, -1, -1) (src/act_atak.cpp:55-57), so the first
+    // `ready_to_attack` measures the distance.
+    x: f32(-1),
+    y: f32(-1),
+    z: f32(-1),
     range: r,
     minRange: c.minRange,
     timer: 0,
@@ -168,7 +170,7 @@ export function startAttack(
     sub,
   };
   e.attack = a;
-  if (maximumSpeed(e, t) !== 0) setAttackState(ctx, e, a, ATTACK_MOVING);
+  if (!holdsPosition(e, t)) setAttackState(ctx, e, a, ATTACK_MOVING);
   else if (!readyToAttack(ctx, e, a)) {
     if (a.state === 0) setAttackState(ctx, e, a, ATTACK_WAITING);
   } else {
@@ -258,17 +260,25 @@ function readyToAttack(ctx: GameContext, e: Entity, a: AttackAction): boolean {
     }
   }
   if (!ready) {
-    setAttackState(ctx, e, a, maximumSpeed(e, t) === 0 ? ATTACK_FAILED : ATTACK_MOVING);
+    setAttackState(ctx, e, a, holdsPosition(e, t) ? ATTACK_FAILED : ATTACK_MOVING);
     return false;
   }
   return (e.attackTimer ?? 0) <= 0;
 }
 
-/** Too close: a mobile unit without a unit AI just waits (src/act_atak.cpp:499-512). */
+/** Too close: a mobile unit that is not standing its ground just waits (src/act_atak.cpp:499-512). */
 function tooClose(ctx: GameContext, e: Entity, a: AttackAction): boolean {
-  if (maximumSpeed(e, typeOf(ctx, e)) !== 0) return false;
+  if (!holdsPosition(e, typeOf(ctx, e))) return false;
   setAttackState(ctx, e, a, ATTACK_FAILED);
   return false;
+}
+
+/**
+ * The attacker does not move to its target: it cannot move, or its unit AI's current order is STAND_GROUND
+ * (`first_in_stack` and `ready_to_attack`, src/act_atak.cpp:168-187, 499-530).
+ */
+function holdsPosition(e: Entity, t: UnitType): boolean {
+  return maximumSpeed(e, t) === 0 || e.ai?.order === AI_ORDER_STAND_GROUND;
 }
 
 /** `RGE_Action_Attack::update` (combat.md §3.2, sprites.md §5.2). */

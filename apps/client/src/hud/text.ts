@@ -21,6 +21,8 @@ const RESOURCE_FALLBACK = ['Food', 'Wood', 'Stone', 'Gold'] as const;
 const STRING_COMMAND = {
   build: [4103, 'Build'],
   stop: [4105, 'Stop'],
+  'stand-ground': [4122, 'Stand Ground'],
+  repair: [4127, 'Repair'],
   'cancel-construction': [4120, 'Cancel construction'],
   more: [4112, 'More'],
   cancel: [4111, 'Cancel'],

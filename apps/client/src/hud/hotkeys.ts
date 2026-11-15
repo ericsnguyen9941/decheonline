@@ -13,10 +13,12 @@ export const HOTKEY_STRING = {
   group: 0x1039,
   ungroup: 0x103a,
   more: 0x103b,
+  'stand-ground': 0x103d,
   viewTownCenter: 0x103f,
   /** `STRING_ID_HOTKEY_SELECT_BUILDING_BASE` + 0..7. */
   selectBuilding: 0x1040,
   move: 0x104a,
+  repair: 0x104d,
 } as const;
 
 /** The key a string names: its first character in upper case (`*get_string(id)`); null for an id with no text. */
@@ -43,6 +45,8 @@ export function buttonLetter(provider: AssetProvider, b: CommandButton, world: W
     case 'group':
     case 'ungroup':
     case 'more':
+    case 'stand-ground':
+    case 'repair':
       return hotkeyLetter(provider, HOTKEY_STRING[b.kind]);
     case 'place':
     case 'train':

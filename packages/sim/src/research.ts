@@ -82,7 +82,8 @@ export function dropResearch(ctx: GameContext, e: Entity): void {
 /**
  * The stop command on a building (`RGE_Command::do_command_stop` → `TRIBE_Building_Object::stop`, `src/t_b_obj.cpp:1049`):
  * its research stops with a refund (`action_stop`), its AI stops (`stopObject(1)`: the stopped action is deleted, the
- * standing sprite shown), then the queue goes one unit at a time, each refunded.
+ * standing sprite shown), then the queue goes one unit at a time, each refunded. On a unit (`RGE_Combat_Object::stop`,
+ * `src/com_obj.cpp:103`) only the middle part runs: it has no research or queue.
  */
 export function stopBuilding(ctx: GameContext, e: Entity): void {
   if (e.research) stopResearch(ctx, e, e.research);

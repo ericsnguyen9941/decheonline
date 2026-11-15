@@ -14,6 +14,8 @@ export * from './context';
 export * from './combat';
 export * from './gather';
 export * from './build';
+export * from './repair';
+export { hasAction } from './unit-ai';
 export * from './buildings';
 export * from './masters';
 export * from './techs';

@@ -33,6 +33,14 @@ const FLASH_MS = 1500;
 const FLASH_BIT = 0x100;
 /** `STRING_ID_MESSAGE_MOVE`: shown when the Move key arms the next click. */
 const MESSAGE_MOVE = 0x0be0;
+/** `STRING_ID_MESSAGE_REPAIR`: shown when the Repair button arms the next click. */
+const MESSAGE_REPAIR = 0x0bec;
+/** `RGE_MASTER_TYPE_ACTION`, `TRIBE_MASTER_TYPE_BUILDING` and `_TREE`. */
+const MASTER_TYPE_ACTION = 40;
+const MASTER_TYPE_BUILDING = 80;
+const MASTER_TYPE_TREE = 90;
+/** `OBJECT_GROUP_CIVILIAN`: the Villagers, the only ones the Repair command sends. */
+const GROUP_CIVILIAN = 4;
 /** `sel_list` holds 25 objects (`select_one_object`). */
 const MAX_SELECTED = 25;
 /** `select_level`s: a left click picks from 2 up, a selection box picks 4 (`pick_multi(4, ...)`). */
@@ -178,6 +186,8 @@ export class UnitLayer {
   private readonly groupIds = new GroupIds();
   /** `RGE_GAME_MODE_COMMAND_MOVE`: the next left click on the map moves the selection there. */
   private commandMove = false;
+  /** `TRIBE_GAME_MODE_COMMAND_REPAIR`: the next click on the map names the building to repair. */
+  private commandRepair = false;
   /** The digits of groupnum.shp (frame = group number 1-9), once loaded, and the sprites over the selected objects. */
   private readonly groupDigits: (Texture | null)[] = [];
   private readonly groupMarks = new Container();
@@ -288,6 +298,7 @@ export class UnitLayer {
     this.selected.clear();
     this.primaryId = null;
     this.commandMove = false;
+    this.commandRepair = false;
   }
 
   /**
@@ -856,6 +867,7 @@ export class UnitLayer {
         return;
       }
       if (this.commandMove && e.button === 0) return this.moveTo(p.x, p.y);
+      if (this.commandRepair && (e.button === 0 || e.button === 2)) return this.repairAt(p.x, p.y);
       if (e.button === 0) this.press = { ...p, boxing: false };
       else if (e.button === 2) this.orderAt(p.x, p.y);
     });
@@ -952,6 +964,51 @@ export class UnitLayer {
     this.cancelPlacement();
     this.commandMove = true;
     this.o.onMessage?.(MESSAGE_MOVE);
+  }
+
+  /**
+   * The Repair button (`command_repair`, scr_game.cpp:3980): the next left or right click on the map picks the building
+   * to repair, and the message line says so.
+   */
+  armRepair(): void {
+    this.cancelPlacement();
+    this.commandMove = false;
+    this.commandRepair = true;
+    this.o.onMessage?.(MESSAGE_REPAIR);
+  }
+
+  /**
+   * The click of the Repair mode (src/tvw_main.cpp:449, `command_make_repair`, src/tplayer.cpp:995): the picked object,
+   * when it is an own building short of its hit points and not dying, is repaired by the selected Villagers, and flashes;
+   * anything else plays cantdo.wav. The mode ends either way.
+   */
+  private repairAt(x: number, y: number): void {
+    this.commandRepair = false;
+    const { world, player } = this.o;
+    const target = this.topmostAt(x, y, () => true);
+    const t = target && typeOf(world, target);
+    const units = this.commandObjects(SELECT_BOX, GROUP_CIVILIAN);
+    if (!target || !t || target.owner !== player || t.masterType !== MASTER_TYPE_BUILDING || target.hp >= t.hitPoints || target.state >= ObjectState.Dying || units.length === 0) {
+      this.o.sounds?.cantDo();
+      return;
+    }
+    this.flashes.clear();
+    this.flashes.set(target.id, performance.now());
+    this.o.issue({ type: 'repair', units, target: target.id });
+  }
+
+  /**
+   * `get_selected_objects_to_command` (src/player.cpp:1648): the selected objects of the player that are active, of select
+   * level `minLevel` or more, of object group `group` (-1 any), and of an action master type other than a tree.
+   */
+  commandObjects(minLevel: number, group = -1): number[] {
+    const { world, player } = this.o;
+    return [...this.selected].filter((id) => {
+      const e = world.entities.get(id);
+      if (!e || e.owner !== player || e.state !== ObjectState.Active || this.selectLevel(e) < minLevel) return false;
+      const t = typeOf(world, e);
+      return (group === -1 || t.group === group) && t.masterType >= MASTER_TYPE_ACTION && t.masterType !== MASTER_TYPE_TREE;
+    });
   }
 
   /** The left click of the Move mode: the selected units walk to the map point (a click off the map only ends the mode). */

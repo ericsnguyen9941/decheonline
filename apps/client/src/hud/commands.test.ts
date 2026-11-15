@@ -38,11 +38,12 @@ test('villager-class units build, others do not', () => {
   expect(canBuild(unitType(CLUBMAN))).toBe(false);
 });
 
-test('a villager gets Build and Unselect; its build menu the start buildings at their dat slots and Cancel', () => {
+test('a villager gets Build, Repair and Unselect; its build menu the start buildings at their dat slots and Cancel', () => {
   const { world, context } = game();
   const villager = own(world, VILLAGER);
   expect(commandButtons(context(villager.id))).toEqual([
     { kind: 'build', slot: 0 },
+    { kind: 'repair', slot: 1 },
     { kind: 'unselect', slot: 11 },
   ]);
   // Stone Age start techs enable the House, Barracks, Granary and Storage Pit; the Town Center needs a player with none.
@@ -120,12 +121,14 @@ test('several selected units get Group and Ungroup; one in a group Ungroup alone
   const c = { ...context(villagers[0]!.id), selected: villagers, levelOf };
   expect(commandButtons(c)).toEqual([
     { kind: 'build', slot: 0 },
+    { kind: 'repair', slot: 1 },
     { kind: 'group', slot: 6 },
     { kind: 'ungroup', slot: 7 },
     { kind: 'unselect', slot: 11 },
   ]);
   expect(commandButtons({ ...c, selected: [villagers[0]!], grouped: true })).toEqual([
     { kind: 'build', slot: 0 },
+    { kind: 'repair', slot: 1 },
     { kind: 'ungroup', slot: 6 },
     { kind: 'unselect', slot: 11 },
   ]);

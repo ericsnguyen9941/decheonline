@@ -4,6 +4,7 @@
  * Only human players exist so far: the computer-player branches are not ported.
  */
 import { ACTION_BUILD, buildFirstInStack, buildMoveTo, buildWork, updateBuild } from './build';
+import { ACTION_REPAIR, repairMoveTo, repairTaskFor, repairWork, startRepair, updateRepair } from './repair';
 import { attackWork, distanceToObject, startAttack, turnTowards, updateAttack } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
@@ -116,6 +117,8 @@ function targetTask(ctx: PlayerMasters, t: UnitType, e: Entity, target: Entity |
     const i = tasks.findIndex((k) => k.building === 1 && checkTask(ctx, k, e, target));
     if (i !== -1) return i;
   }
+  const repair = repairTaskFor(ctx, t, e, target);
+  if (repair !== null) return repair;
   let i = tasks.findIndex((k) => k.unitId === target.type && checkTask(ctx, k, e, target));
   if (i !== -1) return i;
   i = tasks.findIndex((k) => k.group === tt.group && checkTask(ctx, k, e, target));
@@ -197,10 +200,18 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
       buildWork(ctx, e, w, target, x, y);
       return w.type;
     }
+    if (w.type === ACTION_REPAIR) {
+      repairWork(ctx, e, w, target, x, y);
+      return w.type;
+    }
     if (workRetarget(ctx, e, w, target, x, y)) return w.type;
   }
   if (e.attack && !e.work && target && e.attack.target === target.id && attackWork(ctx, e, target)) return ACTION_ATTACK;
   const kind = task === -1 ? -1 : t.action!.tasks[task]!.actionType;
+  if (kind === ACTION_REPAIR) {
+    startRepair(ctx, e, task, target, x, y);
+    return kind;
+  }
   deleteActions(ctx, e);
   if (kind === ACTION_BUILD || kind === ACTION_GATHER || kind === ACTION_HUNT) {
     const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x, y, z: 0 };
@@ -215,7 +226,7 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
     startAttack(ctx, e, target, k.moving, k.proceeding, k.workRange, false);
     return ACTION_ATTACK;
   }
-  // No task, or one this port does not run yet (repair, ...): `move_to` the target or the point.
+  // No task, or one this port does not run yet: `move_to` the target or the point.
   startMoveTo(e, target ?? null, x, y, 0, MOVE_RANGE, null, false, ctx);
   return ACTION_MOVE;
 }
@@ -248,6 +259,10 @@ export function workMoveTo(ctx: GameContext, e: Entity, x: number, y: number): b
   if (!a) return false;
   if (a.type === ACTION_BUILD) {
     buildMoveTo(ctx, e, a, x, y);
+    return true;
+  }
+  if (a.type === ACTION_REPAIR) {
+    repairMoveTo(ctx, e, a, x, y);
     return true;
   }
   a.x = f32(x);
@@ -459,6 +474,7 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
   const a = e.work;
   if (!a) return ActionResult.Remove;
   if (a.type === ACTION_BUILD) return updateBuild(ctx, e, a);
+  if (a.type === ACTION_REPAIR) return updateRepair(ctx, e, a);
   const hunt = a.type === ACTION_HUNT;
   const live = (id: number) => {
     const o = object(ctx, id);
@@ -640,6 +656,23 @@ export function workTaskType(ctx: PlayerMasters, e: Entity, target: Entity): num
   if (targetTask(ctx, t, e, target) !== -1) return t.id;
   if (!t.action || t.action.taskSwapGroup === 0) return -1;
   for (const other of swapTypes(ctx, e.owner, t)) if (targetTask(ctx, other, e, target) !== -1) return other.id;
+  return -1;
+}
+
+/**
+ * `RGE_Action_Object::getTask` (src/act_obj.cpp:455): the unit's own task for `target`, else the first task of a type
+ * of its task group (in id order), which the unit then becomes. -1 when none has one.
+ */
+export function getTask(ctx: GameContext, e: Entity, target: Entity): number {
+  const t = typeOf(ctx, e);
+  const own = targetTask(ctx, t, e, target);
+  if (own !== -1 || !t.action || t.action.taskSwapGroup === 0) return own;
+  for (const other of swapTypes(ctx, e.owner, t)) {
+    const i = targetTask(ctx, other, e, target);
+    if (i === -1) continue;
+    transform(ctx, e, other);
+    return i;
+  }
   return -1;
 }
 

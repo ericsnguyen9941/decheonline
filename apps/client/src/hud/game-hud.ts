@@ -66,6 +66,10 @@ export interface HudSelection {
   group(): void;
   ungroup(): void;
   unselect(): void;
+  /** `get_selected_objects_to_command(minLevel)`: the selected own active objects of that select level or more. */
+  commandObjects(minLevel: number): number[];
+  /** `command_repair`: the next click on the map picks the building to repair. */
+  armRepair(): void;
 }
 
 export interface GameHudOptions {
@@ -186,6 +190,8 @@ export class GameHud {
       group: () => o.selection.group(),
       ungroup: () => o.selection.ungroup(),
       onButton: () => o.sounds?.button(),
+      commandObjects: (minLevel) => o.selection.commandObjects(minLevel),
+      repair: () => o.selection.armRepair(),
     });
     const sounds = o.sounds;
     const click = () => sounds?.button();

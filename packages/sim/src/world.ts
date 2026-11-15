@@ -8,7 +8,9 @@ import {
   type MoveCommand,
   type QueueCommand,
   type QueuedCommand,
+  type RepairCommand,
   type ResearchCommand,
+  type StandGroundCommand,
   type StopCommand,
   type WorkCommand,
 } from './commands';
@@ -22,6 +24,7 @@ import { copyMasters, hasMaster, master, newMasters, typeOf } from './masters';
 import { initialFacing, newMover, orderMove, teleport } from './movement';
 import { giveStorages, isAnimated, isMoving, updateObject } from './objects';
 import { DEFAULT_PATHING_ITERATIONS, PathingSystem } from './pathing';
+import { doRepair, REPAIR_MAN } from './repair';
 import { orderResearch, stopBuilding } from './research';
 import { MapStack } from './rmm-base';
 import { MAP_LARGE, MAP_MOSTLY_LAND, mapGenerate2 } from './rmm-controller';
@@ -44,7 +47,7 @@ import {
   type VictorySettings,
   type VictoryState,
 } from './victory';
-import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState } from './unit-ai';
+import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState, standGround } from './unit-ai';
 import { forgetSighting, stateChanged, Visibility, type VisibilitySnapshot } from './visibility';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
 
@@ -238,7 +241,7 @@ export interface Snapshot {
   victory: VictoryState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12 };
 
 /**
  * The simulation: `RGE_Game_World` in the original. Advances in turns of `granularity`-ms steps (`runTurn`, or one
@@ -664,6 +667,10 @@ export class World {
         return this.doCommandStop(player, command);
       case 'resign':
         return resign(this.victory, player);
+      case 'repair':
+        return this.doCommandRepair(player, command);
+      case 'stand-ground':
+        return this.doCommandStandGround(player, command);
       case 'test': {
         const tx = f32(command.x);
         const ty = f32(command.y);
@@ -838,16 +845,47 @@ export class World {
   }
 
   /**
-   * `RGE_Command::do_command_stop` on buildings (techs.md §3.5): each listed building of the sender stops its research
-   * (refunded) and empties its queue (refunded). Port-side guard (economy.md §5.5): the original stops any listed
-   * object of any player; another player's objects and units (whose stop is not ported) are skipped.
+   * `RGE_Command::do_command_stop` (docs/spec/commands.md §2): each listed object `stop`s. A unit's action ends and its
+   * unit AI stops (`RGE_Combat_Object::stop` → `stopObject(1)`); a building also stops its research and empties its
+   * queue, refunded (techs.md §3.5). Port-side guard (economy.md §5.5): the original stops any listed object of any
+   * player; another player's objects are skipped.
    */
   private doCommandStop(player: number, command: StopCommand): void {
     const ctx = this.gameContext();
     for (const id of command.objects) {
       const e = this.entities.get(id);
-      if (!e?.queue || e.owner !== player || e.state !== ObjectState.Active) continue;
+      if (!e || e.owner !== player || e.state !== ObjectState.Active) continue;
       stopBuilding(ctx, e);
+    }
+  }
+
+  /**
+   * `TRIBE_Command::do_command_repair` (support-actions.md §6.1): each listed unit `do_repair`s the target, becoming the
+   * Repair_Man. Port-side guards (economy.md §5.5): a missing target is skipped (the original would crash), and so are
+   * units not the sender's or not of the Repair_Man's object group (the original's button sends only those).
+   */
+  private doCommandRepair(player: number, command: RepairCommand): void {
+    const target = this.entities.get(command.target);
+    if (!target || target.state >= ObjectState.PendingRemoval || !hasMaster(this, player, REPAIR_MAN)) return;
+    const ctx = this.gameContext();
+    const group = master(this, player, REPAIR_MAN).group;
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e?.mover || e.owner !== player || e.state !== ObjectState.Active || typeOf(this, e).group !== group) continue;
+      doRepair(ctx, e, target);
+    }
+  }
+
+  /**
+   * Stand ground: `RGE_Player::command_stand_ground` sends a group AI order that `do_command_group_ai_order` gives each
+   * listed object (docs/spec/commands.md §3). Port-side guard (economy.md §5.5): another player's objects are skipped.
+   */
+  private doCommandStandGround(player: number, command: StandGroundCommand): void {
+    const ctx = this.gameContext();
+    for (const id of command.units) {
+      const e = this.entities.get(id);
+      if (!e || e.owner !== player || e.state !== ObjectState.Active) continue;
+      standGround(ctx, e, player);
     }
   }
 
@@ -900,7 +938,7 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
-      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop') {
+      if (q.command.type === 'build' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground') {
         hashValue(h, q.command);
       }
     }

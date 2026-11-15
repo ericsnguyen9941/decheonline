@@ -15,6 +15,7 @@ import { ACTION_BUILD } from './build';
 import { typeOf, type PlayerMasters } from './masters';
 import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
+import { ACTION_REPAIR, aiRepair } from './repair';
 import { newSprite } from './sprites';
 import type { UnitType } from './units';
 import { TILE_VISIBLE } from './visibility';
@@ -29,7 +30,7 @@ export const AI_ACTION_GATHER = 0x261;
 export const AI_ACTION_MOVE = 0x262;
 const AI_ACTION_FOLLOW = 0x264;
 export const AI_ACTION_HUNT = 0x265;
-const AI_ACTION_REPAIR = 0x26a;
+export const AI_ACTION_REPAIR = 0x26a;
 const AI_ACTION_TRAIN = 0x26b;
 export const AI_ACTION_RESEARCH = 0x26c;
 /** Unit AI orders (`UNIT_AI_ORDER_*`): an order is its action + 100. */
@@ -39,9 +40,9 @@ const AI_ORDER_STOP = 0x2c2;
 export const AI_ORDER_GATHER = 0x2c5;
 export const AI_ORDER_MOVE = 0x2c6;
 export const AI_ORDER_HUNT = 0x2c9;
-const AI_ORDER_REPAIR = 0x2ce;
+export const AI_ORDER_REPAIR = 0x2ce;
 const AI_ORDER_MOVE_TO_TARGET = 0x2d4;
-const AI_ORDER_STAND_GROUND = 0x2d5;
+export const AI_ORDER_STAND_GROUND = 0x2d5;
 const AI_ORDER_ATTACK_ROUNDUP = 0x2d9;
 /** Notifications (`UNIT_AI_NOTIFY_*` and the owner events). */
 export const NOTIFY_ATTACKED = 0x1f4;
@@ -260,6 +261,8 @@ export function aiStateForAction(action: number): [order: number, action: number
       return [AI_ORDER_MOVE, AI_ACTION_MOVE];
     case ACTION_HUNT:
       return [AI_ORDER_HUNT, AI_ACTION_HUNT];
+    case ACTION_REPAIR:
+      return [AI_ORDER_REPAIR, AI_ACTION_REPAIR];
     default:
       return [-1, -1];
   }
@@ -303,8 +306,8 @@ function removeCurrentTarget(ai: UnitAI): void {
   ai.targetZ = f32(-1);
 }
 
-/** The object has a game action at the top of its list. */
-function hasAction(e: Entity): boolean {
+/** The object has a game action at the top of its list (`have_action`). */
+export function hasAction(e: Entity): boolean {
   return !!(e.work || e.attack || e.mover?.action || e.research);
 }
 
@@ -949,6 +952,12 @@ function baseNotify(ctx: GameContext, e: Entity, note: Note): number {
       if (ai.order === AI_ORDER_MOVE_TO_TARGET && note.p1 === AI_ACTION_MOVE) {
         removeCurrentTarget(ai);
         stopObject(ctx, e, false);
+        return NOTE_DONE;
+      }
+      // A unit standing its ground drops an attack that ended, or failed out of range, and stays (`:3005`, `:3088`, `:3170`).
+      if (ai.order === AI_ORDER_STAND_GROUND && note.p1 === AI_ACTION_ATTACK) {
+        removeCurrentTarget(ai);
+        stopObject(ctx, e, true);
       }
       return NOTE_DONE;
     }
@@ -1008,8 +1017,16 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
       stopObject(ctx, e, true);
       playerNotify(ctx, e.owner, note.type, note.p1);
       return NOTE_DONE;
+    case NOTIFY_TARGET_INVALID:
+      // A repair the owner could not pay for ends (`action_finished`, src/taiuaimd.cpp:852-863). Re-tasking hunters,
+      // gatherers and builders on this notify is not ported yet.
+      if (ai.action !== AI_ACTION_REPAIR) return NOTE_DONE;
+      removeCurrentTarget(ai);
+      stopObject(ctx, e, true);
+      playerNotify(ctx, e.owner, note.type, note.p1);
+      return NOTE_DONE;
     default:
-      // Target-invalid and task requests re-task gatherers (economy); not ported yet.
+      // Task requests re-task gatherers (economy); not ported yet.
       return NOTE_DONE;
   }
 }
@@ -1132,6 +1149,9 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
     case AI_ORDER_BUILD:
       ok = aiTask(ctx, e, o.target, ACTION_BUILD, AI_ACTION_BUILD);
       break;
+    case AI_ORDER_REPAIR:
+      ok = repairObject(ctx, e, o.target, true);
+      break;
   }
   if (ok) {
     if (o.type === AI_ORDER_STOP) {
@@ -1146,6 +1166,36 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
   for (let i = index; i < q.length - 1; i++) q[i] = { ...q[i + 1]!, range: q[i]!.range };
   q.pop();
   return ok;
+}
+
+/** `repairObject` (src/aiuaimod.cpp:1884): the unit's `repair`, then the action and target recorded. */
+function repairObject(ctx: GameContext, e: Entity, targetId: number, unconditional: boolean): boolean {
+  const ai = e.ai!;
+  if (!unconditional && ai.action === AI_ACTION_REPAIR) return false;
+  const target = ctx.entities.get(targetId);
+  if (!target || !aiRepair(ctx, e, target, unconditional)) return false;
+  setAction(ai, AI_ACTION_REPAIR);
+  setTarget(ai, targetId, target.x, target.y, target.z);
+  return true;
+}
+
+/**
+ * `RGE_Player::command_stand_ground` as `do_command_group_ai_order` runs it (src/Command.cpp:628, src/player.cpp:1883):
+ * an immediate STAND_GROUND order from the player, at the unit's own position, range 1, priority 100. It stops the unit,
+ * which then attacks only what it can reach from where it stands.
+ */
+export function standGround(ctx: GameContext, e: Entity, player: number): void {
+  if (!e.ai) return;
+  aiOrder(ctx, e, player, AI_ORDER_STAND_GROUND, -1, -1, e.x, e.y, e.z, 1, true, false, 100);
+}
+
+/**
+ * The builder's hand-over of a finished, damaged building (src/tact_bld.cpp:155-162): an immediate REPAIR order from the
+ * owner on the target, range 1, priority 100.
+ */
+export function orderRepair(ctx: GameContext, e: Entity, target: Entity): void {
+  if (!e.ai) return;
+  aiOrder(ctx, e, e.owner, AI_ORDER_REPAIR, target.id, target.owner, target.x, target.y, target.z, 1, true, false, 100);
 }
 
 /** `gatherObject` / `huntObject` / `buildObject`: start the task of that kind on the target, then record it. */

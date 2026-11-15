@@ -23,6 +23,8 @@ export type UnitSound = (typeof UnitSound)[keyof typeof UnitSound];
 export const GameSound = {
   /** button2.wav: the game screen's buttons (`TRIBE_Screen_Game` makes them with `get_sound(1)`, src/scr_game.cpp:227). */
   Button: 1,
+  /** cantdo.wav: an order mode's click on nothing it can take (`error_a`, src/tvw_main.cpp:420). */
+  CantDo: 3,
   /** resdone.wav: an age reached (`TRIBE_Game::notification`, research completed, tech 101-103). */
   AgeDone: 5,
   /** res.wav: any other research completed. */

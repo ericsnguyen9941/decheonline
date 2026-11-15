@@ -90,10 +90,32 @@ export interface ResearchCommand {
   tech: number;
 }
 
-/** Stop order (`RGE_Command::do_command_stop`, techs.md §3.5) on the listed buildings: research and queue refunded. */
+/**
+ * Stop order (`RGE_Command::do_command_stop`, techs.md §3.5, docs/spec/commands.md): the listed objects stop; a
+ * building's research and queue are refunded.
+ */
 export interface StopCommand {
   type: 'stop';
   objects: number[];
+}
+
+/**
+ * Repair order (`TRIBE_Command::do_command_repair`, support-actions.md §6): the listed units of the sender repair object
+ * `target`.
+ */
+export interface RepairCommand {
+  type: 'repair';
+  units: number[];
+  target: number;
+}
+
+/**
+ * Stand ground (`RGE_Player::command_stand_ground`, sent as a group AI order, docs/spec/commands.md): the listed units of
+ * the sender stop and attack only what they reach from where they stand.
+ */
+export interface StandGroundCommand {
+  type: 'stand-ground';
+  units: number[];
 }
 
 /** Resign (`RGE_Command::do_command_resign`, victory.md §4): the sender loses. */
@@ -104,7 +126,7 @@ export interface ResignCommand {
 /** Most units one move command may list. */
 export const MAX_ORDER_UNITS = 255;
 
-export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand | ResearchCommand | StopCommand | ResignCommand;
+export type Command = NoopCommand | TestCommand | MoveCommand | WorkCommand | BuildCommand | QueueCommand | CancelCommand | AttackCommand | ResearchCommand | StopCommand | ResignCommand | RepairCommand | StandGroundCommand;
 
 function isId(v: unknown): v is number {
   return Number.isInteger(v) && (v as number) > 0 && (v as number) <= 0x7fffffff;
@@ -178,6 +200,17 @@ export function parseCommand(v: unknown): Command | null {
     }
     case 'resign':
       return { type: 'resign' };
+    case 'repair': {
+      const { units, target } = o;
+      if (!isId(target)) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'repair', units: [...(units as number[])], target };
+    }
+    case 'stand-ground': {
+      const { units } = o;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'stand-ground', units: [...(units as number[])] };
+    }
     default:
       return null;
   }

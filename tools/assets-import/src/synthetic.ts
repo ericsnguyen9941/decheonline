@@ -43,7 +43,7 @@ export const SYNTHETIC = {
     10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
     4151: 'B', 4152: 'S', 4153: 'G', 4154: 'U', 4155: 'X', 4157: 'D', 4158: 'T', 4159: 'H',
     4160: 'N', 4161: 'B', 4162: 'D', 4163: 'A', 4164: 'K', 4165: 'L', 4166: 'P', 4167: 'Y',
-    4170: 'M', 16132: 'C', 3040: 'Click an area to move there.',
+    4170: 'M', 4173: 'R', 16132: 'C', 3040: 'Click an area to move there.', 3052: 'Click the building or boat to repair.',
     9004: 'You are victorious!', 9005: 'You have been defeated!', 3013: '%s resigned.', 1217: 'Problem communicating with %s...',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],

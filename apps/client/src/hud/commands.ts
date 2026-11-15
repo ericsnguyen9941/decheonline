@@ -1,10 +1,12 @@
 // What the command button grid holds, from TRIBE_Screen_Game::setup_buttons (src/scr_game.cpp:2409) and
-// TRIBE_Player::interface_item_avail (src/tplayer.cpp:731), for the commands the sim has: the villager's build menu, the
-// buildings' train and research buttons with their queue counts, stop, and cancelling a foundation (docs/spec/hud.md).
+// TRIBE_Player::interface_item_avail (src/tplayer.cpp:731), for the commands the sim has: the villager's build menu and
+// repair, the buildings' train and research buttons with their queue counts, stop, stand ground, and cancelling a
+// foundation (docs/spec/hud.md).
 // Every master is the player's own (`player->master_objects`), so ages and techs change what the grid offers.
 import {
   ACTION_BUILD,
   BUILDER,
+  hasAction,
   isEnabled,
   master,
   ObjectState,
@@ -37,8 +39,12 @@ export type CommandButton =
    * yet, drawn dithered and deaf to the mouse.
    */
   | { kind: 'research'; slot: number; tech: number; disabled: boolean }
-  /** `TRIBE_UI_COMMAND_STOP`: the building stops its research, or empties its queue (refunded). */
+  /** `TRIBE_UI_COMMAND_STOP`: the selection stops; a building stops its research, or empties its queue (refunded). */
   | { kind: 'stop'; slot: number }
+  /** `TRIBE_UI_COMMAND_REPAIR`: the next click on the map names the building the selected Villagers repair. */
+  | { kind: 'repair'; slot: number }
+  /** `TRIBE_UI_COMMAND_STAND_GROUND`: the selected units stop and hold their ground. */
+  | { kind: 'stand-ground'; slot: number }
   /** `TRIBE_UI_COMMAND_CANCEL_CONSTRUCTION`. */
   | { kind: 'cancel-construction'; slot: number }
   /** `TRIBE_UI_COMMAND_MORE`: the build menu's other page. */
@@ -53,7 +59,7 @@ export type CommandButton =
   | { kind: 'ungroup'; slot: number };
 
 /** btncmd.shp (interface SLP 50721) frames the grid uses at 800x600 and up. */
-export const COMMAND_FRAME = { build: 2, stop: 3, 'cancel-construction': 3, group: 7, ungroup: 8, cancel: 10, unselect: 10, more: 11 } as const;
+export const COMMAND_FRAME = { repair: 0, build: 2, stop: 3, 'stand-ground': 4, 'cancel-construction': 3, group: 7, ungroup: 8, cancel: 10, unselect: 10, more: 11 } as const;
 
 /** The grid's last slot: cancel or unselect (hotkey Esc). */
 export const FINAL_SLOT = 11;
@@ -72,7 +78,12 @@ const MASTER_TYPE_BUILDING = 80;
 /** `unit_level`s with a branch of their own in `setup_buttons`: building, villager, and the other units. */
 const LEVEL_BUILDING = 2;
 const LEVEL_VILLAGER = 3;
+/** The other unit levels: soldiers (4), trade boats (5), priests (6), transports (7), the rest (9). */
+const LEVEL_SOLDIER = 4;
+const LEVEL_PRIEST = 6;
 const UNIT_LEVELS = new Set([4, 5, 6, 7, 9]);
+/** `RGE_MASTER_TYPE_ACTION`: `any_selected_have_action` looks at master types from it to the building's. */
+const MASTER_TYPE_ACTION = 40;
 /** `is_group_selected(4)`: the object group of the Villagers, which gives a mixed selection the build button. */
 const GROUP_VILLAGER = 4;
 
@@ -177,8 +188,19 @@ export function commandButtons(c: CommandContext): CommandButton[] {
     selected.length > 1 ? [{ kind: 'group', slot: 6 }, { kind: 'ungroup', slot: 7 }] : c.grouped ? [{ kind: 'ungroup', slot: 6 }] : [];
   const level = levelSelected(selected, c.levelOf);
   const t = typeOf(world, object);
-  if (level === LEVEL_VILLAGER) return [{ kind: 'build', slot: 0 }, ...grouping, unselect];
-  if (UNIT_LEVELS.has(level)) return [...grouping, unselect];
+  // `any_selected_have_action`: Stop shows while one of the selected objects has an action.
+  const busy = selected.some((e) => typeOf(world, e).masterType >= MASTER_TYPE_ACTION && typeOf(world, e).masterType <= MASTER_TYPE_BUILDING && hasAction(e));
+  if (level === LEVEL_VILLAGER) {
+    return [{ kind: 'build', slot: 0 }, { kind: 'repair', slot: 1 }, ...(busy ? [{ kind: 'stop', slot: 2 } as const] : []), ...grouping, unselect];
+  }
+  if (level === LEVEL_SOLDIER) {
+    // Attack Ground (slot 1, Stop then in 2) needs every selected unit to fire missiles with an area effect; the sim has
+    // no such unit (the Stone Thrower), so Stop is in slot 1.
+    return [{ kind: 'stand-ground', slot: 0 }, ...(busy ? [{ kind: 'stop', slot: 1 } as const] : []), ...grouping, unselect];
+  }
+  // Priests' Heal and Convert (slots 0, 1) and a transport's Unload are not ported (no such units in the sim); trade
+  // boats' and the rest's Stop is in slot 0.
+  if (UNIT_LEVELS.has(level)) return [...(busy ? [{ kind: 'stop', slot: level === LEVEL_PRIEST ? 2 : 0 } as const] : []), ...grouping, unselect];
   if (level === LEVEL_BUILDING && t.masterType === MASTER_TYPE_BUILDING) {
     if (object.state < ObjectState.Active) return [{ kind: 'cancel-construction', slot: 0 }, unselect];
     if (object.state > ObjectState.Active) return [unselect];
@@ -211,11 +233,14 @@ export function commandButtons(c: CommandContext): CommandButton[] {
     out.push(unselect);
     return out;
   }
-  // Mixed levels (0) and the rest: Build when a Villager is among them; the last button is Unselect when every one is
-  // a unit, else Cancel (which unselects in the normal mode).
+  // Mixed levels (0) and the rest: Build when a Villager is among them, then Stop when one has an action (any one, for a
+  // selection of units only); the last button is Unselect when every one is a unit, else Cancel (which unselects in the
+  // normal mode).
   const units = selected.length > 1 && level === 0 && selected.every((e) => isUnitLevel(levelOf(e.type, c.levelOf)));
-  const build: CommandButton[] = selected.some((e) => typeOf(world, e).group === GROUP_VILLAGER) ? [{ kind: 'build', slot: 0 }] : [];
-  return [...build, ...grouping, units ? unselect : { kind: 'cancel', slot: FINAL_SLOT }];
+  const villagers = selected.some((e) => typeOf(world, e).group === GROUP_VILLAGER);
+  const build: CommandButton[] = villagers ? [{ kind: 'build', slot: 0 }] : [];
+  const stop: CommandButton[] = (units ? selected.some(hasAction) : busy) ? [{ kind: 'stop', slot: villagers ? 1 : 0 }] : [];
+  return [...build, ...stop, ...grouping, units ? unselect : { kind: 'cancel', slot: FINAL_SLOT }];
 }
 
 /** A master's `unit_level`, from the pack or, without one, guessed from the sim's table. */

@@ -20,7 +20,20 @@ import {
 } from './sound-rules';
 
 /** What made a sound. */
-export type SoundEvent = 'select' | 'move' | 'command' | 'created' | 'built' | 'death' | 'research' | 'attacked' | 'button' | 'sprite' | 'message' | 'game-over';
+export type SoundEvent =
+  | 'select'
+  | 'move'
+  | 'command'
+  | 'created'
+  | 'built'
+  | 'death'
+  | 'research'
+  | 'attacked'
+  | 'button'
+  | 'sprite'
+  | 'message'
+  | 'game-over'
+  | 'cant-do';
 
 /** One sound played (or that would have played before audio started), for tests (`window.__game.sounds()`). */
 export interface SoundTrigger {
@@ -125,7 +138,9 @@ export class GameSounds {
         return;
       }
       case 'work':
-      case 'attack': {
+      case 'attack':
+      case 'repair': {
+        // A repair plays its command master's sound (`get_command_master`, src/tplayer.cpp:1008): the Repair_Man's.
         const e = first(c.units);
         const target = world.entities.get(c.target);
         if (!e || !target) return;
@@ -143,6 +158,11 @@ export class GameSounds {
         if (e) this.unit('command', e, UnitSound.Command);
         return;
       }
+      case 'stand-ground': {
+        const e = first(c.units);
+        if (e) this.unit('command', e, UnitSound.Command);
+        return;
+      }
       default:
     }
   }
@@ -150,6 +170,11 @@ export class GameSounds {
   /** A game screen button was pressed: button2.wav, from its start. */
   button(): void {
     this.game('button', GameSound.Button, -1, true);
+  }
+
+  /** An order mode's click found nothing to order: cantdo.wav. */
+  cantDo(): void {
+    this.game('cant-do', GameSound.CantDo, -1);
   }
 
   /** A notification's game sound (`TRIBE_Game::notification`'s `play_sound(index)`). */

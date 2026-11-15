@@ -12,6 +12,7 @@ import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, endAction, startMoveTo, updateMover } from './movement';
 import { f32, mul32 } from './num';
 import { newSprite } from './sprites';
+import { orderRepair } from './unit-ai';
 import type { Task } from './units';
 
 export const ACTION_BUILD = 101;
@@ -124,8 +125,11 @@ export function updateBuild(ctx: GameContext, e: Entity, a: WorkAction): ActionR
   if (a.target2 !== -1 && !object(ctx, a.target2)) a.target2 = -1;
   let target = object(ctx, a.target);
   if (target && target.state !== ObjectState.Unbuilt && a.timer === 0) {
-    // A damaged target is handed to repair as an AI order in the original (`processAIOrder`); repair is not ported,
-    // so it is dropped like a finished one.
+    // A damaged target is handed to repair: an immediate REPAIR order from the owner (src/tact_bld.cpp:155-162).
+    if (target.hp < f32(typeOf(ctx, target).hitPoints)) {
+      orderRepair(ctx, e, target);
+      return ActionResult.Continue;
+    }
     a.target = -1;
     target = undefined;
     if (a.state !== BUILD_IDLE) {

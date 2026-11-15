@@ -17,6 +17,9 @@ const MESSAGE_MS = 4000;
 const ATTR_POPULATION = 11;
 const ATTR_HEADROOM = 4;
 const ATTR_POPULATION_LIMIT = 32;
+/** The least `select_level` Stop sends to (buildings are 3), and the default the other commands use (units, 4). */
+const SELECT_LEVEL_STOP = 3;
+const SELECT_LEVEL_UNIT = 4;
 
 export interface CommandPanelOptions {
   /** The 12 grid slots, row by row, placed by the HUD. */
@@ -40,6 +43,13 @@ export interface CommandPanelOptions {
   ungroup: () => void;
   /** A button was pressed (mouse down or its key): its click sound. */
   onButton?: () => void;
+  /**
+   * `get_selected_objects_to_command(minLevel)`: the selected objects a command goes to (own, active, of that select level
+   * or more); the panel's object alone when not given.
+   */
+  commandObjects?: (minLevel: number) => number[];
+  /** The Repair button: the next click on the map picks the building to repair. */
+  repair?: () => void;
 }
 
 /**
@@ -284,9 +294,20 @@ export class CommandPanel {
         if (checkTechCost(world, player, b.tech)) issue({ type: 'research', building: object.id, tech: b.tech });
         else this.refuse((TECHS[b.tech]?.costs ?? []).filter((c) => c.flag !== 0));
         return;
-      case 'stop':
-        // `command_stop`.
-        issue({ type: 'stop', objects: [object.id] });
+      case 'stop': {
+        // `command_stop` (src/player.cpp:1824): the selected objects of select level 3 or more.
+        const objects = this.o.commandObjects?.(SELECT_LEVEL_STOP) ?? [object.id];
+        if (objects.length > 0) issue({ type: 'stop', objects });
+        return;
+      }
+      case 'stand-ground': {
+        // `command_stand_ground` (src/player.cpp:1883): the selected objects of select level 4 or more.
+        const units = this.o.commandObjects?.(SELECT_LEVEL_UNIT) ?? [object.id];
+        if (units.length > 0) issue({ type: 'stand-ground', units });
+        return;
+      }
+      case 'repair':
+        this.o.repair?.();
         return;
       case 'cancel-construction':
         issue({ type: 'cancel', target: object.id });
