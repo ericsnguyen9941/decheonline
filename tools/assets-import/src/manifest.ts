@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 10;
+export const PACK_VERSION = 11;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -143,6 +143,27 @@ export type PackUnitSounds = [number, number, number, number, number, number];
 /** `TRIBE_Game::sounds` (src/tribegam.cpp:646-682): the game's own wavs by index, interfac.drs ids 50300 up. */
 export const GAME_SOUND_IDS = [50300, 50301, 50302, 50303, 50304, 50305, 50306, 50307, 50308, 50309, 50310, 50311, 50312, 50313, 50314, 50315, 50316] as const;
 
+/**
+ * A screen's or dialog's look from its info file (`TEasy_Panel::setup`, src/Panel_ez.cpp:150-212; pack version 11).
+ * Its background SLPs are imported through its own palette; the colours are 0xRRGGBB.
+ */
+export interface PackScreen {
+  /** Background SLPs (`interface` source) for a 640, 800 and 1024 wide screen; -1 none. */
+  backgrounds: [number, number, number];
+  /** `background_position`: 0 at the top left, 1 centred, 2 tiled. */
+  position: number;
+  /** `shade_amount`: how much darker, in percent, the background shows under a bevelled button. */
+  shade: number;
+  /** `background_color`. */
+  background: number;
+  /** `bevel_colors`: the six of `DrawBevel3`, outer top-right ring first. */
+  bevels: number[];
+  /** `text_color1/2`, `focus_color1/2`, `state_color1/2`: the text and its shadow. */
+  text: [number, number];
+  focus: [number, number];
+  state: [number, number];
+}
+
 export interface PackManifest {
   version: number;
   /** Palette 50500 of interfac.drs: `{ rgb: number[768] }`. */
@@ -173,6 +194,8 @@ export interface PackManifest {
   unitSounds: Record<string, PackUnitSounds>;
   /** Resource ids of the wavs in the pack: sounds.drs (data2 overriding data) and interfac.drs's (pack version 9). */
   wavs: number[];
+  /** Keyed by the info file's interfac.drs id: the screens and dialogs the client draws (pack version 11). */
+  screens: Record<string, PackScreen>;
 }
 
 /** Pack-relative path of wav resource `id`. */

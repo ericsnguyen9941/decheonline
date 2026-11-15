@@ -1,5 +1,5 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
-import { slpImagePath, slpKey, soundPath, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
+import { slpImagePath, slpKey, soundPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
 import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
@@ -82,6 +82,10 @@ class PackProvider implements AssetProvider {
 
   string(id: number): string | null {
     return this.manifest.strings[id] ?? null;
+  }
+
+  screen(id: number): PackScreen | null {
+    return this.manifest.screens[id] ?? null;
   }
 
   mapArt(): MapArt {

@@ -45,6 +45,11 @@ export type ClientMessage =
   | { t: 'hash'; turn: number; hash: number }
   /** Answer to the server's `ping` `n`, sent at once. */
   | { t: 'pong'; n: number }
+  /**
+   * Take slot `slot` of started room `code` back after this client's socket dropped (docs/spec/turn-timing.md §9).
+   * `token` is the one `start` gave this client; `received` is how many released turns it has (it gets the rest).
+   */
+  | { t: 'rejoin'; code: string; slot: Slot; token: string; received: number }
   | { t: 'leave' };
 
 // Server -> client
@@ -59,15 +64,30 @@ export type ErrorCode =
   | 'not-host'
   | 'not-ready'
   | 'not-started'
-  | 'bad-turn';
+  | 'bad-turn'
+  /** The room, slot or token of a `rejoin` is wrong, or the slot was dropped. */
+  | 'bad-rejoin';
 
 export type EndReason = 'peer-left';
 
 export type ServerMessage =
   /** Sent on create/join and whenever the lobby changes. `you` is the receiver's slot. */
   | { t: 'lobby'; code: string; you: Slot; players: PlayerInfo[] }
-  /** The game begins. Every client seeds its sim with `seed` and submits each turn's batch once it has run it. */
-  | { t: 'start'; seed: number; commandDelay: number; players: PlayerInfo[] }
+  /**
+   * The game begins. Every client seeds its sim with `seed` and submits each turn's batch once it has run it. `token`
+   * is the receiver's own: it takes the slot back with `rejoin` after a dropped socket.
+   */
+  | { t: 'start'; seed: number; commandDelay: number; players: PlayerInfo[]; token: string }
+  /**
+   * Answer to a good `rejoin`: the slot is this client's again. `nextTurn` is the first turn the server has no batch
+   * of it for: the client sends its batches from there. The released turns it lacks follow as `turn` messages.
+   */
+  | { t: 'rejoined'; nextTurn: number }
+  /**
+   * The player in `slot` stayed away `DROP_AFTER_MS` and is dropped: the server sends a `resign` in its next batch and
+   * empty ones after it (`COMM_OTHER_PLAYER_DROPPED`, docs/spec/turn-timing.md §9).
+   */
+  | { t: 'dropped'; slot: Slot }
   /**
    * Both batches issued during `turn`, ordered by slot. Released strictly in turn order. `speed`: the step size and
    * buffer frames the server agreed for turn `speed.turn` (later than `turn + COMMAND_DELAY_TURNS`); give it to the
@@ -82,6 +102,12 @@ export type ServerMessage =
   | { t: 'desync'; turn: number; hashes: number[] }
   | { t: 'ended'; reason: EndReason }
   | { t: 'error'; code: ErrorCode; message: string };
+
+/**
+ * A player whose socket dropped is dropped from the game this long after the server last heard from it: the original's
+ * non-host timeout (`0x1D6B4` ms, src/com_hand.cpp:560). Until then it may `rejoin`.
+ */
+export const DROP_AFTER_MS = 120_500;
 
 /** The server buffers at most this many unreleased turns per player. */
 export const MAX_TURNS_AHEAD = 64;

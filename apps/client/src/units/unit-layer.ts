@@ -213,12 +213,17 @@ export class UnitLayer {
   private pointer: { x: number; y: number } | null = null;
   /** CSS cursor over an attack target: the original's sword, or the browser's crosshair without art. */
   private attackCursor = 'crosshair';
+  private revealedMap = false;
 
   constructor(private readonly o: UnitLayerOptions) {
     this.seenStep = stepOf(o.world);
     this.doppelgangers = new Doppelgangers(o.player, (type) => o.provider.mapArt()?.doppelganger(type) ?? 0);
     // Each player sees the map through its own fog (`RGE_Player::visible`), in every mode.
-    o.view.setFog({ state: (col, row) => o.world.tileVisibility(o.player, col, row), version: () => stepOf(o.world) });
+    // After a multiplayer game ends the whole map shows without fog (`set_map_visible(1)`, `set_map_fog(0)`).
+    o.view.setFog({
+      state: (col, row) => (this.revealed ? TILE_VISIBLE : o.world.tileVisibility(o.player, col, row)),
+      version: () => (this.revealed ? -1 : stepOf(o.world)),
+    });
     // Objects start at the tile count (`t.sprite.zIndex`), the fog just under it (map-view.ts).
     this.outlines.zIndex = o.world.map.width * o.world.map.height - 0.25;
     o.view.layer.addChild(this.outlines);
@@ -262,6 +267,16 @@ export class UnitLayer {
     if (this.primaryId !== null && this.selected.has(this.primaryId)) return this.primaryId;
     this.primaryId = this.selected.values().next().value ?? null;
     return this.primaryId;
+  }
+
+  /** Is the whole map shown without fog (`revealMap`)? */
+  get revealed(): boolean {
+    return this.revealedMap;
+  }
+
+  /** The game over screen's `set_map_visible(1)` and `set_map_fog(0)`: every tile visible from now on. */
+  revealMap(): void {
+    this.revealedMap = true;
   }
 
   /** `unselect_object`. */

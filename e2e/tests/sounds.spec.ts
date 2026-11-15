@@ -128,16 +128,20 @@ test('selecting, ordering, building and training play the original sounds; the o
   await host.waitForFunction((count) => window.__game!.population(1).count === count, population + 1);
   n = await heard(host, { event: 'created', sound: 114, source: VILLAGER }, n);
 
-  // Menu opens the Game Settings: the slider moves the volume, Cancel puts it back, OK keeps it.
+  // Menu, then Game Settings: the slider moves the volume, Cancel puts it back, OK keeps it.
   const volume = () => host.evaluate(() => Number((document.querySelector('[data-testid=sound-volume]') as HTMLInputElement).value));
-  await host.getByTestId('menu-menu').click();
+  const settings = async () => {
+    await host.getByTestId('menu-menu').click();
+    await host.getByTestId('menu-settings').click();
+  };
+  await settings();
   await expect(host.getByTestId('options-dialog')).toBeVisible();
   await heard(host, { event: 'button', game: BUTTON }, n);
   const start = await volume();
   await host.getByTestId('sound-volume').fill('99');
   await host.getByTestId('options-cancel').click();
   await expect(host.getByTestId('options-dialog')).toBeHidden();
-  await host.getByTestId('menu-menu').click();
+  await settings();
   expect(await volume()).toBe(start);
   await host.getByTestId('sound-volume').fill('40');
   await host.getByTestId('options-ok').click();

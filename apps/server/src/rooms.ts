@@ -1,8 +1,9 @@
-import { randomInt } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import {
   CODE_ALPHABET,
   CODE_LENGTH,
   COMMAND_DELAY_TURNS,
+  DROP_AFTER_MS,
   MAX_PLAYERS,
   MAX_TURNS_AHEAD,
   isValidCode,
@@ -33,7 +34,8 @@ export interface TurnRecord {
 }
 
 interface Member {
-  peer: Peer;
+  /** Null while the member's socket is away (dropped, not left) in a started game. */
+  peer: Peer | null;
   name: string;
   ready: boolean;
   /** Next turn this member must submit. */
@@ -48,6 +50,14 @@ interface Member {
   /** Number and send time of the latest ping. */
   pingN: number;
   pingAt: number;
+  /** The secret `start` gave this member's client, for `rejoin`. */
+  token: string;
+  /** When the server last heard from this member, ms. */
+  heardAt: number;
+  /** Dropped after its socket stayed away `DROP_AFTER_MS`: the server fills its batches from then on. */
+  dropped: boolean;
+  /** Cancels the drop while the socket is away. */
+  cancelDrop: (() => void) | null;
 }
 
 export class Room {
@@ -67,12 +77,12 @@ export class Room {
   }
 
   broadcast(message: ServerMessage): void {
-    for (const m of this.members) m.peer.send(message);
+    for (const m of this.members) m.peer?.send(message);
   }
 
   sendLobby(): void {
     const players = this.players();
-    this.members.forEach((m, you) => m.peer.send({ t: 'lobby', code: this.code, you, players }));
+    this.members.forEach((m, you) => m.peer?.send({ t: 'lobby', code: this.code, you, players }));
   }
 }
 
@@ -81,8 +91,17 @@ export interface RoomRegistryOptions {
   generateCode?: () => string;
   /** Override the game seed (tests). */
   generateSeed?: () => number;
-  /** Clock for round trips, ms (tests). */
+  /** Clock for round trips and drops, ms (tests). */
   now?: () => number;
+  /** Override the rejoin tokens (tests). */
+  generateToken?: () => string;
+  /** Run `fn` after `ms`; returns a cancel function (tests). */
+  schedule?: (fn: () => void, ms: number) => () => void;
+}
+
+function schedule(fn: () => void, ms: number): () => void {
+  const timer = setTimeout(fn, ms);
+  return () => clearTimeout(timer);
 }
 
 function randomCode(): string {
@@ -98,11 +117,15 @@ export class RoomRegistry {
   private readonly generateCode: () => string;
   private readonly generateSeed: () => number;
   private readonly now: () => number;
+  private readonly generateToken: () => string;
+  private readonly schedule: (fn: () => void, ms: number) => () => void;
 
   constructor(options: RoomRegistryOptions = {}) {
     this.generateCode = options.generateCode ?? randomCode;
     this.generateSeed = options.generateSeed ?? (() => randomInt(2 ** 32));
     this.now = options.now ?? (() => performance.now());
+    this.generateToken = options.generateToken ?? (() => randomBytes(16).toString('hex'));
+    this.schedule = options.schedule ?? schedule;
   }
 
   roomOf(peer: Peer): Room | undefined {
@@ -115,6 +138,8 @@ export class RoomRegistry {
         return this.create(peer, message.name);
       case 'join':
         return this.join(peer, message.code, message.name);
+      case 'rejoin':
+        return this.rejoin(peer, message.code, message.slot, message.token, message.received);
       case 'leave':
         return this.disconnect(peer);
       default:
@@ -125,6 +150,7 @@ export class RoomRegistry {
     const slot = room.members.findIndex((m) => m.peer === peer);
     const member = room.members[slot];
     if (!member) return reject(peer, 'not-in-room', 'join or create a room first');
+    member.heardAt = this.now();
     if (room.started) this.ping(member, false);
     switch (message.t) {
       case 'ready':
@@ -143,15 +169,19 @@ export class RoomRegistry {
     }
   }
 
-  /** Remove a peer from its room (leave message or dropped socket). */
-  disconnect(peer: Peer): void {
+  /**
+   * Remove a peer from its room: a leave message or a socket closed on purpose (`dropped` false), or a socket that broke
+   * (`dropped`). In a started game a broken socket keeps its slot for `rejoin` until `DROP_AFTER_MS` after the server
+   * last heard from it; then the player is dropped (docs/spec/turn-timing.md §9). Leaving ends the game for the others.
+   */
+  disconnect(peer: Peer, dropped = false): void {
     const room = this.byPeer.get(peer);
     if (!room) return;
     this.byPeer.delete(peer);
     const slot = room.members.findIndex((m) => m.peer === peer);
+    if (room.started && dropped) return this.away(room, room.members[slot]!);
     room.members.splice(slot, 1);
     if (room.started) {
-      // No reconnection yet: a started game ends when anyone leaves.
       room.broadcast({ t: 'ended', reason: 'peer-left' });
       this.closeRoom(room);
       return;
@@ -165,8 +195,57 @@ export class RoomRegistry {
   }
 
   private closeRoom(room: Room): void {
-    for (const m of room.members) this.byPeer.delete(m.peer);
+    for (const m of room.members) {
+      if (m.peer) this.byPeer.delete(m.peer);
+      m.cancelDrop?.();
+      m.cancelDrop = null;
+    }
     this.rooms.delete(room.code);
+  }
+
+  /** `member`'s socket broke: hold its slot, and drop it once it stayed away `DROP_AFTER_MS`. */
+  private away(room: Room, member: Member): void {
+    member.peer = null;
+    const wait = Math.max(0, DROP_AFTER_MS - (this.now() - member.heardAt));
+    member.cancelDrop = this.schedule(() => this.drop(room, member), wait);
+  }
+
+  /**
+   * Drop `member` from the game as the original's host does with a player that stopped answering (`Kick`, then every
+   * other player runs `command_resign(player, 1)` on `COMM_OTHER_PLAYER_DROPPED`): its next batch resigns it, and from
+   * then on the server fills its batches. A room with nobody connected left is closed.
+   */
+  private drop(room: Room, member: Member): void {
+    member.cancelDrop = null;
+    if (this.rooms.get(room.code) !== room) return;
+    if (room.members.every((m) => m.peer === null)) return this.closeRoom(room);
+    member.dropped = true;
+    room.broadcast({ t: 'dropped', slot: room.members.indexOf(member) });
+    member.pending.set(member.nextTurn, [{ type: 'resign' }]);
+    member.nextTurn++;
+    this.release(room);
+  }
+
+  /** Give a dropped socket's slot back to its client (`rejoin`): the turns it missed follow `rejoined`. */
+  private rejoin(peer: Peer, rawCode: string, slot: number, token: string, received: number): void {
+    if (this.byPeer.has(peer)) return reject(peer, 'already-in-room', 'leave the current room first');
+    const code = normalizeCode(rawCode);
+    const room = isValidCode(code) ? this.rooms.get(code) : undefined;
+    const member = room?.started ? room.members[slot] : undefined;
+    if (!room || !member || member.dropped || member.token !== token || received > room.log.length) {
+      return reject(peer, 'bad-rejoin', 'cannot rejoin that game');
+    }
+    // A socket that broke without the server noticing yet loses the slot to the new one.
+    if (member.peer) this.byPeer.delete(member.peer);
+    member.cancelDrop?.();
+    member.cancelDrop = null;
+    member.peer = peer;
+    member.heardAt = this.now();
+    this.byPeer.set(peer, room);
+    peer.send({ t: 'rejoined', nextTurn: member.nextTurn });
+    for (const record of room.log.slice(received)) peer.send({ t: 'turn', ...record });
+    peer.send({ t: 'rtt', rtt: room.members.map((m) => m.rtt) });
+    this.ping(member, true);
   }
 
   private newMember(peer: Peer, name: string, slot: number): Member {
@@ -181,6 +260,10 @@ export class RoomRegistry {
       frameMs: 0,
       pingN: 0,
       pingAt: 0,
+      token: '',
+      heardAt: this.now(),
+      dropped: false,
+      cancelDrop: null,
     };
   }
 
@@ -216,12 +299,11 @@ export class RoomRegistry {
     }
     room.started = true;
     room.seed = this.generateSeed();
-    room.broadcast({
-      t: 'start',
-      seed: room.seed,
-      commandDelay: COMMAND_DELAY_TURNS,
-      players: room.players(),
-    });
+    const players = room.players();
+    for (const m of room.members) {
+      m.token = this.generateToken();
+      m.peer?.send({ t: 'start', seed: room.seed, commandDelay: COMMAND_DELAY_TURNS, players, token: m.token });
+    }
     for (const m of room.members) this.ping(m, true);
   }
 
@@ -229,6 +311,7 @@ export class RoomRegistry {
   private ping(member: Member, force: boolean): void {
     const now = this.now();
     if (!force && now - member.pingAt <= PING_INTERVAL_MS) return;
+    if (!member.peer) return;
     member.pingN++;
     member.pingAt = now;
     member.peer.send({ t: 'ping', n: member.pingN });
@@ -260,7 +343,7 @@ export class RoomRegistry {
   private release(room: Room): void {
     for (;;) {
       const turn = room.log.length;
-      if (room.members.some((m) => !m.pending.has(turn))) return;
+      if (room.members.some((m) => !m.dropped && !m.pending.has(turn))) return;
       const batches = room.members.map((m, slot) => ({ slot, commands: m.pending.get(turn) ?? [] }));
       for (const m of room.members) m.pending.delete(turn);
       // Through the relay a round trip between players is the sum of both legs (turn-timing.md §8.3).
@@ -277,10 +360,11 @@ export class RoomRegistry {
     if (!room.started) return reject(peer, 'not-started', 'game has not started');
     if (turn >= room.log.length) return reject(peer, 'bad-turn', 'turn not released yet');
     member.hashes.set(turn, hash);
-    if (room.members.some((m) => !m.hashes.has(turn))) return;
+    if (room.members.some((m) => !m.dropped && !m.hashes.has(turn))) return;
     const hashes = room.members.map((m) => m.hashes.get(turn) ?? 0);
     for (const m of room.members) m.hashes.delete(turn);
-    if (hashes.some((h) => h !== hashes[0])) {
+    const reported = hashes.filter((_, slot) => !room.members[slot]!.dropped);
+    if (reported.some((h) => h !== reported[0])) {
       room.desyncs.push(turn);
       room.broadcast({ t: 'desync', turn, hashes });
     }

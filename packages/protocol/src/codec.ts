@@ -71,6 +71,12 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
       return { ok: true, message: { t: 'start' } };
     case 'leave':
       return { ok: true, message: { t: 'leave' } };
+    case 'rejoin': {
+      const { code, slot, token, received } = v;
+      if (typeof code !== 'string' || code.length > 32 || typeof token !== 'string' || token.length > 64) return fail('bad rejoin');
+      if (!isTurn(slot) || !isTurn(received)) return fail('bad rejoin');
+      return { ok: true, message: { t: 'rejoin', code, slot, token, received } };
+    }
     case 'turn': {
       const cmds = commands(v['commands']);
       const frameMs = v['frameMs'];
@@ -94,7 +100,7 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
   }
 }
 
-const SERVER_TAGS = new Set(['lobby', 'start', 'turn', 'ping', 'rtt', 'desync', 'ended', 'error']);
+const SERVER_TAGS = new Set(['lobby', 'start', 'rejoined', 'dropped', 'turn', 'ping', 'rtt', 'desync', 'ended', 'error']);
 
 /** Parse a frame from the server. Checks the tag only; the server is trusted to send well-formed bodies. */
 export function decodeServerMessage(raw: string): Decoded<ServerMessage> {

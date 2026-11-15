@@ -1,5 +1,5 @@
 import { COMMAND_DELAY_TURNS, SINGLE_STEP_TURNS, startingObjects, World, type Command } from '@aoe/sim';
-import type { EndReason, SpeedChange, TurnBatch } from '@aoe/protocol';
+import type { ClientMessage, EndReason, SpeedChange, TurnBatch } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
 export interface LockstepStart {
@@ -7,7 +7,18 @@ export interface LockstepStart {
   commandDelay: number;
   /** Number of human players; protocol slot s is sim player s + 1 (player 0 is Gaia). */
   playerCount: number;
+  /** Room, slot and token to take the slot back with after a broken socket; without it a broken link ends the game. */
+  rejoin?: { code: string; slot: number; token: string };
 }
+
+/** How the game ended for this client: the server's reason, or `lost` when the link broke for good (`rejoin` refused). */
+export type LockstepEnd = EndReason | 'lost';
+
+/**
+ * While the game waits on a turn, every this long it says who it waits for: the original warns of a player it has not
+ * heard from for 25 s, and again every 25 s (`COMM_PLAYER_NOT_RESPONDING`, src/com_hand.cpp:565).
+ */
+export const NOT_RESPONDING_MS = 25_000;
 
 export interface Timers {
   set(fn: () => void, ms: number): unknown;
@@ -45,7 +56,11 @@ export class Lockstep {
   /** Called after each executed turn. */
   onTurn: (turn: number, hash: number) => void = () => {};
   onDesync: (turn: number, hashes: number[]) => void = () => {};
-  onEnded: (reason: EndReason) => void = () => {};
+  onEnded: (reason: LockstepEnd) => void = () => {};
+  /** The game has waited `NOT_RESPONDING_MS` (and every `NOT_RESPONDING_MS` after) for a turn the relay has not released. */
+  onNotResponding: () => void = () => {};
+  /** The server dropped the player in `slot` (its next batch resigns it). */
+  onDropped: (slot: number) => void = () => {};
   /** Total command batches received, per slot (debug and tests). */
   readonly applied: Command[][] = [];
   /** The server's latest round trip to each slot, ms. */
@@ -59,7 +74,15 @@ export class Lockstep {
   private readonly now: () => number;
   private readonly frameMs: () => number;
   private readonly released = new Map<number, { batches: TurnBatch[]; speed?: SpeedChange }>();
+  /** Released turns received so far (the relay releases them in order). */
+  private received = 0;
+  /** Released turns given to the world so far. */
+  private taken = 0;
+  /** This client's batches the relay has not released yet, by turn: sent again after a rejoin. */
+  private readonly unreleased = new Map<number, ClientMessage>();
   private pending: Command[] = [];
+  /** Timer of the next not-responding warning while the loop waits on a batch. */
+  private stallTimer: unknown;
   /** Wall time of the current turn's boundary step. */
   private boundaryAt = 0;
   /** Wall time the next boundary step is due: a frame after the last buffer step was due. */
@@ -82,9 +105,17 @@ export class Lockstep {
     this.unsubscribe = link.onMessage((m) => {
       if (this.stopped) return;
       if (m.t === 'turn') {
+        if (m.turn < this.taken || this.released.has(m.turn)) return;
+        this.received = Math.max(this.received, m.turn + 1);
+        this.unreleased.delete(m.turn);
         this.released.set(m.turn, m.speed ? { batches: m.batches, speed: m.speed } : { batches: m.batches });
         for (const batch of m.batches) (this.applied[batch.slot] ??= []).push(...batch.commands);
         this.pump();
+      } else if (m.t === 'rejoined') {
+        // The batches sent while the socket was down never arrived.
+        for (const [turn, batch] of [...this.unreleased].sort((a, b) => a[0] - b[0])) if (turn >= m.nextTurn) link.send(batch);
+      } else if (m.t === 'dropped') {
+        this.onDropped(m.slot);
       } else if (m.t === 'ping') {
         const pong = () => link.send({ t: 'pong', n: m.n });
         if (this.pongDelayMs > 0) this.timers.set(pong, this.pongDelayMs);
@@ -99,10 +130,12 @@ export class Lockstep {
         this.onEnded(m.reason);
       }
     });
+    const rejoin = start.rejoin;
+    if (rejoin) link.setResume?.(() => ({ t: 'rejoin', ...rejoin, received: this.received }));
     link.onClose(() => {
       if (this.stopped) return;
       this.stop();
-      this.onEnded('peer-left');
+      this.onEnded(rejoin ? 'lost' : 'peer-left');
     });
     // Start on the next pass, once the caller has set its handlers.
     this.wait(0);
@@ -135,7 +168,9 @@ export class Lockstep {
   stop(): void {
     this.stopped = true;
     this.unsubscribe();
+    this.link.setResume?.(null);
     if (this.timer !== undefined) this.timers.clear(this.timer);
+    this.settle();
   }
 
   /** Run every step that is due, then wait for the next one's time or batch. A late loop catches up at once. */
@@ -147,7 +182,8 @@ export class Lockstep {
       const wait = due - this.now();
       if (wait > 0) return this.wait(wait);
       if (world.turnStep === 0) {
-        if (!this.takeBatches(world.turn)) return;
+        if (!this.takeBatches(world.turn)) return this.stall();
+        this.settle();
         this.boundaryAt = this.now();
       }
       world.runStep();
@@ -166,9 +202,25 @@ export class Lockstep {
     const release = this.released.get(issued);
     if (!release) return false;
     this.released.delete(issued);
+    this.taken = issued + 1;
     for (const batch of release.batches) this.world.addBatch(issued, batch.slot + 1, batch.commands);
     if (release.speed) this.world.setSpeedChange(release.speed);
     return true;
+  }
+
+  /** The loop waits on a batch: warn every `NOT_RESPONDING_MS` until it comes. */
+  private stall(): void {
+    if (this.stallTimer !== undefined) return;
+    const warn = () => {
+      this.stallTimer = this.timers.set(warn, NOT_RESPONDING_MS);
+      this.onNotResponding();
+    };
+    this.stallTimer = this.timers.set(warn, NOT_RESPONDING_MS);
+  }
+
+  private settle(): void {
+    if (this.stallTimer !== undefined) this.timers.clear(this.stallTimer);
+    this.stallTimer = undefined;
   }
 
   private endTurn(turn: number): void {
@@ -176,7 +228,9 @@ export class Lockstep {
     this.hashes.set(turn, hash);
     this.link.send({ t: 'hash', turn, hash });
     const frameMs = Math.min(255, Math.round(this.frameMs()));
-    this.link.send(frameMs > 0 ? { t: 'turn', turn, commands: this.pending, frameMs } : { t: 'turn', turn, commands: this.pending });
+    const batch: ClientMessage = frameMs > 0 ? { t: 'turn', turn, commands: this.pending, frameMs } : { t: 'turn', turn, commands: this.pending };
+    if (turn >= this.received) this.unreleased.set(turn, batch);
+    this.link.send(batch);
     this.pending = [];
     this.onTurn(turn, hash);
   }

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { ClientMessage, Command, ServerMessage, SpeedChange } from '@aoe/protocol';
 import { startingObjects, World } from '@aoe/sim';
 import type { Link } from '../net/link';
-import { Lockstep, type Timers } from './lockstep';
+import { Lockstep, NOT_RESPONDING_MS, type Timers } from './lockstep';
 
 class FakeLink implements Link {
   sent: ClientMessage[] = [];
@@ -16,6 +16,7 @@ class FakeLink implements Link {
   }
   onClose(): void {}
   close(): void {}
+  setResume?: (resume: (() => ClientMessage) | null) => void;
   receive(m: ServerMessage): void {
     for (const h of this.handlers) h(m);
   }
@@ -89,7 +90,8 @@ describe('lockstep', () => {
     timers.next();
     timers.next();
     expect(lockstep.turn).toBe(2);
-    expect(timers.due).toEqual([]);
+    // Only the not-responding warning is due.
+    expect(timers.due.map((t) => t.at - timers.clock)).toEqual([NOT_RESPONDING_MS]);
     link.receive(release(1)); // out of order: turn 0 not released yet
     expect(lockstep.turn).toBe(2);
     link.receive(release(0));
@@ -162,6 +164,46 @@ describe('lockstep', () => {
     expect(timers.clock).toBe(500);
     link.receive({ t: 'rtt', rtt: [12, 40] });
     expect(lockstep.rtt).toEqual([12, 40]);
+  });
+
+  test('waiting on a turn warns after 25 s and every 25 s after, until the turn comes', () => {
+    const { link, timers, lockstep } = setup();
+    let warnings = 0;
+    lockstep.onNotResponding = () => warnings++;
+    // Turns 0 and 1 run; turn 2 waits for the release of turn 0.
+    for (let i = 0; i < 3; i++) timers.next();
+    const stalledAt = timers.clock;
+    timers.next();
+    expect(timers.clock - stalledAt).toBe(NOT_RESPONDING_MS);
+    expect(warnings).toBe(1);
+    timers.next();
+    expect(warnings).toBe(2);
+    link.receive(release(0));
+    expect(lockstep.turn).toBe(3);
+    expect(timers.due.every((t) => t.at - timers.clock < NOT_RESPONDING_MS)).toBe(true);
+  });
+
+  test('a rejoin asks for the turns it lacks and sends again the batches the relay never got', () => {
+    const link = new FakeLink();
+    let resume: (() => ClientMessage) | null = null;
+    link.setResume = (r) => (resume = r);
+    const timers = new FakeTimers();
+    const rejoin = { code: 'ABCD2', slot: 1, token: 'secret' };
+    const lockstep = new Lockstep({ link, start: { ...start, rejoin }, timers, now: () => timers.clock, frameMs: () => FRAME_MS });
+    for (let i = 0; i < 3; i++) timers.next();
+    link.receive(release(0));
+    timers.next();
+    // Turns 0-2 were sent; only turn 0 was released.
+    expect(lockstep.turn).toBe(3);
+    expect(resume!()).toEqual({ t: 'rejoin', ...rejoin, received: 1 });
+    link.sent.splice(0);
+    link.receive({ t: 'rejoined', nextTurn: 2 });
+    expect(link.sent).toEqual([{ t: 'turn', turn: 2, commands: [], frameMs: FRAME_MS }]);
+    link.receive(release(1));
+    link.receive(release(2));
+    expect(resume!()).toMatchObject({ received: 3 });
+    lockstep.stop();
+    expect(resume).toBe(null);
   });
 
   test('desync and ended stop the loop and notify', () => {

@@ -195,7 +195,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   const soundTick = () => sounds?.update();
   app.ticker.add(soundTick);
 
-  const end = (kind: 'desync' | 'peer-left', detail: string) => {
+  // Back to the lobby: the game screen goes, the session leaves its room.
+  const teardown = () => {
     lockstep?.stop();
     lockstep = undefined;
     panel?.remove();
@@ -210,6 +211,9 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     window.__map = undefined;
     setGameVisible(false);
     session.finish();
+  };
+  const end = (kind: 'desync' | 'peer-left', detail: string) => {
+    teardown();
     showEndDialog(kind, detail, () => undefined);
   };
 
@@ -222,9 +226,16 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     const game = new Lockstep({
       link,
       speed,
-      start: { seed: start.seed, commandDelay: start.commandDelay, playerCount: start.players.length },
+      // A broken socket comes back to the same room and slot (docs/spec/turn-timing.md §9).
+      start: { seed: start.seed, commandDelay: start.commandDelay, playerCount: start.players.length, rejoin: { code: session.state.code, slot: you, token: start.token } },
       frameMs: () => frames.average(),
     });
+    // Player names by player number (slot + 1), as the score and the achievements show them.
+    const names = [''];
+    for (const p of start.players) names[p.slot + 1] = p.name;
+    const dropped = new Set<number>();
+    game.onDropped = (slot) => dropped.add(slot + 1);
+    game.onNotResponding = () => hud?.notResponding();
     lockstep = game;
     // Before the first turn runs: the relay releases turns asynchronously.
     if (debug && resources !== undefined) {
@@ -238,7 +249,16 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     }
     setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
-    game.onEnded = () => end('peer-left', 'Your opponent left the game.');
+    game.onEnded = (reason) => {
+      if (reason === 'lost') {
+        // The server dropped this player (or the link never came back): the game is over for it.
+        if (hud) hud.droppedSelf();
+        else end('peer-left', 'You were dropped from the game.');
+      } else if (!hud?.gameOver.over) {
+        end('peer-left', 'Your opponent left the game.');
+      }
+      // After the end of the game the other player leaving changes nothing: this one stays until Menu/Quit Game.
+    };
     if (debug) panel = debugPanel(host, game, player, () => units, () => hud, () => sounds, frames);
     void createAssetProvider().then(async (provider) => {
       const view = await MapView.create(app, game.world.map, provider);
@@ -246,8 +266,10 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       mapView = view;
       const gameSounds = new GameSounds({ world: game.world, player, table: provider.soundTable(), audio });
       sounds = gameSounds;
-      // An order acknowledges itself with the unit's sound as the player gives it (`command_make_*`).
+      // An order acknowledges itself with the unit's sound as the player gives it (`command_make_*`); none in the game
+      // over mode.
       const order = (c: Command) => {
+        if (hud?.gameOver.over) return;
         gameSounds.command(c);
         game.issue(c);
       };
@@ -278,6 +300,18 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         cancelPlacement: () => layer.cancelPlacement(),
         map: { view, units: layer },
         sounds: gameSounds,
+        game: {
+          names,
+          resign: () => game.issue({ type: 'resign' }),
+          disconnect: () => {
+            game.stop();
+            link.send({ t: 'leave' });
+          },
+          leave: teardown,
+          dropped: (p) => dropped.has(p),
+          onGameOver: () => layer.unselect(),
+          reveal: () => layer.revealMap(),
+        },
       });
       // Start looking at this player's town centre spot.
       const own = units.ownUnits()[0];

@@ -28,6 +28,8 @@ const FALLBACK_PLAYERS = [0x0000ff, 0xff0000, 0xffff00, 0x8c4a21, 0xff8000, 0x00
 export interface MinimapUnits {
   readonly selected: ReadonlySet<number>;
   readonly doppelgangers: { readonly copies: ReadonlyMap<number, Doppelganger> };
+  /** Is the whole map shown without fog (the game is over)? */
+  readonly revealed: boolean;
   /** Order the selected own units to walk to map point (x, y); false when none is selected. */
   moveSelectedTo(x: number, y: number): boolean;
 }
@@ -112,14 +114,19 @@ export class Minimap {
     this.g.putImageData(this.image, 0, 0);
   }
 
+  /** What the player knows of tile (col, row), every tile visible once the map is revealed. */
+  private visibility(col: number, row: number): number {
+    return this.o.units.revealed ? TILE_VISIBLE : this.o.world.tileVisibility(this.o.player, col, row);
+  }
+
   /** `draw_explored_tiles`: a tile is drawn the first time the player has it explored. */
   private exploreTiles(): void {
-    const { world, player } = this.o;
+    const { world } = this.o;
     const { width, height } = world.map;
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const i = row * width + col;
-        if (this.explored[i] || world.tileVisibility(player, col, row) === TILE_BLACK) continue;
+        if (this.explored[i] || this.visibility(col, row) === TILE_BLACK) continue;
         this.explored[i] = 1;
         this.drawTile(col, row);
       }
@@ -174,11 +181,11 @@ export class Minimap {
    * set; `map_draw_level` 1 a 3x3 square, 2 a plus, 3 a plus in the master's own `map_color`.
    */
   private drawVisible(e: Entity, colour1: number, colour2: number, flashing = false): void {
-    const { world, player } = this.o;
+    const { world } = this.o;
     const col = Math.floor(e.x);
     const row = Math.floor(e.y);
     if (!world.map.inBounds(col, row)) return;
-    const visible = world.tileVisibility(player, col, row);
+    const visible = this.visibility(col, row);
     if (visible !== TILE_VISIBLE && (visible !== TILE_FOGGED || typeOf(world, e).fogFlag === 0)) return;
     const [level, colour] = this.art?.unitMinimap(e.type) ?? fallbackLevel(e);
     if (level === 3 && !flashing) colour1 = colour;
@@ -189,7 +196,7 @@ export class Minimap {
   private drawCopy(c: Doppelganger): void {
     const col = Math.floor(c.x);
     const row = Math.floor(c.y);
-    if (this.o.world.tileVisibility(this.o.player, col, row) !== TILE_FOGGED) return;
+    if (this.visibility(col, row) !== TILE_FOGGED) return;
     const [level, colour] = this.art?.unitMinimap(c.type) ?? [0, 0];
     const own = level === 3 ? colour : c.owner > 0 ? this.playerColour(c.owner) : WHITE;
     this.drawLevel(col, row, level, own, own);

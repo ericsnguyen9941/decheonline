@@ -40,6 +40,22 @@ test('imports interface slps, a data2 Interfac.drs overriding the base one, and 
   expect(unit.displayed).toHaveLength(4);
 });
 
+test("imports a screen's info file with its colours through the screen's own palette", () => {
+  const { id, background } = SYNTHETIC.screen;
+  expect(manifest.screens[id]).toEqual({
+    backgrounds: [background, -1, -1],
+    position: 0,
+    shade: 54,
+    background: 0xffffff,
+    bevels: [0x9b9b9b, 0x9a9a9a, 0x999999, 0x989898, 0x979797, 0x969696],
+    text: [0xd9d0b0, 0],
+    focus: [0xcacf01, 0],
+    state: [0xd9d0b0, 0],
+  });
+  expect(manifest.slps[slpKey('interface', background)]?.frames).toHaveLength(1);
+  expect(Object.keys(manifest.screens)).toEqual([String(id)]);
+});
+
 test("imports map.bmp's lines, the tile edges, the minimap colours and each unit's minimap and doppelganger fields", () => {
   const shape = manifest.minimap!;
   expect(shape).toMatchObject({ width: 220, height: 114, startY: 1 });

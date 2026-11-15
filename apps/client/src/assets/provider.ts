@@ -1,5 +1,5 @@
 import type { Texture } from 'pixi.js';
-import type { PackMinimap, PackTileEdges } from '@aoe/assets-import/manifest';
+import type { PackMinimap, PackScreen, PackTileEdges } from '@aoe/assets-import/manifest';
 
 export interface SpriteFrame {
   texture: Texture;
@@ -149,4 +149,6 @@ export interface AssetProvider {
   terrainLayout(terrainId: number): { rows: number; cols: number };
   /** The dat's sounds and the wavs; null without a pack. */
   soundTable(): SoundTable | null;
+  /** The look of a screen or dialog by its info file's interfac.drs id (pack version 11); null when unknown. */
+  screen(id: number): PackScreen | null;
 }

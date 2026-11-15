@@ -8,10 +8,20 @@ import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
 import { Minimap, type MinimapUnits } from './minimap';
+import { AchievementsScreen } from './achievements';
+import { easyButton, FONT, GAME_DIALOG_INFO, lookOf } from './easy-panel';
+import { ChatLines, formatName, GameOver, MESSAGE_NOT_RESPONDING, SOUND_CHAT, type GameOverSounds } from './game-over';
+import { MenuDialog, okPopup } from './menu';
+import { ScoreDisplay } from './score-display';
 import { OptionsDialog, type OptionsSounds } from './options';
 import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
 import { ageName, civilizationName, objectName, statRows, topButtonLabels } from './text';
+
+/** `STRING_ID_SCORE_BUTTON_SHORTCUT`: the score button's text. */
+const SCORE_BUTTON = 0x1023;
+/** `STRING_ID_PLAYER_DROPPED_NOTICE`. */
+const DROPPED_NOTICE = 0x25c9;
 
 /** Frames in health.shp; the bar shows frame `count - count * hp / max`. */
 const HEALTH_FRAMES = 26;
@@ -76,7 +86,27 @@ export interface GameHudOptions {
   /** The map view and its units, for the minimap; without them the minimap's frame stays empty. */
   map?: { view: MapView; units: MinimapUnits };
   /** The buttons' click and the sound volume the Menu button's settings change; without it, no click and no settings. */
-  sounds?: OptionsSounds;
+  sounds?: OptionsSounds & GameOverSounds;
+  /** The multiplayer game around the screen: the menu's resign and quit, and the end of the game. */
+  game: HudGame;
+}
+
+/** What the game screen asks of the multiplayer game. */
+export interface HudGame {
+  /** Player names by player number (0 Gaia). */
+  names: readonly string[];
+  /** Send the resign command (`command_resign`). */
+  resign(): void;
+  /** Quit Game confirmed (`do_game_over`'s `disconnect_multiplayer_game`): out of the room, the screen stays. */
+  disconnect(): void;
+  /** Leave the game screen for the lobby (`quit_game`). */
+  leave(): void;
+  /** Has the server dropped player `p`? */
+  dropped(p: number): boolean;
+  /** Entering the game over mode: cancel the order being given and unselect. */
+  onGameOver(): void;
+  /** The whole map, without fog. */
+  reveal(): void;
 }
 
 function box(parent: HTMLElement | null, className: string, testid?: string): HTMLDivElement {
@@ -113,12 +143,25 @@ export class GameHud {
   private readonly slots = Array.from({ length: 12 }, () => box(this.bottom, 'hud-slot', 'command-slot'));
   private readonly minimap = box(this.bottom, 'hud-minimap', 'minimap');
   private readonly message = box(this.root, 'hud-message', 'hud-message');
+  private readonly view = box(this.root, 'hud-view', 'hud-view');
   /** The command button grid. */
   readonly commands: CommandPanel;
   /** The minimap, when the HUD has a map view. */
   readonly minimapView: Minimap | null;
   /** The Menu button's settings (the sound volume), when the HUD has sounds. */
   readonly options: OptionsDialog | null;
+  /** The Menu button's dialog. */
+  readonly menu: MenuDialog;
+  /** The chat lines' system messages. */
+  readonly chat: ChatLines;
+  /** F4's score display. */
+  readonly scores: ScoreDisplay;
+  /** The end of the game. */
+  readonly gameOver: GameOver;
+  private readonly scoreButton: HTMLButtonElement;
+  private achievements: AchievementsScreen | null = null;
+  /** `player_quit`: the player resigned from the menu. */
+  private quit = false;
   private readonly bar: ResourceBar;
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = () => this.applyLayout();
@@ -145,18 +188,53 @@ export class GameHud {
       onButton: () => o.sounds?.button(),
     });
     const sounds = o.sounds;
+    const click = () => sounds?.button();
     this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds) : null;
+    this.chat = new ChatLines(this.view);
+    this.scores = new ScoreDisplay(this.view, o.world, o.game.names);
+    this.gameOver = new GameOver({
+      view: this.view,
+      provider: o.provider,
+      world: o.world,
+      player: o.player,
+      names: o.game.names,
+      sounds: sounds ?? null,
+      chat: this.chat,
+      quit: () => this.quit,
+      dropped: (p) => o.game.dropped(p),
+      onGameOver: () => {
+        o.cancelPlacement();
+        o.game.onGameOver();
+      },
+      reveal: () => o.game.reveal(),
+    });
+    this.menu = new MenuDialog(this.root, o.provider, {
+      playing: () => o.world.playerStatus(o.player) === 0 && !this.quit,
+      quit: () => {
+        o.game.disconnect();
+        this.showAchievements(true);
+      },
+      resign: () => {
+        this.quit = true;
+        o.game.resign();
+      },
+      achievements: () => this.showAchievements(false),
+      settings: () => this.options?.show(),
+      click,
+    });
     // The top strip's buttons click like the grid's (`RGE_Panel_Tool_Box` gets `get_sound(1)`, src/scr_game.cpp:466);
-    // Menu opens the settings.
+    // Menu opens the menu.
     this.menus.forEach((el, i) =>
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
-        sounds?.button();
-        if (i !== 2 || !this.options) return;
-        if (this.options.open) this.options.close();
-        else this.options.show();
+        click();
+        if (i === 2) this.menu.show();
       }),
     );
+    // `button_panel[16]`: the score button, a text button in the dialogs' bevel.
+    this.scoreButton = easyButton(this.bottom, lookOf(o.provider, GAME_DIALOG_INFO), { x: 0, y: 0, w: 30, h: 30 }, o.provider.string(SCORE_BUTTON) ?? '', FONT.standard, () => this.scores.toggle(), click);
+    this.scoreButton.classList.add('hud-score-button');
+    this.scoreButton.dataset.testid = 'score-button';
     this.minimapView = o.map ? new Minimap({ parent: this.minimap, world: o.world, provider: o.provider, player: o.player, ...o.map }) : null;
     topButtonLabels(o.provider).forEach((label, i) => (this.menus[i]!.textContent = label));
     this.root.classList.toggle('art', o.provider.interfaceFrame(SLP.screen[1024], 0) !== null);
@@ -170,6 +248,9 @@ export class GameHud {
 
   destroy(): void {
     this.o.app.ticker.remove(this.tick);
+    this.menu.close();
+    this.chat.destroy();
+    this.scores.destroy();
     window.removeEventListener('resize', this.onResize);
     this.bar.destroy();
     this.commands.destroy();
@@ -212,8 +293,48 @@ export class GameHud {
     place(this.object, l.object);
     l.buttons.forEach((r, i) => place(this.slots[i]!, r));
     place(this.minimap, l.minimap);
+    place(this.scoreButton, l.scoreButton);
     this.shown = null;
     this.update();
+  }
+
+  /** "Problem communicating with %s...": a turn is late (com_hand.cpp `COMM_PLAYER_NOT_RESPONDING`); names who is playing. */
+  notResponding(): void {
+    const { world, player, provider } = this.o;
+    for (let p = 1; p < world.players; p++) {
+      if (p === player || world.playerStatus(p) !== 0) continue;
+      this.o.sounds?.message(SOUND_CHAT);
+      this.chat.show(formatName(provider, MESSAGE_NOT_RESPONDING, this.o.game.names[p] ?? ''));
+    }
+  }
+
+  /**
+   * This player was dropped from the game (`STRING_ID_PLAYER_DROPPED_NOTICE`): the game is over for it, OK goes to the
+   * end of the game's achievements.
+   */
+  droppedSelf(): void {
+    if (this.quit) return;
+    this.quit = true;
+    this.menu.close();
+    okPopup(this.root, this.o.provider, this.o.provider.string(DROPPED_NOTICE) ?? '', () => this.showAchievements(true), () => this.o.sounds?.button());
+  }
+
+  /** `TribeAchievementsScreen`: at the end of the game (`do_game_over`), Close leaves; else back to the game. */
+  showAchievements(end: boolean): void {
+    if (this.achievements) return;
+    this.achievements = new AchievementsScreen({
+      parent: this.root,
+      provider: this.o.provider,
+      world: this.o.world,
+      player: this.o.player,
+      names: this.o.game.names,
+      end,
+      click: () => this.o.sounds?.button(),
+      onClose: () => {
+        this.achievements = null;
+        if (end) this.o.game.leave();
+      },
+    });
   }
 
   /** `show_message` of language string `id` on the message line (nothing when the pack has no such string). */
@@ -245,6 +366,8 @@ export class GameHud {
    */
   private update(): void {
     const { world, selection, player } = this.o;
+    this.gameOver.update();
+    this.scores.update();
     this.minimapView?.update();
     this.age.textContent = ageName(this.o.provider, world.attributes[player]![ATTR_CURRENT_AGE]!);
     const primary = selection.primary;

@@ -20,7 +20,7 @@ import {
 } from './sound-rules';
 
 /** What made a sound. */
-export type SoundEvent = 'select' | 'move' | 'command' | 'created' | 'built' | 'death' | 'research' | 'attacked' | 'button' | 'sprite';
+export type SoundEvent = 'select' | 'move' | 'command' | 'created' | 'built' | 'death' | 'research' | 'attacked' | 'button' | 'sprite' | 'message' | 'game-over';
 
 /** One sound played (or that would have played before audio started), for tests (`window.__game.sounds()`). */
 export interface SoundTrigger {
@@ -150,6 +150,18 @@ export class GameSounds {
   /** A game screen button was pressed: button2.wav, from its start. */
   button(): void {
     this.game('button', GameSound.Button, -1, true);
+  }
+
+  /** A notification's game sound (`TRIBE_Game::notification`'s `play_sound(index)`). */
+  message(index: number): void {
+    this.game('message', index, -1);
+  }
+
+  /** The end of the game's won.wav or lost.wav (interface wav `id`), from its start. */
+  gameOver(id: number): void {
+    const url = this.o.table?.wavUrl(id) ?? null;
+    this.record({ event: 'game-over', sound: -1, game: -1, wav: url ? id : null, source: -1 });
+    if (url) this.o.audio.play(url);
   }
 
   /** Does graphic `graphic` play sounds as it animates? */

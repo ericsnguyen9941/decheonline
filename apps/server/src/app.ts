@@ -45,7 +45,9 @@ export function createApp({
       if (decoded.ok) rooms.handle(peer, decoded.message);
       else peer.send({ t: 'error', code: 'bad-message', message: decoded.error });
     });
-    socket.on('close', () => rooms.disconnect(peer));
+    // A socket that broke (1006, no close frame) or that a client closed as a drop (4000 up) may come back with `rejoin`;
+    // one closed on purpose (1000, 1001 a closed tab, 1005) has left.
+    socket.on('close', (code) => rooms.disconnect(peer, code === 1006 || code >= 4000));
     socket.on('error', () => socket.terminate());
   });
   server.on('close', () => {

@@ -53,7 +53,39 @@ export const SYNTHETIC = {
   /** sounds.drs wavs: data's, data2's (which also replaces `overriddenWav`), and interfac.drs's button click. */
   wavs: { data: [5000, 5001], data2: [5001, 5002], interface: [50301] },
   overriddenWav: 5001,
+  /**
+   * The won achievements screen's info file (`scr7`, bina 50057): background SLP 50131 at 640 wide, palette 50505 (index c
+   * is grey 255 - c), bevel colours 100-105.
+   */
+  screen: { id: 50057, background: 50131, palette: 50505 },
 } as const;
+
+/** `scr7`'s info file, in the real one's form. */
+function syntheticScreenInfo(): Uint8Array {
+  const { background, palette } = SYNTHETIC.screen;
+  return new TextEncoder().encode(
+    [
+      `background1_files     scr7a  none  ${background}  -1`,
+      'background2_files     scr7b  none  -1  -1',
+      'background3_files     scr7c  none  -1  -1',
+      `palette_file          pal7  ${palette}`,
+      'cursor_file           cursor7  51007',
+      'shade_amount          percent  54',
+      'button_file           btn7  50609',
+      'popup_dialog_sin      dlg7  50010',
+      'background_position   0',
+      'background_color      0',
+      'bevel_colors          100  101  102  103  104  105',
+      'text_color1           217 208 176',
+      'text_color2           0 0 0',
+      'focus_color1          202  207  1',
+      'focus_color2          0    0    0',
+      'state_color1          217  208  176',
+      'state_color2          0    0    0',
+      '',
+    ].join('\r\n'),
+  );
+}
 
 /** A short 8-bit mono PCM wav at 11025 Hz: `samples` bytes of a square wave of period `period`. */
 export function buildWav(samples = 64, period = 8): Uint8Array {
@@ -123,6 +155,9 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   const interfac = buildDrs([
     { type: 'bina', id: 50500, data: syntheticPalette() },
     { type: 'bina', id: MINIMAP_BMP_ID, data: syntheticMapBmp() },
+    { type: 'bina', id: SYNTHETIC.screen.id, data: syntheticScreenInfo() },
+    { type: 'bina', id: SYNTHETIC.screen.palette, data: Uint8Array.from({ length: 768 }, (_, i) => 255 - Math.floor(i / 3)) },
+    { type: 'slp', id: SYNTHETIC.screen.background, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
     { type: 'slp', id: SYNTHETIC.interfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
     { type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
     { type: 'slp', id: SYNTHETIC.groupNumberSlp, data: buildSlp(Array.from({ length: 11 }, () => ({ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }))) },

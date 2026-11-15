@@ -2,7 +2,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { WebSocket } from 'ws';
-import { CODE_LENGTH, isValidCode, type ClientMessage, type ServerMessage } from '@aoe/protocol';
+import { CODE_LENGTH, DROP_AFTER_MS, isValidCode, type ClientMessage, type ServerMessage } from '@aoe/protocol';
 import { createApp } from './app';
 import { PING_INTERVAL_MS, RoomRegistry, type Peer } from './rooms';
 
@@ -70,6 +70,11 @@ class TestClient {
   close(): void {
     this.socket.close();
   }
+
+  /** Break the socket without a close frame, as a lost connection does (the server sees 1006). */
+  terminate(): void {
+    this.socket.terminate();
+  }
 }
 
 let server: Server;
@@ -108,7 +113,7 @@ async function pair(): Promise<{ host: TestClient; guest: TestClient; code: stri
   return { host, guest, code };
 }
 
-async function startGame(host: TestClient, guest: TestClient): Promise<void> {
+async function startGame(host: TestClient, guest: TestClient): Promise<string[]> {
   host.send({ t: 'ready', ready: true });
   guest.send({ t: 'ready', ready: true });
   await host.expect('lobby');
@@ -116,8 +121,7 @@ async function startGame(host: TestClient, guest: TestClient): Promise<void> {
   await guest.expect('lobby');
   await guest.expect('lobby');
   host.send({ t: 'start' });
-  await host.expect('start');
-  await guest.expect('start');
+  return [(await host.expect('start')).token, (await guest.expect('start')).token];
 }
 
 describe('rooms', () => {
@@ -293,6 +297,38 @@ describe('turn relay', () => {
   });
 });
 
+describe('rejoin', () => {
+  test('a broken socket keeps its slot: the player rejoins with its token, gets the turns it missed and goes on', async () => {
+    const { host, guest, code } = await pair();
+    const [, token] = await startGame(host, guest);
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    for (const c of [host, guest]) c.send({ t: 'turn', turn: 0, commands: [] });
+    await host.expect('turn');
+    await guest.expect('turn');
+    // Turn 1 is released while the guest's socket is broken: it sent its batch just before.
+    guest.send({ t: 'turn', turn: 1, commands: [{ type: 'noop' }] });
+    host.send({ t: 'turn', turn: 1, commands: [] });
+    expect((await host.expect('turn')).turn).toBe(1);
+    guest.terminate();
+    host.send({ t: 'turn', turn: 2, commands: [] });
+    await host.expectSilence();
+
+    const wrong = await connect();
+    wrong.send({ t: 'rejoin', code, slot: 1, token: 'nope', received: 1 });
+    expect((await wrong.expect('error')).code).toBe('bad-rejoin');
+
+    const back = await connect();
+    back.send({ t: 'rejoin', code: code.toLowerCase(), slot: 1, token: token!, received: 1 });
+    expect(await back.next()).toEqual({ t: 'rejoined', nextTurn: 2 });
+    expect(await back.next()).toEqual({ t: 'turn', turn: 1, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [{ type: 'noop' }] }] });
+    expect((await back.expect('rtt')).rtt).toHaveLength(2);
+    back.send({ t: 'turn', turn: 2, commands: [] });
+    expect((await host.expect('turn')).turn).toBe(2);
+    expect((await back.expect('turn')).turn).toBe(2);
+    expect(rooms.rooms.get(code)?.members.map((m) => m.dropped)).toEqual([false, false]);
+  });
+});
+
 describe('speed control', () => {
   class FakePeer implements Peer {
     messages: ServerMessage[] = [];
@@ -331,6 +367,57 @@ describe('speed control', () => {
     registry.handle(peers[1]!, { t: 'hash', turn: 0, hash: 0 });
     expect(peers[1]!.take('ping')).toEqual([{ t: 'ping', n: 2 }]);
     expect(peers[0]!.take('ping')).toEqual([]);
+  });
+
+  test('a player away DROP_AFTER_MS after it was last heard is dropped: its next batch resigns it, then empty ones', () => {
+    let clock = 0;
+    const timers: { fn: () => void; at: number }[] = [];
+    const registry = new RoomRegistry({ generateSeed: () => 1, now: () => clock, generateToken: () => 't', schedule: (fn, ms) => {
+      const timer = { fn, at: clock + ms };
+      timers.push(timer);
+      return () => timers.splice(timers.indexOf(timer), 1);
+    } });
+    const peers = [new FakePeer(), new FakePeer()];
+    registry.handle(peers[0]!, { t: 'create', name: 'A' });
+    const code = peers[0]!.take('lobby')[0]!.code;
+    registry.handle(peers[1]!, { t: 'join', code, name: 'B' });
+    for (const p of peers) registry.handle(p, { t: 'ready', ready: true });
+    registry.handle(peers[0]!, { t: 'start' });
+    registry.handle(peers[1]!, { t: 'turn', turn: 0, commands: [] });
+    clock = 500;
+    registry.disconnect(peers[1]!, true);
+    expect(timers.map((t) => t.at)).toEqual([DROP_AFTER_MS]);
+    registry.handle(peers[0]!, { t: 'turn', turn: 0, commands: [] });
+    registry.handle(peers[0]!, { t: 'turn', turn: 1, commands: [] });
+    expect(peers[0]!.take('turn').map((m) => m.turn)).toEqual([0]);
+    clock = DROP_AFTER_MS;
+    timers[0]!.fn();
+    expect(peers[0]!.take('dropped')).toEqual([{ t: 'dropped', slot: 1 }]);
+    registry.handle(peers[0]!, { t: 'turn', turn: 2, commands: [] });
+    expect(peers[0]!.take('turn').map((m) => m.batches[1])).toEqual([
+      { slot: 1, commands: [{ type: 'resign' }] },
+      { slot: 1, commands: [] },
+    ]);
+    const late = new FakePeer();
+    registry.handle(late, { t: 'rejoin', code, slot: 1, token: 't', received: 0 });
+    expect(late.take('error')).toMatchObject([{ code: 'bad-rejoin' }]);
+    // Its hashes are no longer awaited.
+    registry.handle(peers[0]!, { t: 'hash', turn: 2, hash: 5 });
+    expect(peers[0]!.take('desync')).toEqual([]);
+  });
+
+  test('a room whose players are all away is closed when the first drop falls due', () => {
+    const timers: (() => void)[] = [];
+    const registry = new RoomRegistry({ generateSeed: () => 1, now: () => 0, schedule: (fn) => (timers.push(fn), () => undefined) });
+    const peers = [new FakePeer(), new FakePeer()];
+    registry.handle(peers[0]!, { t: 'create', name: 'A' });
+    const code = peers[0]!.take('lobby')[0]!.code;
+    registry.handle(peers[1]!, { t: 'join', code, name: 'B' });
+    for (const p of peers) registry.handle(p, { t: 'ready', ready: true });
+    registry.handle(peers[0]!, { t: 'start' });
+    for (const p of peers) registry.disconnect(p, true);
+    timers[0]!();
+    expect(registry.rooms.has(code)).toBe(false);
   });
 
   test('the change agreed at boundary T rides on the release of turn T - 1, for turn T + 2', () => {

@@ -13,11 +13,13 @@ import {
   type PackFrame,
   type PackManifest,
   type PackMinimap,
+  type PackScreen,
   type PackSlp,
   type PackTileEdges,
   type SlpSource,
 } from './manifest';
 import { encodePng } from './png';
+import { DECAL_SCREENS, packScreen, parseScreenInfo, SCREEN_IDS, type ScreenInfo } from './screens';
 
 const PALETTE_ID = 50500;
 
@@ -97,6 +99,37 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
   const [tileEdgePath, blackEdgePath] = edgePaths;
   const tileEdges = tileEdgePath && blackEdgePath ? parseTileEdges(await readFile(tileEdgePath), await readFile(blackEdgePath)) : null;
 
+  // The screens' info files; their backgrounds (and the achievements screen's marks) go through their own palettes.
+  const readBina = (id: number): Uint8Array | undefined => sources.interface.reduce<Uint8Array | undefined>((found, drs) => drs.read('bina', id) ?? found, undefined);
+  const screenInfos = new Map<number, ScreenInfo>();
+  for (const id of SCREEN_IDS) {
+    const bytes = readBina(id);
+    const info = bytes && parseScreenInfo(bytes);
+    if (info) screenInfos.set(id, info);
+  }
+  const palettes = new Map<number, Palette>([[PALETTE_ID, palette]]);
+  const paletteOf = (id: number): Palette | null => {
+    if (!palettes.has(id)) {
+      const bytes = readBina(id);
+      if (!bytes) return null;
+      palettes.set(id, parsePalette(bytes));
+    }
+    return palettes.get(id)!;
+  };
+  const slpPalettes = new Map<number, Palette>();
+  const screens: Record<string, PackScreen> = {};
+  for (const [id, info] of screenInfos) {
+    const screenPalette = paletteOf(info.palette);
+    if (!screenPalette) continue;
+    screens[id] = packScreen(info, screenPalette);
+    for (const slp of info.backgrounds) if (slp >= 0) slpPalettes.set(slp, screenPalette);
+  }
+  for (const [slp, screen] of Object.entries(DECAL_SCREENS)) {
+    const info = screenInfos.get(screen);
+    const screenPalette = info && paletteOf(info.palette);
+    if (screenPalette) slpPalettes.set(Number(slp), screenPalette);
+  }
+
   await rm(outDir, { recursive: true, force: true });
   await mkdir(join(outDir, 'sprites'), { recursive: true });
   await copyFile(datPath, join(outDir, 'empires.dat'));
@@ -112,7 +145,7 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     }
     await mkdir(join(outDir, 'sprites', source), { recursive: true });
     for (const [id, bytes] of bytesById) {
-      const result = await writeSlp(outDir, source, id, bytes, palette);
+      const result = await writeSlp(outDir, source, id, bytes, (source === 'interface' && slpPalettes.get(id)) || palette);
       slps[slpKey(source, id)] = result.slp;
       imageCount += result.images;
     }
@@ -125,7 +158,7 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
   for (const [id, bytes] of wavs) await writeFile(join(outDir, soundPath(id)), bytes);
   log(`sounds: ${wavs.size} wav`);
 
-  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b));
+  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b), screens);
   log(`strings: ${strings.size}`);
   await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
   return { manifest, slpCount: Object.keys(slps).length, imageCount, wavCount: wavs.size };
@@ -167,6 +200,7 @@ function buildManifest(
   minimap: PackMinimap | null,
   tileEdges: PackTileEdges | null,
   wavs: number[],
+  screens: Record<string, PackScreen>,
 ): PackManifest {
   const graphicSlp = (slp: number): string | null => {
     const key = slpKey('graphics', slp);
@@ -188,6 +222,7 @@ function buildManifest(
     sounds: {},
     unitSounds: {},
     wavs,
+    screens,
   };
   dat.sounds.forEach((s, id) => {
     manifest.sounds[id] = { items: s.items.map((i) => [i.resourceId, i.probability]) };

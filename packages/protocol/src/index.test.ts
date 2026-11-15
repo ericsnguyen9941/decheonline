@@ -38,6 +38,7 @@ describe('client message decoding', () => {
     { t: 'turn', turn: 9, commands: [], frameMs: 17 },
     { t: 'hash', turn: 3, hash: 0xdeadbeef },
     { t: 'pong', n: 4 },
+    { t: 'rejoin', code: 'ABCD2', slot: 1, token: 'f00d', received: 12 },
     { t: 'leave' },
   ];
   test.each(roundTrips)('round-trips $t', (m) => {
@@ -59,6 +60,8 @@ describe('client message decoding', () => {
     ['hash out of range', JSON.stringify({ t: 'hash', turn: 0, hash: 2 ** 32 })],
     ['frame time out of range', JSON.stringify({ t: 'turn', turn: 0, commands: [], frameMs: 256 })],
     ['pong without number', JSON.stringify({ t: 'pong' })],
+    ['rejoin without token', JSON.stringify({ t: 'rejoin', code: 'ABCD2', slot: 0, received: 0 })],
+    ['rejoin with negative received', JSON.stringify({ t: 'rejoin', code: 'ABCD2', slot: 0, token: 'a', received: -1 })],
   ])('rejects %s', (_label, raw) => {
     expect(decodeClientMessage(raw).ok).toBe(false);
   });
@@ -73,5 +76,7 @@ describe('client message decoding', () => {
 
 test('server message decoding checks the tag', () => {
   expect(decodeServerMessage('{"t":"ended","reason":"peer-left"}').ok).toBe(true);
+  expect(decodeServerMessage('{"t":"rejoined","nextTurn":3}').ok).toBe(true);
+  expect(decodeServerMessage('{"t":"dropped","slot":1}').ok).toBe(true);
   expect(decodeServerMessage('{"t":"create"}').ok).toBe(false);
 });

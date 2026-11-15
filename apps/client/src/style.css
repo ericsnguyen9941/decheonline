@@ -486,3 +486,60 @@ dialog h2 {
   border: 2px solid var(--stone-dark);
   border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
 }
+
+/* The original's fonts (hud/easy-panel.ts FONT). */
+.aoe-font-copper12 {
+  font: bold 16px 'Copperplate Gothic Light', 'Copperplate Gothic', Copperplate, serif;
+}
+.aoe-font-copper21 {
+  font: bold 28px 'Copperplate Gothic Light', 'Copperplate Gothic', Copperplate, serif;
+}
+.aoe-font-standard,
+.aoe-font-strikeout {
+  font: bold 13px Arial, Helvetica, sans-serif;
+}
+.aoe-font-strikeout {
+  text-decoration: line-through;
+}
+/* A modal dialog's cover: the game under it takes no clicks (`panel_system.modalPanel()`). */
+.aoe-modal {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  z-index: 3;
+}
+.aoe-dialog {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.aoe-button {
+  padding: 0;
+  border: 0;
+  cursor: inherit;
+}
+.aoe-text {
+  position: absolute;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.aoe-text.wrap {
+  white-space: pre-line;
+}
+.aoe-text[hidden],
+.aoe-button[hidden] {
+  display: none !important;
+}
+/* The main view between the top strip and the bottom panel: the chat lines, the score and the game over texts. */
+.hud-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 20px;
+  bottom: 126px;
+  pointer-events: none !important;
+}
+.hud-score-button {
+  position: absolute;
+}

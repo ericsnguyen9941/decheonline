@@ -53,6 +53,8 @@ export interface HudLayout {
   buttons: Rect[];
   /** The minimap's frame (bottom-relative). */
   minimap: Rect;
+  /** The score button (`button_panel[16]`, bottom-relative): screen (989, 650), (765, 482), (605, 362). */
+  scoreButton: Rect;
 }
 
 export const TOP_HEIGHT = 20;
@@ -75,6 +77,7 @@ function layout(width: 640 | 800 | 1024, minimap: Rect, topX: number, ageWidth: 
     object: { x: 5, y: 7, w: 127, h: 114 },
     buttons,
     minimap,
+    scoreButton: { x: width - 35, y: 8, w: 30, h: 30 },
   };
 }
 
