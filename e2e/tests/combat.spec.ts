@@ -91,7 +91,6 @@ test("a Clubman trained at a Barracks kills the other player's Villager; both cl
   await host.waitForFunction(
     (i) => window.__game!.units().some((u) => u.id === i && !u.moving && window.__game!.tileVisibility(u.col, u.row) === 0x0f),
     id,
-    { timeout: 60_000 },
   );
   const prey = (await host.evaluate(() => window.__game!.units())).find((u) => u.id === id)!;
   await host.evaluate(([col, row]) => window.__map!.centerOnTile(col, row), [prey.col, prey.row] as const);

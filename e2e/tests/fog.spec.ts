@@ -61,8 +61,6 @@ async function minimap(page: Page): Promise<{ width: number; at: (x: number, y: 
 const minimapPoint = (page: Page, col: number, row: number) =>
   page.evaluate(([c, r]) => window.__game!.minimapPoint(c!, r!)!, [col, row]);
 
-test.setTimeout(120_000);
-
 test('each player sees only its own area; the other player units show once in sight and hide again in the fog', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   const all = await units(host);
@@ -82,16 +80,16 @@ test('each player sees only its own area; the other player units show once in si
   // The host walks its villagers up to the guest's: then each sees the other's.
   const target = theirs[0]!;
   await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids as number[], x as number, y as number), [mine.map((u) => u.id), target.x - 2, target.y]);
-  await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x0f, [target.col, target.row], { timeout: 60_000 });
+  await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x0f, [target.col, target.row]);
   await expect.poll(() => drawnAt(host, target)).not.toBeNull();
   // The walker keeps moving: read its current tile on every poll.
   const walker = async () => (await units(guest)).find((u) => u.id === mine[0]!.id)!;
-  await expect.poll(async () => { const w = await walker(); return visibility(guest, w.col, w.row); }, { timeout: 30_000 }).toBe(VISIBLE);
-  await expect.poll(async () => drawnAt(guest, await walker()), { timeout: 30_000 }).not.toBeNull();
+  await expect.poll(async () => { const w = await walker(); return visibility(guest, w.col, w.row); }).toBe(VISIBLE);
+  await expect.poll(async () => drawnAt(guest, await walker())).not.toBeNull();
 
   // Walking home again leaves the guest's tile fogged for the host, and its villager no longer drawn there.
   await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids as number[], x as number, y as number), [mine.map((u) => u.id), mine[0]!.x, mine[0]!.y]);
-  await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x80, [target.col, target.row], { timeout: 60_000 });
+  await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x80, [target.col, target.row]);
   expect(await visibility(host, target.col, target.row)).toBe(FOGGED);
   await expect.poll(() => drawnAt(host, target)).toBeNull();
 });
@@ -119,7 +117,7 @@ test('the minimap shows the explored tiles, grows as a unit explores, and moves 
   // A villager walking towards the guest's base explores the tiles on the way.
   const target = theirs[0]!;
   await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids as number[], x as number, y as number), [[mine[0]!.id], target.x - 3, target.y]);
-  await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x0f, [target.col, target.row], { timeout: 60_000 });
+  await host.waitForFunction(([c, r]) => window.__game!.tileVisibility(c!, r!) === 0x0f, [target.col, target.row]);
   await expect.poll(async () => (await minimap(host)).at(away.x + 3, away.y)).not.toBe(background);
   expect(explored(await minimap(host))).toBeGreaterThan(explored(start));
 
