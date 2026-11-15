@@ -1,7 +1,9 @@
 import { isLobbyCiv, isLobbySettings, parseCommand } from '@aoe/sim';
 import {
+  MAX_CHAT_LENGTH,
   MAX_COMMANDS_PER_BATCH,
   MAX_NAME_LENGTH,
+  MAX_PLAYERS,
   type ClientMessage,
   type Command,
   type GameSettings,
@@ -107,6 +109,12 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
       if (!isTurn(frameMs) || frameMs > 255) return fail('bad frame time');
       return { ok: true, message: { t: 'turn', turn: v['turn'], commands: cmds, frameMs } };
     }
+    case 'chat': {
+      const { text, to } = v;
+      if (typeof text !== 'string' || text.length === 0 || text.length > MAX_CHAT_LENGTH) return fail('bad chat text');
+      if (!Array.isArray(to) || to.length > MAX_PLAYERS || !to.every((s) => isTurn(s) && s < MAX_PLAYERS)) return fail('bad chat recipients');
+      return { ok: true, message: { t: 'chat', text, to: to as number[] } };
+    }
     case 'pong':
       if (!isTurn(v['n'])) return fail('bad pong');
       return { ok: true, message: { t: 'pong', n: v['n'] } };
@@ -122,7 +130,7 @@ export function decodeClientMessage(raw: string): Decoded<ClientMessage> {
   }
 }
 
-const SERVER_TAGS = new Set(['lobby', 'start', 'rejoined', 'dropped', 'turn', 'ping', 'rtt', 'desync', 'ended', 'error']);
+const SERVER_TAGS = new Set(['lobby', 'start', 'rejoined', 'dropped', 'turn', 'ping', 'rtt', 'desync', 'chat', 'ended', 'error']);
 
 /** Parse a frame from the server. Checks the tag only; the server is trusted to send well-formed bodies. */
 export function decodeServerMessage(raw: string): Decoded<ServerMessage> {

@@ -190,6 +190,8 @@ export class RoomRegistry {
         return this.pong(room, member, message.n);
       case 'hash':
         return this.reportHash(room, member, peer, message.turn, message.hash);
+      case 'chat':
+        return this.chat(room, slot, message.text, message.to);
     }
   }
 
@@ -390,6 +392,14 @@ export class RoomRegistry {
       room.log.push(record);
       room.broadcast({ t: 'turn', ...record });
     }
+  }
+
+  /**
+   * A chat message, in the lobby or the game: to each other player in `to` whose socket is here (`TXChat` sends it to
+   * the players its `DestPlayers` names; the sender adds its own copy, docs/spec/chat.md §3). Never part of a turn.
+   */
+  private chat(room: Room, from: number, text: string, to: number[]): void {
+    for (const slot of new Set(to)) if (slot !== from) room.members[slot]?.peer?.send({ t: 'chat', from, text });
   }
 
   private reportHash(room: Room, member: Member, peer: Peer, turn: number, hash: number): void {

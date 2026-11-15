@@ -42,17 +42,35 @@ function select(testid: string, label: string, options: [number, string][], valu
   return node;
 }
 
+/** The setup screen's chat box keeps 100 lines (`fillChat`, src/scr_mps.cpp:1704-1716). */
+const CHAT_LINES = 100;
+/** Its input takes 247 characters (`create_edit(..., 247, ...)`, src/scr_mps.cpp:235). */
+const CHAT_LENGTH = 247;
+
 /**
  * DOM for the lobby: entry (name, create, join by code) and the room (invite code, players with their civs, the host's
- * settings, ready, start), as the original's multiplayer setup screen offers them (docs/spec/lobby.md).
+ * settings, chat, ready, start), as the original's multiplayer setup screen offers them (docs/spec/lobby.md,
+ * docs/spec/chat.md §5).
  */
 export class LobbyView {
   readonly root = el('section', { id: 'lobby', testid: 'lobby' });
   private name = 'Player';
   private text: Text = englishText;
+  /** The room's chat, kept across redraws: the box of lines and the input. */
+  private readonly chatLog = el('div', { className: 'chat-log', testid: 'lobby-chat' });
+  private readonly chatInput = el('input', { maxLength: CHAT_LENGTH, testid: 'lobby-chat-input', ariaLabel: 'Chat', autocomplete: 'off' });
+  private readonly chatTitle = el('h3', {});
+  private readonly chat = el('div', { className: 'chat' }, this.chatTitle, this.chatLog, this.chatInput);
+  private inRoom = false;
 
   constructor(private readonly session: Session) {
     session.onChange = (state) => this.render(state);
+    session.onChat = (line) => this.addChat(line);
+    this.chatInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !this.chatInput.value) return;
+      this.session.sendChat(this.chatInput.value);
+      this.chatInput.value = '';
+    });
     this.render(session.state);
   }
 
@@ -66,7 +84,22 @@ export class LobbyView {
 
   render(state: LobbyState): void {
     this.root.hidden = state.phase === 'playing';
+    // A new setup screen starts with an empty chat (`chat->ClearChat()`, src/scr_mps.cpp:52).
+    if (state.phase === 'lobby' && !this.inRoom) this.chatLog.replaceChildren();
+    this.inRoom = state.phase === 'lobby';
+    // The chat moves into the new panel; typing in it goes on.
+    const typing = document.activeElement === this.chatInput;
     this.root.replaceChildren(state.phase === 'lobby' ? this.room(state) : this.entry(state));
+    if (typing && this.chatInput.isConnected) this.chatInput.focus();
+  }
+
+  /** `word_wrap_append` a line; the box follows the newest line when it was showing the last one. */
+  private addChat(line: string): void {
+    const log = this.chatLog;
+    const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 1;
+    if (log.childElementCount >= CHAT_LINES) log.firstElementChild?.remove();
+    log.append(el('div', { className: 'chat-line', testid: 'lobby-chat-line' }, line));
+    if (atEnd) log.scrollTop = log.scrollHeight;
   }
 
   private entry(state: LobbyState): HTMLElement {
@@ -116,6 +149,7 @@ export class LobbyView {
       el('p', { className: 'invite' }, 'Invite code ', el('strong', { testid: 'invite-code' }, state.code)),
       list,
       this.settings(state.settings, host && !me?.ready),
+      this.chatPanel(),
       el('div', { className: 'row' }, ready, leave),
     );
     if (host) {
@@ -125,6 +159,11 @@ export class LobbyView {
     }
     this.appendError(box, state);
     return box;
+  }
+
+  private chatPanel(): HTMLElement {
+    this.chatTitle.textContent = this.label('chat');
+    return this.chat;
   }
 
   private label(key: keyof typeof LABELS): string {

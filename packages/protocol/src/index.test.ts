@@ -44,6 +44,8 @@ describe('client message decoding', () => {
     { t: 'hash', turn: 3, hash: 0xdeadbeef },
     { t: 'pong', n: 4 },
     { t: 'rejoin', code: 'ABCD2', slot: 1, token: 'f00d', received: 12 },
+    { t: 'chat', text: 'hi: there', to: [0, 1] },
+    { t: 'chat', text: 'x'.repeat(255), to: [] },
     { t: 'leave' },
   ];
   test.each(roundTrips)('round-trips $t', (m) => {
@@ -77,6 +79,10 @@ describe('client message decoding', () => {
     ['civ 0 (Gaia)', JSON.stringify({ t: 'civ', civ: 0 })],
     ['civ past Random', JSON.stringify({ t: 'civ', civ: 18 })],
     ['rejoin without token', JSON.stringify({ t: 'rejoin', code: 'ABCD2', slot: 0, received: 0 })],
+    ['empty chat', JSON.stringify({ t: 'chat', text: '', to: [1] })],
+    ['chat past 255 characters', JSON.stringify({ t: 'chat', text: 'x'.repeat(256), to: [1] })],
+    ['chat to slot 2', JSON.stringify({ t: 'chat', text: 'hi', to: [2] })],
+    ['chat without recipients', JSON.stringify({ t: 'chat', text: 'hi' })],
     ['rejoin with negative received', JSON.stringify({ t: 'rejoin', code: 'ABCD2', slot: 0, token: 'a', received: -1 })],
   ])('rejects %s', (_label, raw) => {
     expect(decodeClientMessage(raw).ok).toBe(false);
@@ -94,5 +100,6 @@ test('server message decoding checks the tag', () => {
   expect(decodeServerMessage('{"t":"ended","reason":"peer-left"}').ok).toBe(true);
   expect(decodeServerMessage('{"t":"rejoined","nextTurn":3}').ok).toBe(true);
   expect(decodeServerMessage('{"t":"dropped","slot":1}').ok).toBe(true);
+  expect(decodeServerMessage('{"t":"chat","from":0,"text":"hi"}').ok).toBe(true);
   expect(decodeServerMessage('{"t":"create"}').ok).toBe(false);
 });

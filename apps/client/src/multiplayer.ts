@@ -230,6 +230,11 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   const audio = new SoundPlayer();
   const soundTick = () => sounds?.update();
   app.ticker.add(soundTick);
+  // The game screen's chat: a message from another player, outside the turns (docs/spec/chat.md §3). The lobby's
+  // goes to the session.
+  link.onMessage((m) => {
+    if (m.t === 'chat' && session.state.phase === 'playing') hud?.receiveChat(m.from + 1, m.text);
+  });
 
   // Back to the lobby: the game screen goes, the session leaves its room.
   const teardown = () => {
@@ -376,6 +381,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
           dropped: (p) => dropped.has(p),
           onGameOver: () => layer.unselect(),
           reveal: () => layer.revealMap(),
+          sendChat: (text, to) => link.send({ t: 'chat', text, to: to.map((p) => p - 1) }),
         },
       });
       // Start looking at this player's Town Center, else its newest object (`TRIBE_Player::random_start`'s view).

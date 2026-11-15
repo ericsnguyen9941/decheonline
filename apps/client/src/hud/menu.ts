@@ -46,7 +46,7 @@ export interface MenuActions {
 
 /**
  * A modal panel over the HUD: it takes the clicks and the keys (`key_down_action` returns while
- * `panel_system.modalPanel()` is set), Esc runs `esc`.
+ * `panel_system.modalPanel()` is set), Esc runs `esc` and Enter `enter` (a chat input's line, src/dlg_smsg.cpp).
  */
 export class Modal {
   readonly cover: HTMLDivElement;
@@ -56,6 +56,9 @@ export class Modal {
     if (e.key === 'Escape' && e.type === 'keydown') {
       e.preventDefault();
       this.esc?.();
+    } else if (e.key === 'Enter' && e.type === 'keydown' && this.enter) {
+      e.preventDefault();
+      this.enter();
     }
   };
 
@@ -65,6 +68,7 @@ export class Modal {
     h: number,
     testid: string,
     private readonly esc: (() => void) | null,
+    private readonly enter: (() => void) | null = null,
   ) {
     this.cover = document.createElement('div');
     this.cover.className = 'aoe-modal';

@@ -247,6 +247,27 @@ describe('rooms', () => {
   });
 });
 
+describe('chat', () => {
+  test('a chat message goes to the players it names, in the lobby and in the game, never into a turn', async () => {
+    const { host, guest, code } = await pair();
+    host.send({ t: 'chat', text: 'hello', to: [0, 1] });
+    expect(await guest.next()).toEqual({ t: 'chat', from: 0, text: 'hello' });
+    // Not to the sender (it shows its own copy), nor to a player left out.
+    guest.send({ t: 'chat', text: 'just me', to: [1] });
+    host.send({ t: 'chat', text: 'nobody', to: [0] });
+    await host.expectSilence();
+    await guest.expectSilence();
+
+    await startGame(host, guest);
+    guest.send({ t: 'chat', text: 'gl hf', to: [0, 1] });
+    expect(await host.next()).toEqual({ t: 'chat', from: 1, text: 'gl hf' });
+    host.send({ t: 'turn', turn: 0, commands: [] });
+    guest.send({ t: 'turn', turn: 0, commands: [] });
+    expect(await host.expect('turn')).toMatchObject({ batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [] }] });
+    expect(rooms.rooms.get(code)?.log).toHaveLength(1);
+  });
+});
+
 describe('turn relay', () => {
   test('both clients receive turns in order, batches ordered by slot', async () => {
     const { host, guest, code } = await pair();

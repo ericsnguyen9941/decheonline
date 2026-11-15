@@ -9,6 +9,8 @@ export { CIV_COUNT, CIV_RANDOM, DEFAULT_GAME_SETTINGS, isLobbyCiv, type GameSett
 export const MAX_PLAYERS = 2;
 export const MAX_NAME_LENGTH = 24;
 export const MAX_COMMANDS_PER_BATCH = 256;
+/** A chat message's text: `TXChat` sends at most 255 characters (src/com_hand.cpp:1972-1981; docs/spec/chat.md §3). */
+export const MAX_CHAT_LENGTH = 255;
 
 /** Invite code: 5 characters, no 0/O/1/I/L lookalikes; matched case-insensitively. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -58,6 +60,11 @@ export type ClientMessage =
    * `token` is the one `start` gave this client; `received` is how many released turns it has (it gets the rest).
    */
   | { t: 'rejoin'; code: string; slot: Slot; token: string; received: number }
+  /**
+   * A chat message for the players in `to` (`TXChat`'s `DestPlayers`, docs/spec/chat.md §3), in the lobby or the game.
+   * Outside the turns: it never reaches the sim. The sender shows its own copy itself.
+   */
+  | { t: 'chat'; text: string; to: Slot[] }
   | { t: 'leave' };
 
 // Server -> client
@@ -111,6 +118,8 @@ export type ServerMessage =
   | { t: 'rtt'; rtt: number[] }
   /** State hashes for `turn` disagreed. `hashes` is indexed by slot. */
   | { t: 'desync'; turn: number; hashes: number[] }
+  /** Player `from`'s chat message to this client (docs/spec/chat.md §3). */
+  | { t: 'chat'; from: Slot; text: string }
   | { t: 'ended'; reason: EndReason }
   | { t: 'error'; code: ErrorCode; message: string };
 

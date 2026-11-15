@@ -187,6 +187,22 @@ button.primary {
   padding: 0;
   list-style: none;
 }
+#lobby .chat {
+  margin: 1rem 0 0;
+}
+#lobby .chat h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+}
+#lobby .chat-log {
+  height: 6rem;
+  overflow-y: auto;
+  padding: 0.3rem 0.6rem;
+  overflow-wrap: anywhere;
+  background: rgba(255, 248, 220, 0.45);
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-dark) var(--stone-light) var(--stone-light) var(--stone-dark);
+}
 #lobby .error {
   margin: 1rem 0 0;
   font-weight: bold;
@@ -549,6 +565,26 @@ dialog h2 {
   padding: 0;
   border: 0;
   cursor: inherit;
+}
+/* A check box or radio button: its `btn6_0` picture centred and cut to the button (hud/chat.ts). */
+.aoe-picture-button {
+  overflow: hidden;
+  background: transparent;
+  color: #fff;
+}
+.aoe-picture-button > .aoe-picture {
+  position: absolute;
+  pointer-events: none;
+}
+/* A text input (`TEditPanel`, hud/chat.ts, the lobby's chat). */
+.aoe-edit {
+  border: 0;
+  outline: none;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+.chat-player-bar {
+  pointer-events: none;
 }
 .aoe-text {
   position: absolute;

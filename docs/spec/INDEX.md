@@ -223,6 +223,11 @@ platform code. They matter for look-and-feel tasks, not for the simulation.
 Note one coupling: sound playback calls `rand`, which the engine fences off
 (core.md §4.2).
 
+Chat (Enter's chat bar, the Send Messages dialog, recipients, the chat lines, the
+setup screen's chat box): [chat.md](chat.md) (`src/dlg_smsg.cpp`, `src/Chat.cpp`,
+`src/com_hand.cpp` `TXChat` :1942, `src/scr_game.cpp` :1395/:3797,
+`src/scr_mps.cpp` :1704).
+
 Sounds (which wav plays for what, for whom, and the volume): [sounds.md](sounds.md)
 (`src/Sound.cpp`, `src/Sounddrv.cpp`, `src/sprite.cpp` `RGE_Sprite::play_sound`
 :372, `src/player.cpp` :1359/:1772, `src/tplayer.cpp` :874/:1740,

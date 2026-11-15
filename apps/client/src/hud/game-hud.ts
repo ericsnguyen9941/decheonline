@@ -1,5 +1,5 @@
 import type { Application, Ticker } from 'pixi.js';
-import { ATTR_FOOD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, FARM, HOUSE, ObjectState, typeOf, type Command, type Entity, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, FARM, HOUSE, ObjectState, STATUS_LOST, typeOf, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import type { MapView } from '../map/map-view';
 import { CommandPanel } from './command-panel';
@@ -9,6 +9,7 @@ import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
 import { Minimap, type MinimapUnits } from './minimap';
 import { AchievementsScreen } from './achievements';
+import { ChatEntry, STRING_CHAT } from './chat';
 import { easyButton, FONT, GAME_DIALOG_INFO, lookOf } from './easy-panel';
 import { ChatLines, formatName, GameOver, MESSAGE_NOT_RESPONDING, SOUND_CHAT, type GameOverSounds } from './game-over';
 import { MenuDialog, okPopup } from './menu';
@@ -111,6 +112,8 @@ export interface HudGame {
   onGameOver(): void;
   /** The whole map, without fog. */
   reveal(): void;
+  /** Send a chat message to players `to` (player numbers) through the relay, outside the turns (docs/spec/chat.md §3). */
+  sendChat(text: string, to: number[]): void;
 }
 
 function box(parent: HTMLElement | null, className: string, testid?: string): HTMLDivElement {
@@ -156,8 +159,15 @@ export class GameHud {
   readonly options: OptionsDialog | null;
   /** The Menu button's dialog. */
   readonly menu: MenuDialog;
-  /** The chat lines' system messages. */
+  /** The chat lines: chat messages and system messages. */
   readonly chat: ChatLines;
+  /** Enter's chat bar and the Chat button's Send Messages dialog. */
+  readonly chatEntry: ChatEntry;
+  /**
+   * The chat group (`TChat::chatGroupPlayers`): every player from the setup screen (src/scr_mps.cpp:53-55), this one
+   * again at the start (src/tribegam.cpp:3488); the Send Messages dialog's check boxes change it.
+   */
+  readonly chatGroup = new Set<number>();
   /** F4's score display. */
   readonly scores: ScoreDisplay;
   /** The end of the game. */
@@ -169,6 +179,12 @@ export class GameHud {
   private readonly bar: ResourceBar;
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = () => this.applyLayout();
+  /** Enter opens the chat bar (`key_down_action`'s `VK_RETURN`, src/scr_game.cpp:1838; not with Ctrl or Alt). */
+  private readonly onKey = (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+    e.preventDefault();
+    this.commandChat(true);
+  };
   private layout: HudLayout | undefined;
   private shown: string | null = null;
 
@@ -214,6 +230,24 @@ export class GameHud {
       },
       reveal: () => o.game.reveal(),
     });
+    for (let p = 1; p < o.world.players; p++) this.chatGroup.add(p);
+    this.chatEntry = new ChatEntry({
+      parent: this.root,
+      provider: o.provider,
+      group: this.chatGroup,
+      players: () =>
+        Array.from({ length: o.world.players - 1 }, (_, i) => {
+          const p = i + 1;
+          const gone = o.game.dropped(p);
+          return { player: p, name: o.game.names[p] ?? '', civ: civilizationName(o.provider, o.world.civs[p]!), out: gone || o.world.playerStatus(p) === STATUS_LOST, checkable: p !== o.player && !gone };
+        }),
+      // No teams in a lobby game: every other player is an enemy.
+      isAlly: (p) => p === o.player,
+      isEnemy: (p) => p !== o.player,
+      send: (text) => this.sendChat(text),
+      click,
+    });
+    window.addEventListener('keydown', this.onKey);
     this.menu = new MenuDialog(this.root, o.provider, {
       playing: () => o.world.playerStatus(o.player) === 0 && !this.quit,
       quit: () => {
@@ -234,6 +268,7 @@ export class GameHud {
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         click();
+        if (i === 0) this.commandChat(false);
         if (i === 2) this.menu.show();
       }),
     );
@@ -255,6 +290,8 @@ export class GameHud {
   destroy(): void {
     this.o.app.ticker.remove(this.tick);
     this.menu.close();
+    this.chatEntry.close();
+    window.removeEventListener('keydown', this.onKey);
     this.chat.destroy();
     this.scores.destroy();
     window.removeEventListener('resize', this.onResize);
@@ -302,6 +339,38 @@ export class GameHud {
     place(this.scoreButton, l.scoreButton);
     this.shown = null;
     this.update();
+  }
+
+  /**
+   * `command_quick_chat` (Enter) and `command_chat` (the Chat button; a multiplayer game opens the Send Messages
+   * dialog): refused with "You cannot chat after you have resigned or been defeated." while this player is out of a
+   * game still on (src/scr_game.cpp:3797-3820).
+   */
+  commandChat(quick: boolean): void {
+    if (this.gameOver.over && !this.o.world.gameOver) {
+      this.say(STRING_CHAT.afterDefeat);
+      return;
+    }
+    if (quick) this.chatEntry.quick();
+    else this.chatEntry.full();
+  }
+
+  /**
+   * `SendGroupChatMsg` (src/com_hand.cpp:1905-1990): nothing in the game over mode; else to every other player in the
+   * chat group still in the game, and on this screen too when this player is in it.
+   */
+  private sendChat(text: string): void {
+    const { player, game } = this.o;
+    if (this.gameOver.over) return;
+    if (this.chatGroup.has(player)) this.receiveChat(player, text);
+    const to = [...this.chatGroup].filter((p) => p !== player && !game.dropped(p));
+    if (to.length > 0) game.sendChat(text, to);
+  }
+
+  /** A chat message from player `from` (this one's own included): "Name: text" on the chat lines with sound 2 (`AddChatMsg`, `handleChatReceived`). */
+  receiveChat(from: number, text: string): void {
+    this.o.sounds?.message(SOUND_CHAT);
+    this.chat.show(`${this.o.game.names[from] ?? ''}: ${text}`);
   }
 
   /** "Problem communicating with %s...": a turn is late (com_hand.cpp `COMM_PLAYER_NOT_RESPONDING`); names who is playing. */

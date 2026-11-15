@@ -1,5 +1,5 @@
 import type { ErrorCode, GameSettings, PlayerInfo, ServerMessage, Slot } from '@aoe/protocol';
-import { DEFAULT_GAME_SETTINGS, normalizeCode } from '@aoe/protocol';
+import { DEFAULT_GAME_SETTINGS, MAX_CHAT_LENGTH, normalizeCode } from '@aoe/protocol';
 import type { Link } from '../net/link';
 
 export type StartMessage = Extract<ServerMessage, { t: 'start' }>;
@@ -31,6 +31,8 @@ export class Session {
   onChange: (state: LobbyState) => void = () => {};
   /** Called when the host starts the game. */
   onStart: (start: StartMessage, you: Slot) => void = () => {};
+  /** Called with each chat line of the room, "Name: text" (`TChat::AddChatMsg`), this player's own included. */
+  onChat: (line: string) => void = () => {};
 
   constructor(private readonly link: Link) {
     link.onMessage((m) => this.handle(m));
@@ -68,6 +70,17 @@ export class Session {
     this.link.send({ t: 'civ', civ });
   }
 
+  /**
+   * The setup screen's chat: Enter sends the line to every player (`SendChatMsgAll`, src/scr_mps.cpp:750-754), this one
+   * included, so it shows here at once (`TXChat`, src/com_hand.cpp:1966-1969).
+   */
+  sendChat(text: string): void {
+    const line = text.slice(0, MAX_CHAT_LENGTH);
+    if (this.state.phase !== 'lobby' || !line) return;
+    this.chatLine(this.state.you, line);
+    this.link.send({ t: 'chat', text: line, to: this.state.players.map((p) => p.slot) });
+  }
+
   start(): void {
     this.set({ error: null });
     this.link.send({ t: 'start' });
@@ -103,9 +116,17 @@ export class Session {
         this.pendingSettings = [];
         this.set({ error: { code: m.code, message: m.message } });
         return;
+      case 'chat':
+        // A chat for the game screen is the game's (multiplayer.ts).
+        if (this.state.phase === 'lobby') this.chatLine(m.from, m.text);
+        return;
       default:
         return;
     }
+  }
+
+  private chatLine(slot: Slot, text: string): void {
+    this.onChat(`${this.state.players.find((p) => p.slot === slot)?.name ?? ''}: ${text}`);
   }
 
   private set(patch: Partial<LobbyState>): void {

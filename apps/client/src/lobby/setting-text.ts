@@ -20,6 +20,8 @@ export const LABELS = {
   timeLimit: [4329, 'Time Limit'],
   score: [4330, 'Score'],
   populationLimit: [9747, 'Population Limit'],
+  /** `STRING_ID_MP_CHAT_LABEL` (scr_mps.cpp:224). */
+  chat: [9687, 'Chat'],
 } as const;
 
 /** `STRING_ID_CIVILIZATION_*` by civ 1-16 (Palmyran 15 and Macedonian 16 swap ids), 17 "Random" (scr_mps.cpp:133-150). */
