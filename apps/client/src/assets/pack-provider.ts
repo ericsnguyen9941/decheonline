@@ -1,6 +1,6 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
-import { slpImagePath, slpKey, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
-import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SpriteFrame, TechInfo, UnitInfo } from './provider';
+import { slpImagePath, slpKey, soundPath, PACK_VERSION, type PackManifest } from '@aoe/assets-import/manifest';
+import type { AssetProvider, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
 
@@ -35,6 +35,7 @@ class PackProvider implements AssetProvider {
   ) {}
 
   private art: MapArt | null = null;
+  private sounds: SoundTable | null = null;
 
   unitStandingGraphic(unitId: number): number | null {
     return this.manifest.units[unitId]?.standingGraphic ?? null;
@@ -93,6 +94,20 @@ class PackProvider implements AssetProvider {
       playerColour: (player) => manifest.playerColours[player - 1] ?? null,
       minimap: manifest.minimap,
       tileEdges: manifest.tileEdges,
+    });
+  }
+
+  soundTable(): SoundTable {
+    const { manifest, baseUrl } = this;
+    const wavs = new Set(manifest.wavs);
+    return (this.sounds ??= {
+      sound: (id) => manifest.sounds[id]?.items ?? null,
+      unitSounds: (id) => manifest.unitSounds[id] ?? null,
+      graphicSounds: (id) => {
+        const g = manifest.graphics[id];
+        return g ? { sound: g.sound, frameSounds: g.frameSounds } : null;
+      },
+      wavUrl: (id) => (wavs.has(id) ? `${baseUrl}/${soundPath(id)}` : null),
     });
   }
 

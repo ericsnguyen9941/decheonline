@@ -9,6 +9,7 @@ import {
   PLAYER_OWNERS,
   slpImagePath,
   slpKey,
+  soundPath,
   type PackFrame,
   type PackManifest,
   type PackMinimap,
@@ -32,6 +33,7 @@ export interface ImportResult {
   manifest: PackManifest;
   slpCount: number;
   imageCount: number;
+  wavCount: number;
 }
 
 /** Path lookup that ignores case, as on a Windows install; null when absent. */
@@ -70,6 +72,13 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     border: [...[await openDrs(installDir, 'data/Border.drs', false)].filter((d) => d !== null)],
     interface: [interfac, ...[await openDrs(installDir, 'data2/Interfac.drs', false)].filter((d) => d !== null)],
   };
+
+  // The units' and sprites' wavs (sounds.drs, data2 overriding) and the game's own (interfac.drs); an install without
+  // sounds.drs plays none.
+  const wavSources = [
+    ...[await openDrs(installDir, 'data/sounds.drs', false), await openDrs(installDir, 'data2/sounds.drs', false)].filter((d) => d !== null),
+    ...sources.interface,
+  ];
 
   const paletteBytes = interfac.read('bina', PALETTE_ID);
   if (!paletteBytes) throw new Error(`assets:import: palette ${PALETTE_ID} missing from Interfac.drs`);
@@ -110,10 +119,16 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
     log(`${source}: ${bytesById.size} slp`);
   }
 
-  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges);
+  const wavs = new Map<number, Uint8Array>();
+  for (const drs of wavSources) for (const entry of drs.list('wav')) wavs.set(entry.id, drs.read('wav', entry.id) as Uint8Array);
+  await mkdir(join(outDir, 'sounds'), { recursive: true });
+  for (const [id, bytes] of wavs) await writeFile(join(outDir, soundPath(id)), bytes);
+  log(`sounds: ${wavs.size} wav`);
+
+  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b));
   log(`strings: ${strings.size}`);
   await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
-  return { manifest, slpCount: Object.keys(slps).length, imageCount };
+  return { manifest, slpCount: Object.keys(slps).length, imageCount, wavCount: wavs.size };
 }
 
 async function writeSlp(
@@ -151,6 +166,7 @@ function buildManifest(
   strings: Map<number, string>,
   minimap: PackMinimap | null,
   tileEdges: PackTileEdges | null,
+  wavs: number[],
 ): PackManifest {
   const graphicSlp = (slp: number): string | null => {
     const key = slpKey('graphics', slp);
@@ -169,7 +185,13 @@ function buildManifest(
     minimap,
     tileEdges,
     strings: Object.fromEntries(strings),
+    sounds: {},
+    unitSounds: {},
+    wavs,
   };
+  dat.sounds.forEach((s, id) => {
+    manifest.sounds[id] = { items: s.items.map((i) => [i.resourceId, i.probability]) };
+  });
   dat.graphics.forEach((g, id) => {
     if (!g) return;
     manifest.graphics[id] = {
@@ -181,6 +203,13 @@ function buildManifest(
       frameDuration: g.frameDuration,
       layer: g.layer,
       deltas: g.deltas.map((d) => [d.graphicId, d.offsetX, d.offsetY, d.displayAngle]),
+      sound: g.soundId,
+      // `play_sound` stops at a facet's first unused slot (frame -1).
+      frameSounds: g.angleSounds?.map((a) => {
+        const slots: [number, number][] = [[a.frame1, a.sound1], [a.frame2, a.sound2], [a.frame3, a.sound3]];
+        const end = slots.findIndex(([frame]) => frame < 0);
+        return end === -1 ? slots : slots.slice(0, end);
+      }) ?? null,
     };
   });
   dat.terrainBlock.terrains.slice(0, dat.terrainsUsed).forEach((t, id) => {
@@ -215,6 +244,14 @@ function buildManifest(
         minimap: [u.minimapMode, u.minimapColour],
         doppelganger: u.createDoppelgangerOnDeath,
       };
+      manifest.unitSounds[id] = [
+        u.selectionSound,
+        u.trainSound,
+        u.dyingSound,
+        u.action?.attackSound ?? -1,
+        u.action?.moveSound ?? -1,
+        u.building?.constructionSound ?? -1,
+      ];
     }
   }));
   dat.techs.forEach((t, id) => {

@@ -8,6 +8,7 @@ import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
 import { Minimap, type MinimapUnits } from './minimap';
+import { OptionsDialog, type OptionsSounds } from './options';
 import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
 import { ageName, civilizationName, objectName, statRows, topButtonLabels } from './text';
@@ -74,6 +75,8 @@ export interface GameHudOptions {
   cancelPlacement: () => void;
   /** The map view and its units, for the minimap; without them the minimap's frame stays empty. */
   map?: { view: MapView; units: MinimapUnits };
+  /** The buttons' click and the sound volume the Menu button's settings change; without it, no click and no settings. */
+  sounds?: OptionsSounds;
 }
 
 function box(parent: HTMLElement | null, className: string, testid?: string): HTMLDivElement {
@@ -114,6 +117,8 @@ export class GameHud {
   readonly commands: CommandPanel;
   /** The minimap, when the HUD has a map view. */
   readonly minimapView: Minimap | null;
+  /** The Menu button's settings (the sound volume), when the HUD has sounds. */
+  readonly options: OptionsDialog | null;
   private readonly bar: ResourceBar;
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = () => this.applyLayout();
@@ -137,7 +142,21 @@ export class GameHud {
       unselect: () => o.selection.unselect(),
       group: () => o.selection.group(),
       ungroup: () => o.selection.ungroup(),
+      onButton: () => o.sounds?.button(),
     });
+    const sounds = o.sounds;
+    this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds) : null;
+    // The top strip's buttons click like the grid's (`RGE_Panel_Tool_Box` gets `get_sound(1)`, src/scr_game.cpp:466);
+    // Menu opens the settings.
+    this.menus.forEach((el, i) =>
+      el.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        sounds?.button();
+        if (i !== 2 || !this.options) return;
+        if (this.options.open) this.options.close();
+        else this.options.show();
+      }),
+    );
     this.minimapView = o.map ? new Minimap({ parent: this.minimap, world: o.world, provider: o.provider, player: o.player, ...o.map }) : null;
     topButtonLabels(o.provider).forEach((label, i) => (this.menus[i]!.textContent = label));
     this.root.classList.toggle('art', o.provider.interfaceFrame(SLP.screen[1024], 0) !== null);

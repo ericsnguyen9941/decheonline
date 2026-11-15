@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 8;
+export const PACK_VERSION = 9;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -45,6 +45,10 @@ export interface PackGraphic {
    * the graphic's own SLP; graphic -1 is the graphic itself, angle -1 shows the part at every angle. Empty: just the SLP.
    */
   deltas: [number, number, number, number][];
+  /** `main_sound`: the dat sound played as the animation leaves frame 0 or wraps (`RGE_Sprite::play_sound`); -1 none. */
+  sound: number;
+  /** The per-facet frame sounds (`sound_list`): `[frame, sound]` pairs, at most 3 per facet; null when it has none. */
+  frameSounds: [number, number][][] | null;
 }
 
 export interface PackTerrain {
@@ -122,6 +126,21 @@ export interface PackMinimap {
   lines: [number, number][];
 }
 
+/** A dat sound (`RGE_Sound`): one of its wavs plays, picked at random by percent. */
+export interface PackSound {
+  /** `[resource id, percent]` per wav; the wav is `soundPath(id)` when `PackManifest.wavs` has the id, else silent. */
+  items: [number, number][];
+}
+
+/**
+ * A master's sounds, dat sound ids (-1 none): `selected_sound`, `created_sound`, `death_sound`, `command_sound`,
+ * `move_sound`, `construction_sound`.
+ */
+export type PackUnitSounds = [number, number, number, number, number, number];
+
+/** `TRIBE_Game::sounds` (src/tribegam.cpp:646-682): the game's own wavs by index, interfac.drs ids 50300 up. */
+export const GAME_SOUND_IDS = [50300, 50301, 50302, 50303, 50304, 50305, 50306, 50307, 50308, 50309, 50310, 50311, 50312, 50313, 50314, 50315, 50316] as const;
+
 export interface PackManifest {
   version: number;
   /** Palette 50500 of interfac.drs: `{ rgb: number[768] }`. */
@@ -146,7 +165,16 @@ export interface PackManifest {
   tileEdges: PackTileEdges | null;
   /** The game's text by string id: language.dll's string tables with languagex.dll's (Rise of Rome) over them. */
   strings: Record<string, string>;
+  /** Keyed by the dat's sound id (pack version 9). */
+  sounds: Record<string, PackSound>;
+  /** Keyed by unit id, the same table as `units` (pack version 9). */
+  unitSounds: Record<string, PackUnitSounds>;
+  /** Resource ids of the wavs in the pack: sounds.drs (data2 overriding data) and interfac.drs's (pack version 9). */
+  wavs: number[];
 }
+
+/** Pack-relative path of wav resource `id`. */
+export const soundPath = (id: number): string => `sounds/${id}.wav`;
 
 export const slpKey = (source: SlpSource, id: number): string => `${source}/${id}`;
 

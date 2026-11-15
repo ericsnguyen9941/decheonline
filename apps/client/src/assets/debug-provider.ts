@@ -56,6 +56,10 @@ export class DebugProvider implements AssetProvider {
     return null;
   }
 
+  soundTable(): null {
+    return null;
+  }
+
   terrainLayout(): { rows: number; cols: number } {
     return { rows: 1, cols: 1 };
   }

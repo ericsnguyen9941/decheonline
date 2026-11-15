@@ -97,6 +97,18 @@ export interface MapArt {
   readonly tileEdges: PackTileEdges | null;
 }
 
+/** What the sounds read from the pack (pack version 9; docs/spec/sounds.md). */
+export interface SoundTable {
+  /** `[wav resource id, percent]` of each wav of dat sound `id`; null when unknown. */
+  sound(id: number): readonly (readonly [number, number])[] | null;
+  /** A unit's `[selected, created, death, command, move, construction]` dat sound ids; null when unknown. */
+  unitSounds(unitId: number): readonly number[] | null;
+  /** A graphic's `main_sound` and per-facet `[frame, sound]` lists; null when unknown. */
+  graphicSounds(graphicId: number): { sound: number; frameSounds: readonly (readonly (readonly [number, number])[])[] | null } | null;
+  /** URL of wav resource `id`; null when the pack does not have it. */
+  wavUrl(id: number): string | null;
+}
+
 /** Where the game's art comes from: the imported pack, or debug shapes when there is none. */
 export interface AssetProvider {
   readonly kind: 'pack' | 'debug';
@@ -120,4 +132,6 @@ export interface AssetProvider {
   mapArt(): MapArt | null;
   /** Flat-tile variants of a terrain: a `rows` x `cols` grid at the start of its frames (RGE_View::get_tile_picture). */
   terrainLayout(terrainId: number): { rows: number; cols: number };
+  /** The dat's sounds and the wavs; null without a pack. */
+  soundTable(): SoundTable | null;
 }

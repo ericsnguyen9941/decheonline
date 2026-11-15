@@ -419,3 +419,70 @@ dialog h2 {
   top: 0;
   image-rendering: pixelated;
 }
+/* The Menu button's settings: the original Game Settings dialog's sound volume slider, OK and Cancel. */
+.hud-options {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 240px;
+  padding: 10px 16px 14px;
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+  background: var(--stone);
+  color: var(--parchment);
+  text-align: center;
+  z-index: 2;
+}
+.hud-options[hidden] {
+  display: none;
+}
+.hud-options-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 8px;
+}
+.hud-options-volume {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto 1fr auto;
+  justify-content: center;
+  column-gap: 8px;
+  height: 150px;
+}
+.hud-options-label {
+  grid-column: 1 / 3;
+  white-space: pre-line;
+}
+.hud-options-high,
+.hud-options-off {
+  grid-column: 2;
+  text-align: left;
+}
+.hud-options-high {
+  grid-row: 2;
+}
+.hud-options-off {
+  grid-row: 4;
+}
+.hud-options-slider {
+  grid-column: 1;
+  grid-row: 2 / 5;
+  /* Top to bottom: 0 "High" to 99 "Off". */
+  writing-mode: vertical-lr;
+  height: 100%;
+  margin: 0;
+}
+.hud-options-buttons {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.hud-options-button {
+  min-width: 90px;
+  font: inherit;
+  color: var(--parchment);
+  background: var(--stone);
+  border: 2px solid var(--stone-dark);
+  border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
+}

@@ -2,9 +2,10 @@ import { Graphics, Sprite, Texture, type Application, type Ticker } from 'pixi.j
 import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, TILE_FOGGED, TILE_VISIBLE, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
 import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
+import type { GameSounds } from '../audio/game-sounds';
 import { canBuild } from '../hud/commands';
 import { frameCursor } from '../hud/frame-image';
-import { SLP } from '../hud/layout';
+import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
 import { attackRollover } from '../hud/text';
 import { pixelToTileCoords, tileCoordsToPixel } from '../map/iso';
 import type { MapView } from '../map/map-view';
@@ -61,6 +62,8 @@ interface Track {
   graphic: number;
   animStart: number;
   startFrame: number;
+  /** Animation frame drawn last, for the sprite's frame sounds; -1 after the graphic changed or went undrawn. */
+  lastFrame: number;
   pack: boolean;
   /** The parts of a flying object's graphic drawn on the ground under it (its shadow), when it has any. */
   shadow: Sprite | null;
@@ -110,6 +113,8 @@ export interface UnitLayerOptions {
   onPlacement?: (unit: number | null) => void;
   /** The rollover text for the object under the pointer (the attack cursor's), or null when it goes. */
   onRollover?: (text: string | null) => void;
+  /** Selection and sprite sounds; none without. */
+  sounds?: GameSounds;
 }
 
 /** The building following the pointer while placing: the aligned map point and whether it fits there. */
@@ -337,7 +342,7 @@ export class UnitLayer {
       alive.add(e.id);
       let t = this.tracks.get(e.id);
       if (!t) {
-        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, pack: false, shadow: null };
+        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
       } else if (newStep) {
@@ -353,6 +358,7 @@ export class UnitLayer {
         t.graphic = graphic;
         t.animStart = now;
         t.startFrame = slide ? 0 : e.sprite.frame;
+        t.lastFrame = -1;
       }
       const at = this.drawnAt(t, now);
       const pos = tileCoordsToPixel(at.x, at.y, width);
@@ -368,7 +374,10 @@ export class UnitLayer {
       const shadow = split && art ? this.loadArt(graphic, e.owner, 'ground') : null;
       if (t.shadow) t.shadow.visible = false;
       t.sprite.visible = art !== null;
-      if (!art) continue;
+      if (!art) {
+        t.lastFrame = -1;
+        continue;
+      }
       t.pack = art.pack;
       const info = art.info;
       let frameStep = 0;
@@ -386,6 +395,12 @@ export class UnitLayer {
       this.place(t.sprite, frame, pick.flipped, pos.x, pos.y - lift, fog === 'fogged');
       // Above every terrain tile; nearer the bottom of the screen draws later.
       t.sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
+      // `RGE_Active_Animated_Sprite::draw`: a frame change plays the sprite's sounds when it is drawn, and not fogged.
+      const sounds = this.o.sounds;
+      if (t.lastFrame !== -1 && frameStep !== t.lastFrame && fog === 'plain' && sounds?.spriteHasSounds(graphic) && this.onScreen(t.sprite)) {
+        sounds.sprite(graphic, t.lastFrame, frameStep, info ? facetOf(e, info.angleCount) : 0);
+      }
+      t.lastFrame = frameStep;
       if (shadow) {
         const s = (t.shadow ??= view.layer.addChild(new Sprite()));
         this.place(s, shadow.frames[pick.index] ?? shadow.frames[0]!, false, pos.x, pos.y, fog === 'fogged');
@@ -405,6 +420,13 @@ export class UnitLayer {
     }
     this.drawHighlight();
     this.drawGhost();
+  }
+
+  /** Does `sprite` show in the main view, between the HUD's top strip and bottom panel? */
+  private onScreen(sprite: Sprite): boolean {
+    const b = sprite.getBounds();
+    const { width, height } = this.o.app.screen;
+    return b.maxX > 0 && b.minX < width && b.maxY > TOP_HEIGHT && b.minY < height - BOTTOM_HEIGHT;
   }
 
   /** What the player knows of the tile under map point (x, y): `TILE_VISIBLE`, `TILE_FOGGED` or `TILE_BLACK`. */
@@ -652,16 +674,17 @@ export class UnitLayer {
     return t.group === GROUP_NONE ? 0 : isUnit(e) ? SELECT_BOX : SELECT_CLICK;
   }
 
-  /** `select_one_object`: adds `id` while the selection has room, and makes it the panel's object. */
-  private selectOne(id: number): void {
-    if (this.selected.size >= MAX_SELECTED) return;
+  /** `select_one_object`: adds `id` while the selection has room, and makes it the panel's object. False when full. */
+  private selectOne(id: number): boolean {
+    if (this.selected.size >= MAX_SELECTED) return false;
     this.selected.add(id);
     this.primaryId = id;
+    return true;
   }
 
-  /** `select_object`: selects `e`, and with it the rest of its group (Group button groups only). */
+  /** `select_object`: selects `e` with its selection sound, and with it the rest of its group (Group button groups only). */
   private selectObject(e: Entity): void {
-    this.selectOne(e.id);
+    if (this.selectOne(e.id)) this.o.sounds?.selected(e);
     const group = this.groups.get(e.id);
     if (group !== undefined && group >= FIRST_GROUP) {
       for (const [id, g] of this.groups) if (g === group && id !== e.id && this.selected.size < MAX_SELECTED) this.selected.add(id);
@@ -703,6 +726,7 @@ export class UnitLayer {
       if (this.selected.size < 2) return;
       this.unselect();
       this.selectOne(hit.id);
+      this.o.sounds?.selected(hit);
     } else {
       this.unselect();
       this.selectObject(hit);
@@ -710,7 +734,7 @@ export class UnitLayer {
     this.lastClick = { x, y };
   }
 
-  /** `pick_multi(4, ...)`: own units (`select_level` 4) whose map position lies inside the box, up to 25. */
+  /** `pick_multi(4, ...)`: own units (`select_level` 4) whose map position lies inside the box, up to 25, without a sound. */
   private selectBox(x0: number, y0: number, x1: number, y1: number): void {
     const [left, right] = [Math.min(x0, x1), Math.max(x0, x1)];
     const [top, bottom] = [Math.min(y0, y1), Math.max(y0, y1)];

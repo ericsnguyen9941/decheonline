@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { importAssets } from './import';
-import { slpImagePath, slpKey, type PackManifest } from './manifest';
+import { slpImagePath, slpKey, soundPath, type PackManifest } from './manifest';
 import { SYNTHETIC, WHOLE_TILE, writeSyntheticInstall } from './synthetic';
 
 let root: string;
@@ -100,4 +100,16 @@ test('names a missing required file and leaves an existing pack alone', async ()
   await rm(join(broken, 'data', 'Terrain.drs'));
   await expect(importAssets({ installDir: broken, outDir: pack })).rejects.toThrow('data/Terrain.drs not found');
   expect((await stat(join(pack, 'manifest.json'))).size).toBeGreaterThan(0);
+});
+
+test("imports sounds.drs's wavs (data2 overriding data) and interfac.drs's, the dat's sounds and each unit's and graphic's sound ids", async () => {
+  const ids = [...new Set([...SYNTHETIC.wavs.data, ...SYNTHETIC.wavs.data2, ...SYNTHETIC.wavs.interface])].sort((a, b) => a - b);
+  expect(manifest.wavs).toEqual(ids);
+  for (const id of ids) expect((await readFile(join(pack, soundPath(id)))).subarray(0, 4).toString()).toBe('RIFF');
+  expect((await stat(join(pack, soundPath(SYNTHETIC.overriddenWav)))).size).toBe(44 + 128);
+  expect(manifest.sounds[0]).toEqual({ items: [[5000, 100]] });
+  expect(manifest.unitSounds[SYNTHETIC.unitId]).toHaveLength(6);
+  // Graphic 0 has a frame sound per facet (frame i, sound 0); graphic 2 none.
+  expect(manifest.graphics[SYNTHETIC.standingGraphic]).toMatchObject({ sound: -1, frameSounds: [[[0, 0]], [[1, 0]]] });
+  expect(manifest.graphics[SYNTHETIC.missingGraphic]?.frameSounds).toBeNull();
 });

@@ -210,3 +210,8 @@ UI panels and screens (`Panel*.cpp`, `pnl_*.cpp`, `scr_*.cpp`, `dlg_*.cpp`,
 platform code. They matter for look-and-feel tasks, not for the simulation.
 Note one coupling: sound playback calls `rand`, which the engine fences off
 (core.md §4.2).
+
+Sounds (which wav plays for what, for whom, and the volume): [sounds.md](sounds.md)
+(`src/Sound.cpp`, `src/Sounddrv.cpp`, `src/sprite.cpp` `RGE_Sprite::play_sound`
+:372, `src/player.cpp` :1359/:1772, `src/tplayer.cpp` :874/:1740,
+`src/tribegam.cpp` :646/:1751, `src/dlg_conf.cpp`).

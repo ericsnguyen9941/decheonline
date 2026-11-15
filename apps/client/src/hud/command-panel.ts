@@ -37,6 +37,8 @@ export interface CommandPanelOptions {
   /** Make the selection a group, and take the selected objects out of their groups. */
   group: () => void;
   ungroup: () => void;
+  /** A button was pressed (mouse down or its key): its click sound. */
+  onButton?: () => void;
 }
 
 /**
@@ -72,6 +74,8 @@ export class CommandPanel {
         const b = this.buttons[i];
         // A disabled button does not take the mouse (`TButtonPanel::set_disabled`).
         if (!b || (b.kind === 'research' && b.disabled) || (e.button !== 0 && e.button !== 2)) return;
+        // `TButtonPanel::mouse_left_down_action` / `_right_`: the button's sound, from its start.
+        this.o.onButton?.();
         this.pressed = i;
         this.render(true);
       });
@@ -95,7 +99,10 @@ export class CommandPanel {
       on('contextmenu', (e) => e.preventDefault());
     });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && this.buttons[FINAL_SLOT]) this.press(FINAL_SLOT, false);
+      if (e.key === 'Escape' && this.buttons[FINAL_SLOT]) {
+        this.o.onButton?.();
+        this.press(FINAL_SLOT, false);
+      }
     };
     window.addEventListener('keydown', onKey);
     this.cleanup.push(() => window.removeEventListener('keydown', onKey));

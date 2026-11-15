@@ -1,6 +1,8 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, type Command, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
+import { GameSounds, type SoundTrigger } from './audio/game-sounds';
+import { SoundPlayer } from './audio/sound-player';
 import { Lockstep, showEndDialog } from './lockstep';
 import { FrameClock } from './lockstep/frame-clock';
 import { LobbyView, Session } from './lobby';
@@ -65,6 +67,8 @@ export interface NetDebug {
   tileVisibility(col: number, row: number, player?: number): number;
   /** Pixel of the minimap canvas where tile (col, row)'s objects are drawn, or null before the HUD is up. */
   minimapPoint(col: number, row: number): { x: number; y: number } | null;
+  /** Every sound triggered so far, oldest first (whether or not audio has started); empty before the HUD is up. */
+  sounds(): SoundTrigger[];
 }
 
 export interface DebugNet {
@@ -179,6 +183,11 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   let mapView: MapView | undefined;
   let units: UnitLayer | undefined;
   let hud: GameHud | undefined;
+  let sounds: GameSounds | undefined;
+  // Made before the lobby so its clicks start the audio (browsers allow it only after a gesture).
+  const audio = new SoundPlayer();
+  const soundTick = () => sounds?.update();
+  app.ticker.add(soundTick);
 
   const end = (kind: 'desync' | 'peer-left', detail: string) => {
     lockstep?.stop();
@@ -188,6 +197,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     units = undefined;
     hud?.destroy();
     hud = undefined;
+    sounds = undefined;
     mapView?.destroy();
     mapView = undefined;
     window.__game = undefined;
@@ -223,21 +233,29 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     setGameVisible(true);
     game.onDesync = (turn) => end('desync', `The two games disagreed at turn ${turn}. The game cannot continue.`);
     game.onEnded = () => end('peer-left', 'Your opponent left the game.');
-    if (debug) panel = debugPanel(host, game, player, () => units, () => hud, frames);
+    if (debug) panel = debugPanel(host, game, player, () => units, () => hud, () => sounds, frames);
     void createAssetProvider().then(async (provider) => {
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
       mapView = view;
+      const gameSounds = new GameSounds({ world: game.world, player, table: provider.soundTable(), audio });
+      sounds = gameSounds;
+      // An order acknowledges itself with the unit's sound as the player gives it (`command_make_*`).
+      const order = (c: Command) => {
+        gameSounds.command(c);
+        game.issue(c);
+      };
       const layer = new UnitLayer({
         app,
         view,
         world: game.world,
         provider,
         player,
-        issue: (c) => game.issue(c),
+        issue: order,
         stepMs: () => game.stepMs(),
         onPlacement: (unit) => hud?.commands.placementChanged(unit),
         onRollover: (text) => hud?.rollover(text),
+        sounds: gameSounds,
       });
       units = layer;
       hud = new GameHud({
@@ -247,10 +265,11 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         provider,
         player,
         selection: layer,
-        issue: (c) => game.issue(c),
+        issue: order,
         startPlacement: (unit) => layer.startPlacement(unit),
         cancelPlacement: () => layer.cancelPlacement(),
         map: { view, units: layer },
+        sounds: gameSounds,
       });
       // Start looking at this player's town centre spot.
       const own = units.ownUnits()[0];
@@ -269,6 +288,7 @@ function debugPanel(
   player: number,
   layer: () => UnitLayer | undefined,
   hud: () => GameHud | undefined,
+  sounds: () => GameSounds | undefined,
   frames: FrameClock,
 ): HTMLElement {
   const panel = document.createElement('div');
@@ -367,6 +387,7 @@ function debugPanel(
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
     tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
     minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,
+    sounds: () => [...(sounds()?.log ?? [])],
   };
   return panel;
 }

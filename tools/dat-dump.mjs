@@ -1,5 +1,5 @@
 // Prints records from AOE1_DIR/data2/empires.dat via @aoe/data, no vitest.
-// Usage: AOE1_DIR=<install> npm run dat:dump -- <unit|tech|graphic|terrain|effect|civ> <id> [civ=1]
+// Usage: AOE1_DIR=<install> npm run dat:dump -- <unit|tech|graphic|terrain|effect|civ|sound> <id> [civ=1]
 //   (unit takes an optional civ id; Gaia is 0). `summary` prints table sizes.
 import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
@@ -18,7 +18,7 @@ register('data:text/javascript,' + encodeURIComponent(hook), import.meta.url);
 const dir = process.env.AOE1_DIR;
 const [kind, idArg, civArg] = process.argv.slice(2);
 if (!dir || !kind) {
-  console.error('usage: AOE1_DIR=<install> npm run dat:dump -- <summary|unit|tech|graphic|terrain|effect|civ> [id] [civ]');
+  console.error('usage: AOE1_DIR=<install> npm run dat:dump -- <summary|unit|tech|graphic|terrain|effect|civ|sound> [id] [civ]');
   process.exit(1);
 }
 const { RuleSet } = await import(pathToFileURL(join(import.meta.dirname, '..', 'packages', 'data', 'src', 'index.ts')).href);
@@ -27,11 +27,11 @@ const dat = rules.dat;
 
 const tables = {
   tech: dat.techs, graphic: dat.graphics, effect: dat.effects, civ: dat.civs,
-  terrain: dat.terrainBlock.terrains,
+  terrain: dat.terrainBlock.terrains, sound: dat.sounds,
 };
 let record;
 if (kind === 'summary') {
-  record = { version: dat.version, civs: dat.civs.length, techs: dat.techs.length, graphics: dat.graphics.length, effects: dat.effects.length };
+  record = { version: dat.version, civs: dat.civs.length, techs: dat.techs.length, graphics: dat.graphics.length, effects: dat.effects.length, sounds: dat.sounds.length };
 } else if (kind === 'unit') {
   record = rules.unit(Number(civArg ?? 1), Number(idArg));
 } else if (tables[kind]) {

@@ -51,6 +51,7 @@ interface Window {
     techState(tech: number, player?: number): number;
     tileVisibility(col: number, row: number, player?: number): number;
     minimapPoint(col: number, row: number): { x: number; y: number } | null;
+    sounds(): { event: string; sound: number; game: number; wav: number | null; source: number }[];
   };
 }
 

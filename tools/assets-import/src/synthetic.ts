@@ -37,7 +37,31 @@ export const SYNTHETIC = {
   minimap: { width: 220, height: 114 },
   /** Every edge draws the whole tile plain; edge 1 also leaves `blackSpan` black. */
   blackSpan: [16, 0, 3] as TileSpan,
+  /** sounds.drs wavs: data's, data2's (which also replaces `overriddenWav`), and interfac.drs's button click. */
+  wavs: { data: [5000, 5001], data2: [5001, 5002], interface: [50301] },
+  overriddenWav: 5001,
 } as const;
+
+/** A short 8-bit mono PCM wav at 11025 Hz: `samples` bytes of a square wave of period `period`. */
+export function buildWav(samples = 64, period = 8): Uint8Array {
+  const out = new Uint8Array(44 + samples);
+  const view = new DataView(out.buffer);
+  const text = (at: number, t: string) => [...t].forEach((c, i) => (out[at + i] = c.charCodeAt(0)));
+  text(0, 'RIFF');
+  view.setUint32(4, 36 + samples, true);
+  text(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 11025, true);
+  view.setUint32(28, 11025, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  text(36, 'data');
+  view.setUint32(40, samples, true);
+  for (let i = 0; i < samples; i++) out[44 + i] = (i % period) * 2 < period ? 0xa0 : 0x60;
+  return out;
+}
 
 /** The whole flat tile: rows 0-32 of a 65x33 box, as TILEEDGE.DAT's edge 0 `normal_draw`. */
 export const WHOLE_TILE: TileSpan[] = Array.from({ length: 33 }, (_, dy) => {
@@ -88,7 +112,11 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
     { type: 'bina', id: MINIMAP_BMP_ID, data: syntheticMapBmp() },
     { type: 'slp', id: SYNTHETIC.interfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
     { type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }, { width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) },
+    ...SYNTHETIC.wavs.interface.map((id) => ({ type: 'wav', id, data: buildWav() })),
   ]);
+  // data2's copy of the overridden wav is longer, so the pack shows which one it kept.
+  const sounds = buildDrs(SYNTHETIC.wavs.data.map((id) => ({ type: 'wav', id, data: buildWav() })));
+  const sounds2 = buildDrs(SYNTHETIC.wavs.data2.map((id) => ({ type: 'wav', id, data: buildWav(id === SYNTHETIC.overriddenWav ? 128 : 64) })));
   const interfac2 = buildDrs([{ type: 'slp', id: SYNTHETIC.overriddenInterfaceSlp, data: buildSlp([{ width: 4, rows: four(0x47, SYNTHETIC.normalIndex) }]) }]);
 
   await mkdir(join(dir, 'data'), { recursive: true });
@@ -97,6 +125,8 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'data', 'Terrain.drs'), terrain);
   await writeFile(join(dir, 'data', 'Interfac.drs'), interfac);
   await writeFile(join(dir, 'data2', 'Interfac.drs'), interfac2);
+  await writeFile(join(dir, 'data', 'sounds.drs'), sounds);
+  await writeFile(join(dir, 'data2', 'sounds.drs'), sounds2);
   const none = Array.from({ length: EDGE_COUNT }, (): TileSpan[] => []);
   await writeFile(join(dir, 'data2', 'TileEdge.Dat'), buildTileEdgeFile([none.map(() => WHOLE_TILE), none]));
   await writeFile(join(dir, 'data2', 'BlkEdge.Dat'), buildTileEdgeFile([none.map((_, e) => (e === 1 ? [SYNTHETIC.blackSpan] : []))]));
