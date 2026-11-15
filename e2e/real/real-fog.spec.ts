@@ -59,8 +59,8 @@ test('fog with real art: the start, an explored trail, and a flare on the minima
   const all = await units(host);
   const walker = all.find((u) => u.owner === 1 && u.type === VILLAGER)!;
   await host.evaluate(([id]) => window.__game!.issueMove([id!], 28.5, 4.5), [walker.id]);
-  await host.waitForFunction(() => window.__game!.tileVisibility(28, 4) === 0x0f, undefined, { timeout: 90_000 });
-  await expect.poll(() => visibility(host, 21, 6), { timeout: 30_000 }).toBe(FOGGED);
+  await host.waitForFunction(() => window.__game!.tileVisibility(28, 4) === 0x0f);
+  await expect.poll(() => visibility(host, 21, 6)).toBe(FOGGED);
   await host.evaluate(() => window.__map!.centerOnTile(22, 6));
   await shot(host, 'fog-explored.png');
 
@@ -69,17 +69,12 @@ test('fog with real art: the start, an explored trail, and a flare on the minima
   const prey = (await units(guest)).find((u) => u.owner === 2 && u.type === VILLAGER)!;
   await guest.evaluate(([id]) => window.__game!.issueMove([id!], 24.5, 22.5), [prey.id]);
   // It stops near the spot (its group forms around it): shoot it where it stands.
-  await guest.waitForFunction(([id]) => window.__game!.units().some((u) => u.id === id && !u.moving && Math.hypot(u.x - 24.5, u.y - 22.5) < 2), [prey.id], {
-    timeout: 90_000,
-  });
+  await guest.waitForFunction(([id]) => window.__game!.units().some((u) => u.id === id && !u.moving && Math.hypot(u.x - 24.5, u.y - 22.5) < 2), [prey.id]);
   const at = (await units(guest)).find((u) => u.id === prey.id)!;
   const bowmen = all.filter((u) => u.owner === 1 && u.type === BOWMAN).map((u) => u.id);
   expect(bowmen.length).toBe(1);
   await host.evaluate(([ids, target, x, y]) => window.__game!.issueWork(ids as number[], target as number, x as number, y as number), [bowmen, prey.id, at.x, at.y]);
-  await guest.waitForFunction(([flare]) => window.__game!.objects().some((o) => o.type === flare && o.owner === 2), [FLARE], {
-    timeout: 120_000,
-    polling: 100,
-  });
+  await guest.waitForFunction(([flare]) => window.__game!.objects().some((o) => o.type === flare && o.owner === 2), [FLARE], { polling: 100 });
   const flare = (await guest.evaluate(() => window.__game!.objects())).find((o) => o.type === FLARE && o.owner === 2)!;
   const [col, row] = [Math.floor(flare.x), Math.floor(flare.y)];
   expect(Math.hypot(flare.x - at.x, flare.y - at.y)).toBeGreaterThan(4);

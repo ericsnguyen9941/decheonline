@@ -1,7 +1,7 @@
 import { Graphics, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
 import { buildingFacet, checkPlacement, master, ObjectState, spriteInfo, TILE_FOGGED, TILE_VISIBLE, typeOf, UNIT_TYPES, unitType, type Command, type Entity, type World } from '@aoe/sim';
 import { DebugProvider } from '../assets/debug-provider';
-import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
+import type { AssetProvider, FramePart, GraphicInfo, SpriteFrame } from '../assets';
 import type { GameSounds } from '../audio/game-sounds';
 import { canBuild } from '../hud/commands';
 import { frameCursor } from '../hud/frame-image';
@@ -13,6 +13,7 @@ import { composeGraphic, GROUND_LAYER, splitsShadow, type PartSet } from './comp
 import { facingFrame } from './facing';
 import { Doppelgangers, fogDraw, type Doppelganger } from './fog-objects';
 import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
+import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
 import { alignBuilding } from './placement';
 
 /** Pointer travel (CSS px) after which a left press becomes a selection box instead of a click. */
@@ -67,6 +68,17 @@ interface Track {
   pack: boolean;
   /** The parts of a flying object's graphic drawn on the ground under it (its shadow), when it has any. */
   shadow: Sprite | null;
+  /** The frame drawn and its graphic's `draw_level`, for picking. */
+  frame: SpriteFrame | null;
+  layer: number;
+}
+
+/**
+ * `RGE_Map::get_point` (src/map.cpp:2584) from an object at map pixel `o`: tile offset (x, y, z) lands at
+ * `(int)((y + x) * 32)`, `(int)((y + 1 - x - z) * 16) - 16` from the object's whole pixel, each term truncated.
+ */
+export function outlinePoint(o: { x: number; y: number }, x: number, y: number, z: number): { x: number; y: number } {
+  return { x: Math.floor(o.x) + Math.trunc((y + x) * 32), y: Math.floor(o.y) + Math.trunc((y + 1 - x - z) * 16) - 16 };
 }
 
 /**
@@ -160,6 +172,9 @@ export class UnitLayer {
   private rolloverId: number | null = null;
   private readonly tracks = new Map<number, Track>();
   private readonly art = new Map<string, Art | null>();
+  /** Selection diamonds, at the original's draw level 10: over the terrain, under every object. */
+  private readonly outlines = new Graphics();
+  /** Hit point bars, at draw level 30: over every object. */
   private readonly highlight = new Graphics();
   private readonly box = new Graphics();
   private readonly fallback = new DebugProvider();
@@ -167,6 +182,7 @@ export class UnitLayer {
   private readonly cleanup: (() => void)[] = [];
   private readonly alpha = new WeakMap<Texture, { pixels: Uint8ClampedArray; width: number } | null>();
   private seenStep: number;
+  private shown = 0;
   /** The player's remembered trees, mines and bushes, and their sprites. */
   readonly doppelgangers: Doppelgangers;
   private readonly copySprites = new Map<number, Sprite>();
@@ -187,6 +203,9 @@ export class UnitLayer {
     this.doppelgangers = new Doppelgangers(o.player, (type) => o.provider.mapArt()?.doppelganger(type) ?? 0);
     // Each player sees the map through its own fog (`RGE_Player::visible`), in every mode.
     o.view.setFog({ state: (col, row) => o.world.tileVisibility(o.player, col, row), version: () => stepOf(o.world) });
+    // Objects start at the tile count (`t.sprite.zIndex`), the fog just under it (map-view.ts).
+    this.outlines.zIndex = o.world.map.width * o.world.map.height - 0.25;
+    o.view.layer.addChild(this.outlines);
     this.highlight.zIndex = Number.MAX_SAFE_INTEGER;
     o.view.layer.addChild(this.highlight);
     this.ghostSprite.zIndex = Number.MAX_SAFE_INTEGER - 1;
@@ -271,6 +290,11 @@ export class UnitLayer {
     return n;
   }
 
+  /** How many objects the player's fog lets it see (drawn plain or fogged) at the last frame, art loaded or not. */
+  get shownObjects(): number {
+    return this.shown;
+  }
+
   /** The building being placed and where it would go, while its ghost is shown. */
   get ghost(): Ghost | null {
     return this.placing === null ? null : this.ghostAt;
@@ -299,6 +323,7 @@ export class UnitLayer {
     for (const fn of this.cleanup) fn();
     for (const t of this.tracks.values()) t.sprite.destroy();
     for (const s of this.copySprites.values()) s.destroy();
+    this.outlines.destroy();
     this.highlight.destroy();
     this.ghostSprite.destroy();
     this.box.destroy();
@@ -336,13 +361,14 @@ export class UnitLayer {
     if (newStep) this.doppelgangers.update(world);
     const width = world.map.width;
     const alive = new Set<number>();
+    this.shown = 0;
     for (const e of world.entities.all()) {
       // Probe entities of `test` commands have no sprite and are not drawn.
       if (!e.sprite) continue;
       alive.add(e.id);
       let t = this.tracks.get(e.id);
       if (!t) {
-        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null };
+        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, frame: null, layer: DEFAULT_LAYER };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
       } else if (newStep) {
@@ -370,6 +396,7 @@ export class UnitLayer {
       const split = lift !== 0 && graphicInfo !== null && splitsShadow(this.o.provider, graphicInfo);
       const tile = this.tileState(e.x, e.y);
       const fog = fogDraw(type.fogFlag, e.state, tile, graphicInfo?.layer ?? DEFAULT_LAYER, type.fogFlag === 4 && this.doppelgangers.onTile(Math.floor(e.x), Math.floor(e.y)));
+      if (fog !== 'hidden') this.shown++;
       const art = fog === 'hidden' ? null : this.loadArt(graphic, e.owner, split ? 'air' : 'all');
       const shadow = split && art ? this.loadArt(graphic, e.owner, 'ground') : null;
       if (t.shadow) t.shadow.visible = false;
@@ -393,6 +420,8 @@ export class UnitLayer {
         : { index: 0, flipped: false };
       const frame = art.frames[pick.index] ?? art.frames[0]!;
       this.place(t.sprite, frame, pick.flipped, pos.x, pos.y - lift, fog === 'fogged');
+      t.frame = frame;
+      t.layer = info?.layer ?? DEFAULT_LAYER;
       // Above every terrain tile; nearer the bottom of the screen draws later.
       t.sprite.zIndex = world.map.width * world.map.height + Math.round(pos.y);
       // `RGE_Active_Animated_Sprite::draw`: a frame change plays the sprite's sounds when it is drawn, and not fogged.
@@ -575,10 +604,12 @@ export class UnitLayer {
    * The selection marker of the original's default outline (`outline_type` 2, RGE_Static_Object::capture_frame_3d_square):
    * a white diamond on the ground, the unit's outline radii wide, and a 24x2 hit point bar (green, red where hurt) over
    * its top corner while it has hit points left. Only selected objects show the bar (`selected & 1`, outline type 2).
-   * An ordered target flashes its diamond green (`selected & 2`) for 1.5 s, on and off every 256 ms.
+   * An ordered target flashes its diamond green (`selected & 2`) for 1.5 s, on and off every 256 ms. The diamond is a
+   * draw level 10 node (under every object), the bar a level 30 one (over them).
    */
   private drawHighlight(): void {
     const g = this.highlight.clear();
+    const lines = this.outlines.clear();
     const { world, provider } = this.o;
     const now = performance.now();
     const flashing = new Set<number>();
@@ -595,14 +626,12 @@ export class UnitLayer {
       const [rx, ry, rz] = provider.unitInfo(e.type)?.outline ?? [type.radiusX, type.radiusY, type.radiusZ];
       const at = this.drawnAt(t, now);
       const o = tileCoordsToPixel(at.x, at.y, world.map.width);
-      // RGE_Map::get_point: a tile offset (x, y, z) lands at ((y + x) * 32, (y - x - z) * 16) from the object.
-      const point = (x: number, y: number, z: number) => ({ x: Math.round(o.x + (y + x) * 32), y: Math.round(o.y + (y - x - z) * 16) });
-      const corners = [point(rx, -ry, 0), point(rx, ry, 0), point(-rx, ry, 0), point(-rx, -ry, 0)];
-      g.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: flashing.has(id) ? BAR_FILLED : SELECTION_COLOUR });
+      const corners = [outlinePoint(o, rx, -ry, 0), outlinePoint(o, rx, ry, 0), outlinePoint(o, -rx, ry, 0), outlinePoint(o, -rx, -ry, 0)];
+      lines.poly(corners.flatMap((c) => [c.x + 0.5, c.y + 0.5])).stroke({ width: 1, color: flashing.has(id) ? BAR_FILLED : SELECTION_COLOUR });
       if (!this.selected.has(id)) continue;
       const hp = Math.floor(e.hp);
       if (type.hitPoints <= 0 || hp <= 0) continue;
-      const bar = point(rx, -ry, rz);
+      const bar = outlinePoint(o, rx, -ry, rz);
       const left = bar.x - 12;
       const top = bar.y - 2;
       const filled = hp >= type.hitPoints ? BAR_WIDTH : Math.min(BAR_WIDTH - 1, Math.floor((hp * BAR_WIDTH) / type.hitPoints) + 1);
@@ -790,22 +819,53 @@ export class UnitLayer {
   }
 
   /**
-   * Topmost drawn object passing `test` under canvas point (x, y): a unit where its sprite's box covers the point, any
-   * other object where its drawn pixels do. Order targets skip the player's own selected objects.
+   * The object passing `test` picked at canvas point (x, y), as `RGE_Main_View::pick1` (src/vw_main.cpp:983) picks: each
+   * drawn part of draw level 10 to 20 gives its object a confidence (`pick_objects`), the object's best one a weight
+   * (`pick_weight`), and the heaviest wins; on a tie the better confidence, then the higher draw level, then the sprite
+   * drawn on top. A building picks inside each row of a part's drawn span, gaps included; a unit also inside its frame
+   * box and up to 15 px round it. Order targets skip the player's own selected objects.
    */
   private topmostAt(x: number, y: number, test: (e: Entity) => boolean, skipOwnSelected = true): Entity | undefined {
-    const hits: [Entity, Track][] = [];
+    let best: { e: Entity; weight: number; confidence: number; layer: number; z: number } | undefined;
     for (const [id, t] of this.tracks) {
       const e = this.o.world.entities.get(id);
-      if (!e || !t.sprite.visible || !test(e)) continue;
+      if (!e || !t.sprite.visible || !t.frame || !test(e)) continue;
       if (skipOwnSelected && this.selected.has(id) && e.owner === this.o.player) continue;
-      if (t.sprite.getBounds().containsPoint(x, y) && (isUnit(e) || this.opaque(t.sprite, x, y))) hits.push([e, t]);
+      const local = t.sprite.toLocal({ x, y });
+      let confidence = 0;
+      let layer = 0;
+      for (const part of t.frame.parts ?? [{ texture: t.frame.texture, x: 0, y: 0, flipped: false, layer: t.layer }]) {
+        if (part.layer < PICK_MIN_LEVEL || part.layer > PICK_MAX_LEVEL) continue;
+        const c = this.partConfidenceAt(part, local.x, local.y);
+        if (c === 0) continue;
+        if (confidence === 0 || c < confidence || (c === confidence && part.layer > layer)) [confidence, layer] = [c, part.layer];
+      }
+      if (confidence === 0) continue;
+      const weight = pickWeight(this.selectLevel(e), e.type, e.state < ObjectState.Active, confidence);
+      if (weight <= 0) continue;
+      const z = t.sprite.zIndex;
+      if (
+        !best ||
+        weight > best.weight ||
+        (weight === best.weight && (confidence < best.confidence || (confidence === best.confidence && (layer > best.layer || (layer === best.layer && z > best.z)))))
+      ) {
+        best = { e, weight, confidence, layer, z };
+      }
     }
-    hits.sort((a, b) => b[1].sprite.zIndex - a[1].sprite.zIndex);
-    return hits[0]?.[0];
+    return best?.e;
   }
 
-  /** Topmost object a work order can target (Gaia's or an own non-unit) whose drawn pixels cover canvas point (x, y). */
+  /** `pick_objects`' confidence for part `part` of a drawn frame at point (x, y) of that frame. */
+  private partConfidenceAt(part: FramePart, x: number, y: number): number {
+    const { width, height } = part.texture.frame;
+    const data = this.pixelsOf(part.texture);
+    const pixels = data && { pixels: data.pixels, stride: data.width, width, height };
+    // A mirrored part's column 0 is drawn at its right edge (`check_x = right - Xpos`).
+    const px = part.flipped ? part.x + width - x : x - part.x;
+    return partConfidence(pixels, width, height, px, y - part.y);
+  }
+
+  /** The object a work order can target (Gaia's or an own non-unit) picked at canvas point (x, y). */
   private workTarget(x: number, y: number): Entity | undefined {
     if (!this.hasOwnSelection()) return undefined;
     return this.topmostAt(x, y, (e) => e.owner === 0 || (e.owner === this.o.player && !isUnit(e)));

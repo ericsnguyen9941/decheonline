@@ -19,6 +19,8 @@ export interface SkirmishDebug {
   objects(): { id: number; owner: number; type: number; x: number; y: number; z: number; state: number; graphic: number }[];
   /** Objects drawn with pack sprites (not debug shapes). */
   packSprites(): number;
+  /** Objects the player's fog lets it see; every one shows pack art once `packSprites()` equals it. */
+  shownObjects(): number;
   /** Canvas pixel at the middle of object `id`'s drawn sprite; null when it is not drawn. */
   objectScreenPos(id: number): { x: number; y: number } | null;
 }
@@ -77,6 +79,7 @@ export async function startSkirmish(app: Application, speed: number): Promise<Sk
         .filter((e) => e.sprite)
         .map((e) => ({ id: e.id, owner: e.owner, type: e.type, x: e.x, y: e.y, z: e.z, state: e.state, graphic: e.sprite!.graphic })),
     packSprites: () => layer.packSprites,
+    shownObjects: () => layer.shownObjects,
     objectScreenPos: (id) => layer.objectCentre(id),
   };
 }

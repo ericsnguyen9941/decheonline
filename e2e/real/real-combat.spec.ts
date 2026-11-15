@@ -16,14 +16,12 @@ const TOWN_CENTER = 109;
 /** `object_state`: active. */
 const ACTIVE = 2;
 
-test.setTimeout(120_000);
-
 test('a fight renders with real art: Bowmen shoot arrows, a Villager lies dead', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/?debug=combat');
   await page.waitForFunction(() => window.__skirmish !== undefined && window.__map?.source === 'pack');
   // Every object is drawn from the pack, never as a debug shape.
-  await page.waitForFunction(() => window.__skirmish!.packSprites() === window.__skirmish!.objects().length);
+  await page.waitForFunction(() => window.__skirmish!.shownObjects() > 0 && window.__skirmish!.packSprites() === window.__skirmish!.shownObjects());
   // A Villager has died into its body, and an arrow is in flight above the ground.
   await page.waitForFunction(
     ([arrow, dead]) => {
@@ -31,7 +29,7 @@ test('a fight renders with real art: Bowmen shoot arrows, a Villager lies dead',
       return objects.some((o) => o.type === dead) && objects.some((o) => o.type === arrow && o.z > 0.3);
     },
     [ARROW, DEAD_MAN] as const,
-    { timeout: 90_000, polling: 'raf' },
+    { polling: 'raf' },
   );
   // Villagers flee, so the fight drifts: centre the view on the body and the arrows, then take the shot.
   await page.evaluate(
@@ -52,7 +50,7 @@ test('a fight renders with real art: Bowmen shoot arrows, a Villager lies dead',
   const path = join(shots, 'combat.png');
   await page.getByTestId('game-canvas').screenshot({ path });
   const objects = await page.evaluate(() => window.__skirmish!.objects());
-  expect(await page.evaluate(() => window.__skirmish!.packSprites())).toBe(objects.length);
+  expect(await page.evaluate(() => window.__skirmish!.packSprites())).toBe(await page.evaluate(() => window.__skirmish!.shownObjects()));
   const shown = await Promise.all(
     objects
       .filter((o) => o.type === ARROW || o.type === DEAD_MAN)

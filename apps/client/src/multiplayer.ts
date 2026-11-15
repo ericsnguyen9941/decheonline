@@ -37,6 +37,8 @@ export interface NetDebug {
   unitScreenPos(id: number): { x: number; y: number } | null;
   /** Objects drawn with pack sprites (not debug shapes). */
   packSprites(): number;
+  /** Objects the player's fog lets it see; every one shows pack art once `packSprites()` equals it. */
+  shownObjects(): number;
   /** Stockpile of `player` (default: this client's), whole numbers as the resource bar shows them. */
   resources(player?: number): Resources;
   /** Every sim object with a sprite (units, buildings, trees, mines, animals, carcasses), in id order. */
@@ -341,6 +343,7 @@ function debugPanel(
     },
     unitScreenPos: (id) => layer()?.screenPos(id) ?? null,
     packSprites: () => layer()?.packSprites ?? 0,
+    shownObjects: () => layer()?.shownObjects ?? 0,
     resources: (p = player) => resourcesOf(game.world, p),
     resourcesAt: (turn, p) => stock.get(turn)?.[p],
     objects: () =>

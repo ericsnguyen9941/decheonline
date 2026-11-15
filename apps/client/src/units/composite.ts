@@ -1,5 +1,5 @@
 import { Container, Rectangle, Sprite, Texture, type Renderer } from 'pixi.js';
-import type { AssetProvider, GraphicInfo, SpriteFrame } from '../assets';
+import type { AssetProvider, FramePart, GraphicInfo, SpriteFrame } from '../assets';
 import { facingFrame } from './facing';
 
 /** `RGE_Sprite::draw` draws a part whose `draw_level` is at most this at the object's shadow point. */
@@ -51,6 +51,7 @@ export async function composeGraphic(
   for (let facet = 0; facet < info.angleCount; facet++) {
     for (let frame = 0; frame < info.frameCount; frame++) {
       const c = new Container();
+      const parts: { sprite: Sprite; layer: number }[] = [];
       for (const { delta, info: part, frames } of baked) {
         if (!part || frames.length === 0 || (delta.angle >= 0 && delta.angle !== facet)) continue;
         const partFacet = Math.trunc((part.angleCount * facet) / info.angleCount);
@@ -61,13 +62,20 @@ export async function composeGraphic(
         s.scale.x = pick.flipped ? -1 : 1;
         s.position.set(pick.flipped ? delta.offsetX + f.hotspotX : delta.offsetX - f.hotspotX, delta.offsetY - f.hotspotY);
         c.addChild(s);
+        parts.push({ sprite: s, layer: part.layer });
       }
       const b = c.getLocalBounds();
       if (c.children.length === 0 || b.width <= 0 || b.height <= 0) {
         out.push({ texture: Texture.EMPTY, hotspotX: 0, hotspotY: 0 });
       } else {
         const frameRect = new Rectangle(Math.floor(b.x), Math.floor(b.y), Math.ceil(b.width), Math.ceil(b.height));
-        out.push({ texture: renderer.generateTexture({ target: c, frame: frameRect }), hotspotX: -frameRect.x, hotspotY: -frameRect.y });
+        const placed = parts.map(({ sprite: s, layer }): FramePart => {
+          const flipped = s.scale.x < 0;
+          const left = flipped ? s.position.x - s.texture.frame.width : s.position.x;
+          return { texture: s.texture, x: left - frameRect.x, y: s.position.y - frameRect.y, flipped, layer };
+        });
+        const texture = renderer.generateTexture({ target: c, frame: frameRect });
+        out.push({ texture, hotspotX: -frameRect.x, hotspotY: -frameRect.y, parts: placed });
       }
       c.destroy({ children: true });
     }

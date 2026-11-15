@@ -26,8 +26,8 @@ test('villagers render with their real sprites, standing and walking', async ({ 
   await host.getByTestId('ready').click();
   await guest.getByTestId('ready').click();
   await host.getByTestId('start').click();
-  // Every object of both players (6 villagers, 2 Town Centers) and Gaia's drawn from the pack.
-  await host.waitForFunction(() => window.__game?.packSprites() === 40, undefined, { timeout: 30_000 });
+  // Every object the fog lets the host see (its own Villagers and Town Center, Gaia's near them) drawn from the pack.
+  await host.waitForFunction(() => window.__game !== undefined && window.__game.shownObjects() > 0 && window.__game.packSprites() === window.__game.shownObjects());
   expect(await host.evaluate(() => window.__map!.source)).toBe('pack');
   mkdirSync(shots, { recursive: true });
   const canvas = host.getByTestId('game-canvas');

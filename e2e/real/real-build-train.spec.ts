@@ -32,7 +32,6 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 test('the build menu, the placement ghost, a foundation and the train queue show the original art', async ({ browser }) => {
-  test.setTimeout(120_000);
   const host = await open(browser);
   const guest = await open(browser);
   await host.getByTestId('name').fill('Alice');
@@ -44,9 +43,8 @@ test('the build menu, the placement ghost, a foundation and the train queue show
   await host.getByTestId('ready').click();
   await guest.getByTestId('ready').click();
   await host.getByTestId('start').click();
-  await host.waitForFunction(() => window.__game?.packSprites() !== undefined && window.__game.packSprites() === window.__game.objects().length, undefined, {
-    timeout: 30_000,
-  });
+  // Every object the fog lets the player see is drawn from the pack.
+  await host.waitForFunction(() => window.__game !== undefined && window.__game.shownObjects() > 0 && window.__game.packSprites() === window.__game.shownObjects());
   mkdirSync(shots, { recursive: true });
   // The debug strip of `?debug=net` covers the corner of the object panel.
   await host.getByTestId('net-debug').evaluate((el) => el.remove());

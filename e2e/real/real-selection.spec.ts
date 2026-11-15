@@ -26,7 +26,6 @@ const slots = (page: Page) => page.locator('[data-testid=command-slot].used').ev
 test('the top strip shows the age and buttons in the original strings; a wood carrier, a multi-selection and an enemy unit show in the panel', async ({
   browser,
 }) => {
-  test.setTimeout(150_000);
   const host = await open(browser);
   const guest = await open(browser);
   await host.getByTestId('name').fill('Alice');
@@ -38,9 +37,8 @@ test('the top strip shows the age and buttons in the original strings; a wood ca
   await host.getByTestId('ready').click();
   await guest.getByTestId('ready').click();
   await host.getByTestId('start').click();
-  await host.waitForFunction(() => window.__game?.packSprites() !== undefined && window.__game.packSprites() === window.__game.objects().length, undefined, {
-    timeout: 30_000,
-  });
+  // Every object the fog lets the player see is drawn from the pack.
+  await host.waitForFunction(() => window.__game !== undefined && window.__game.shownObjects() > 0 && window.__game.packSprites() === window.__game.shownObjects());
   // The debug strip of `?debug=net` covers the corner of the object panel.
   await host.getByTestId('net-debug').evaluate((el) => el.remove());
   const canvas = host.getByTestId('game-canvas');
@@ -70,7 +68,6 @@ test('the top strip shows the age and buttons in the original strings; a wood ca
       return o.type === type && o.heldType === wood && o.heldAmount >= 4;
     },
     [villager.id, LUMBERJACK, WOOD] as const,
-    { timeout: 90_000 },
   );
   await expect(host.getByTestId('object-held')).toHaveText(/^\d+$/);
   expect(Number(await host.getByTestId('object-held').textContent())).toBeGreaterThanOrEqual(4);

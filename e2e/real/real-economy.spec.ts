@@ -30,9 +30,8 @@ test('a base draws with the real Town Center, trees, forage, mines and animals; 
   await guest.getByTestId('ready').click();
   await host.getByTestId('start').click();
   // Every object of both bases (6 villagers, 2 Town Centers, 40 - 8 of them Gaia's) drawn from the pack.
-  await host.waitForFunction(() => window.__game?.packSprites() !== undefined && window.__game.packSprites() === window.__game.objects().length, undefined, {
-    timeout: 30_000,
-  });
+  // Every object the fog lets the player see is drawn from the pack.
+  await host.waitForFunction(() => window.__game !== undefined && window.__game.shownObjects() > 0 && window.__game.packSprites() === window.__game.shownObjects());
   expect(await host.evaluate(() => window.__game!.objects().length)).toBe(40);
   expect(await host.evaluate(() => window.__map!.source)).toBe('pack');
   mkdirSync(shots, { recursive: true });
@@ -50,7 +49,6 @@ test('a base draws with the real Town Center, trees, forage, mines and animals; 
   await host.waitForFunction(
     ([id, type]) => window.__game!.objects().find((o) => o.id === id)!.type === type && window.__game!.objects().find((o) => o.id === id)!.heldAmount > 3,
     [villager.id, MINER_GOLD] as const,
-    { timeout: 60_000 },
   );
   await canvas.screenshot({ path: join(shots, 'economy-mining.png') });
   console.log(`screenshots: ${join(shots, 'economy-base.png')} ${join(shots, 'economy-mining.png')}`);

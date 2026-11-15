@@ -6,6 +6,19 @@ export interface SpriteFrame {
   /** Pixel inside the frame that sits on the object's map position. */
   hotspotX: number;
   hotspotY: number;
+  /** A baked composite frame's parts, each picked on its own as the original does; absent for a plain frame. */
+  parts?: FramePart[];
+}
+
+/** One drawn part of a baked frame: its own frame's texture, where its left and top edges lie in the baked texture. */
+export interface FramePart {
+  texture: Texture;
+  x: number;
+  y: number;
+  /** Drawn mirrored: baked column `x + width - 1` shows the texture's column 0. */
+  flipped: boolean;
+  /** The part graphic's `draw_level`. */
+  layer: number;
 }
 
 /** Animation layout of a dat graphic. */

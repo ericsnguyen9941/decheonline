@@ -15,7 +15,6 @@ async function open(browser: Browser): Promise<Page> {
 }
 
 test('the game screen shows the original panels, a selected villager its civilization, name, hit points and attack, and the Town Center its name', async ({ browser }) => {
-  test.setTimeout(90_000);
   const host = await open(browser);
   const guest = await open(browser);
   await host.getByTestId('name').fill('Alice');
@@ -27,9 +26,8 @@ test('the game screen shows the original panels, a selected villager its civiliz
   await host.getByTestId('ready').click();
   await guest.getByTestId('ready').click();
   await host.getByTestId('start').click();
-  await host.waitForFunction(() => window.__game?.packSprites() !== undefined && window.__game.packSprites() === window.__game.objects().length, undefined, {
-    timeout: 30_000,
-  });
+  // Every object the fog lets the player see is drawn from the pack.
+  await host.waitForFunction(() => window.__game !== undefined && window.__game.shownObjects() > 0 && window.__game.packSprites() === window.__game.shownObjects());
 
   // 1280x800 gets the 1024x768 art: Egyptian screen SLP 50741 (frame 0 the strip, frame 1 the bottom panel).
   const style = (testid: string, prop: string) => host.getByTestId(testid).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);

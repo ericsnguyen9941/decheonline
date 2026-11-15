@@ -6,6 +6,12 @@ const clientPort = 5273;
 const serverPort = 8887;
 const baseURL = `http://localhost:${clientPort}`;
 
+/**
+ * The built bundles, not `npm run dev`: a page then loads a few files instead of hundreds of modules the dev server
+ * transforms on request, which is what made every test minutes long on a loaded machine.
+ */
+export const BUNDLES_COMMAND = 'npm run build && npx concurrently -k -n server,client "npm start -w @aoe/server" "npm run preview -w @aoe/client"';
+
 /** What the main and the latency configs share: the synthetic pack, the dev server and the (load-proof) timeouts. */
 export const shared: PlaywrightTestConfig = {
   testDir: './tests',
@@ -20,9 +26,7 @@ export const shared: PlaywrightTestConfig = {
   expect: { timeout: 60_000 },
   use: { baseURL },
   webServer: {
-    // The built bundles, not `npm run dev`: a page then loads a few files instead of hundreds of modules the dev server
-    // transforms on request, which is what made every test minutes long on a loaded machine.
-    command: 'npm run build && npx concurrently -k -n server,client "npm start -w @aoe/server" "npm run preview -w @aoe/client"',
+    command: BUNDLES_COMMAND,
     cwd: '..',
     url: baseURL,
     env: { CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir },
