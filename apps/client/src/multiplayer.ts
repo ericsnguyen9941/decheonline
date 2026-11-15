@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, HOUSE, MARKET, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, HOUSE, MARKET, TECH_DONE, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { SoundPlayer } from './audio/sound-player';
@@ -26,8 +26,11 @@ export interface NetDebug {
   entityOwners(): number[];
   /** Sim player number of this client. */
   player(): number;
-  /** Each player's civ (Gaia first), the victory type and the time limit's clock: what the lobby started. */
-  gameSetup(): { civs: number[]; victory: { type: number; countdown: number } };
+  /**
+   * Each player's civ (Gaia first), the victory type and the time limit's clock, and per player its object types, done
+   * techs and explored tile count: what the lobby started.
+   */
+  gameSetup(): { civs: number[]; victory: { type: number; countdown: number }; objects: number[][]; techsDone: number[][]; explored: number[] };
   /** Units in the sim, in id order; `col`/`row` is the tile under the unit. */
   units(): DebugUnit[];
   /** Queue a move order for `units` to tile coordinates (x, y), as a right click would. */
@@ -440,7 +443,16 @@ function debugPanel(
     applied: () => game.applied,
     entityOwners: () => [...game.world.entities.all()].filter((e) => !e.sprite).map((e) => e.owner),
     player: () => player,
-    gameSetup: () => ({ civs: [...game.world.civs], victory: { type: game.world.victory.type, countdown: game.world.victory.countdownClock } }),
+    gameSetup: () => {
+      const { world } = game;
+      return {
+        civs: [...world.civs],
+        victory: { type: world.victory.type, countdown: world.victory.countdownClock },
+        objects: world.civs.map((_, p) => [...world.entities.ofPlayer(p)].map((e) => e.type)),
+        techsDone: world.techs.map((states) => states.flatMap((s, i) => (s === TECH_DONE ? [i] : []))),
+        explored: [...world.visibility.explored],
+      };
+    },
     units: () =>
       [...game.world.entities.all()]
         .filter(isUnit)

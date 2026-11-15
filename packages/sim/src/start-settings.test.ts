@@ -23,7 +23,7 @@ import {
 // The start settings as `TRIBE_World::new_game` applies them after the objects (docs/spec/lobby.md §2.1): the civ's
 // tech tree effect or Full Tech Tree's (tworld.cpp:796-805), the resource level (:806-831), Death Match (:833-840),
 // the starting age (:842-855, tplayer.cpp:1132-1168); Nomad in the generator (rmm_tdbc.cpp:284-293); Reveal Map in
-// `start_game` (tribegam.cpp:3023-3032). Two Egyptian players on a Tiny Inland map from game seed 99.
+// `create_game` (tribegam.cpp:3024-3033). Two Egyptian players on a Tiny Inland map from game seed 99.
 const game = (patch: Partial<GameSettings>) => new World(lobbyWorldOptions(99, { ...DEFAULT_GAME_SETTINGS, mapSize: 72, ...patch }, [1, 1]));
 const objects = (w: World, p: number) => [...w.entities.ofPlayer(p)];
 const count = (w: World, p: number, type: number) => objects(w, p).filter((e) => e.type === type).length;
@@ -140,7 +140,7 @@ describe('Resources (scr_set.cpp:162-165; tworld.cpp:806-831) and Death Match (s
   });
 });
 
-describe('Reveal Map (scr_set.cpp:229-231; tribegam.cpp:3023-3032, visible.cpp:331-353)', () => {
+describe('Reveal Map (scr_set.cpp:229-231; tribegam.cpp:3024-3033, visible.cpp:331-353)', () => {
   test('every tile explored for both players, not Gaia; the fog stays; no "most explored" score entry', () => {
     const off = game({});
     const on = game({ revealMap: true });

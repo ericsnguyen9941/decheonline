@@ -18,8 +18,8 @@ interface Window {
     applied(): { type: string }[][];
     entityOwners(): number[];
     player(): number;
-    /** Each player's civ (Gaia first), the victory type and the time limit's clock (docs/spec/lobby.md). */
-    gameSetup(): { civs: number[]; victory: { type: number; countdown: number } };
+    /** Each player's civ (Gaia first), the victory type and the time limit's clock; per player its object types, done techs, explored tiles (docs/spec/lobby.md). */
+    gameSetup(): { civs: number[]; victory: { type: number; countdown: number }; objects: number[][]; techsDone: number[][]; explored: number[] };
     units(): { id: number; owner: number; type: number; x: number; y: number; col: number; row: number; facet: number; moving: boolean }[];
     issueMove(units: number[], x: number, y: number): void;
     selection(): number[] | null;

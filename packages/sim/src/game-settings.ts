@@ -118,7 +118,7 @@ export function resolveCivs(seed: number, civs: readonly number[]): number[] {
  * The world a lobby game starts: the random map of `settings` from `seed` (or, `testMap`, the fixed test map and its
  * start objects, where Nomad changes nothing), each player's civ (by slot, Random resolved), the victory setting, the
  * start settings `TRIBE_World::new_game` applies (src/tworld.cpp:796-855; Nomad in the generator, src/rmm_tdbc.cpp:284-293;
- * Reveal Map in `start_game`, src/tribegam.cpp:3023-3032) and the population limit (attribute 32, src/tworld.cpp:869-872).
+ * Reveal Map in `create_game`, src/tribegam.cpp:3024-3033) and the population limit (attribute 32, src/tworld.cpp:869-872).
  */
 export function lobbyWorldOptions(seed: number, settings: GameSettings, civs: readonly number[], testMap = false): WorldOptions {
   const players = civs.length + 1;

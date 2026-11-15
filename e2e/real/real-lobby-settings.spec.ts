@@ -47,7 +47,17 @@ async function playGame(browser: Browser, choice: Choice, lobbyShot?: string): P
   // Both screens show the other's pick and the host's settings.
   await expect(guest.getByTestId('civ-0')).toHaveText(choice.civs[0]);
   await expect(host.getByTestId('civ-1')).toHaveText(choice.civs[1]);
-  await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText([`Map Size: ${choice.size}`, `Map Type: ${choice.type}`, new RegExp(`^Victory: ${choice.victory}`)]);
+  await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText([
+    'Scenario: Random Map',
+    `Map Size: ${choice.size}`,
+    `Map Type: ${choice.type}`,
+    new RegExp(`^Victory: ${choice.victory}`),
+    'Age: Default',
+    'Resources: Default',
+    'Reveal Map: No',
+    'Full Tech Tree: No',
+    'Population Limit: 50',
+  ]);
   if (lobbyShot) {
     await shot(host, `${lobbyShot}-host.png`);
     await shot(guest, `${lobbyShot}-guest.png`);

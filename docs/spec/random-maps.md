@@ -931,9 +931,9 @@ discoveries and ruins are 0 (those victories are not ported). The returned
 `artifact_count` / `ruin_count` (5 or 0) go to the world's victory state for the
 all-relics / all-ruins holds; the objects are Gaia's until a player's unit takes
 them (victory.md §3, §10, §10.1; seeded counts per map type and size in
-`relics.test.ts`). Not covered:
-alliances (none in a 2-player room), randomized positions, Nomad, the
-resource levels.
+`relics.test.ts`). The lobby's start settings (Nomad's object rows, the
+resource levels, ages, Full Tech Tree, Reveal Map) are lobby.md §2.1. Not
+covered: alliances (none in a 2-player room), randomized positions.
 
 The client builds every game this way (`apps/client/src/lockstep/lockstep.ts`),
 with the map type and size the host picked in the lobby (`lobbyWorldOptions`,

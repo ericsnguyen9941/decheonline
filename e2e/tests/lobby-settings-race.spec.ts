@@ -29,14 +29,18 @@ test(`quick successive setting changes by the host all arrive, with the server s
   // A guest's lobby echo (its civ) lands between the host's changes and must not pass for the answer to them.
   if (guestActs) await guest.getByTestId('civ-1').selectOption({ index: 2 });
   await hostPage.getByTestId('victory').selectOption({ label: 'Conquest' });
+  await hostPage.getByTestId('starting-age').selectOption({ label: 'Tool Age' });
+  await hostPage.getByTestId('reveal-map').check();
 
-  const lines = ['Map Size: Small', 'Map Type: Hill Country', 'Victory: Conquest', 'Population Limit: 50'];
+  const lines = ['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Conquest', 'Age: Tool Age', 'Resources: Default', 'Reveal Map: Yes', 'Full Tech Tree: No', 'Population Limit: 50'];
   await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText(lines);
   // Past every delayed echo the host's selects still show the picks.
   await hostPage.waitForTimeout(1000);
   await expect(hostPage.getByTestId('map-size')).toHaveValue('96');
   await expect(hostPage.getByTestId('map-type').locator('option:checked')).toHaveText('Hill Country');
   await expect(hostPage.getByTestId('victory').locator('option:checked')).toHaveText('Conquest');
+  await expect(hostPage.getByTestId('starting-age').locator('option:checked')).toHaveText('Tool Age');
+  await expect(hostPage.getByTestId('reveal-map')).toBeChecked();
   await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText(lines);
 });
 }

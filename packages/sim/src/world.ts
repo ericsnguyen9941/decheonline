@@ -389,8 +389,8 @@ export class World {
     for (let p = 1; p < this.players; p++) {
       for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
     }
-    // Reveal Map: `TRIBE_Game::start_game` explores the whole map for every human player once the world is made
-    // (src/tribegam.cpp:3023-3032); the fog stays on.
+    // Reveal Map: `TRIBE_Game::create_game` explores the whole map for every human player once the world is made
+    // (src/tribegam.cpp:3024-3033); the fog stays on.
     if (options.revealMap) for (let p = 1; p < this.players; p++) this.visibility.exploreAll(p);
   }
 
