@@ -32,7 +32,7 @@ import { RmmMap, type RmmWorld } from './rmm-map';
 import { placeRelicsAndRuins } from './rmm-objects';
 import { CrtRand } from './rng';
 import { newSprite } from './sprites';
-import { checkForNewTech, doEffect, newResearchDone, newTechStates } from './techs';
+import { checkForNewTech, doEffect, newResearchDone, newTechStates, startInAge } from './techs';
 import {
   checkGameState,
   copyVictory,
@@ -93,12 +93,48 @@ export interface WorldOptions {
   civs?: readonly number[];
   /** The lobby's victory setting (victory.md §2); default Standard. */
   victory?: VictorySettings;
+  /** Starting Age (`AGE_*`, `TRIBE_Game::Age`); default `AGE_DEFAULT`. Nomad only changes a random map's start objects. */
+  startingAge?: number;
+  /** Resources (`RESOURCES_*`, `TRIBE_Game::ResourceLevel`); default `RESOURCES_DEFAULT`, the civ's own stockpile. */
+  resourceLevel?: number;
+  /** Death Match: every player starts with 20000 food and wood, 10000 gold, 5000 stone. */
+  deathMatch?: boolean;
+  /** Full Tech Tree: effect 210 instead of each civ's tech tree effect. */
+  fullTechTree?: boolean;
+  /** Reveal Map (`fullVisibility`): every player starts with the whole map explored. */
+  revealMap?: boolean;
   /**
    * A random map game (docs/spec/random-maps.md): the map and every start object come from `randomSeed` through the
    * original's `new_game` chain; `map` and `units` are not used.
    */
   randomMap?: RandomMapOptions;
 }
+
+/** `TRIBE_Game::Age` (include/tribegam.h:123): the Starting Age drop-down's ids. */
+export const AGE_DEFAULT = 0;
+export const AGE_NOMAD = 1;
+export const AGE_STONE = 2;
+export const AGE_TOOL = 3;
+export const AGE_BRONZE = 4;
+export const AGE_IRON = 5;
+/** `TRIBE_Game::ResourceLevel` (include/tribegam.h:122); Low (1) is not on the dialog. */
+export const RESOURCES_DEFAULT = 0;
+export const RESOURCES_LOW = 1;
+export const RESOURCES_MEDIUM = 2;
+export const RESOURCES_HIGH = 3;
+
+/**
+ * Food, wood, gold, stone each player is given at game start by resource level and for Death Match
+ * (src/tworld.cpp:806-840); Default keeps the civ's own (200, 200, 0, 150).
+ */
+const START_STOCKPILES: Readonly<Record<number, readonly [number, number, number, number]>> = {
+  [RESOURCES_LOW]: [200, 200, 0, 100],
+  [RESOURCES_MEDIUM]: [500, 500, 0, 250],
+  [RESOURCES_HIGH]: [1000, 1000, 0, 750],
+};
+const DEATH_MATCH_STOCKPILE = [20000, 20000, 10000, 5000] as const;
+/** Effect 210, "A01": the Full Tech Tree's in place of a civ's tech tree (disables only tech 118). */
+const FULL_TECH_TREE_EFFECT = 210;
 
 /** The lobby's random map settings. */
 export interface RandomMapOptions {
@@ -339,28 +375,46 @@ export class World {
     for (let p = 0; p < this.players; p++) checkForNewTech(this.gameContext(), p);
     // The victory type and each player's score table (victory.md §2, §11); no RNG. The original's players have their
     // conditions from creation on, and the random game's player updates read them.
-    this.victory = newVictory(this.players, options.victory);
+    this.victory = newVictory(this.players, options.victory, options.revealMap);
     if (randomMap) {
-      this.newRandomGame(randomMap.type);
+      this.newRandomGame(randomMap.type, options);
     } else {
       // Game setup draws from the stored seed and stores a fresh one afterwards (docs/spec/core.md §4.2).
       const setup = (options.units?.length ?? 0) > 0;
       if (setup) this.rng.srand(this.randomSeed);
       for (const u of options.units ?? []) this.createUnit(u);
-      this.civEffects();
+      this.startEffects(options);
       if (setup) this.randomSeed = this.rng.rand();
     }
     for (let p = 1; p < this.players; p++) {
       for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
     }
+    // Reveal Map: `TRIBE_Game::start_game` explores the whole map for every human player once the world is made
+    // (src/tribegam.cpp:3023-3032); the fog stays on.
+    if (options.revealMap) for (let p = 1; p < this.players; p++) this.visibility.exploreAll(p);
   }
 
-  /** `new_game` (src/tworld.cpp:793-805, techs.md §4.6): after the objects, each player but Gaia gets its civ's effect. */
-  private civEffects(): void {
+  /**
+   * `TRIBE_World::new_game` after the objects (src/tworld.cpp:793-855, techs.md §4.6), each player but Gaia: its civ's
+   * tech tree effect, or effect 210 with Full Tech Tree; the Medium or High resource level's stockpile, then Death
+   * Match's; then the starting age's techs (`startInAge`).
+   */
+  private startEffects(options: WorldOptions): void {
+    const ctx = this.gameContext();
     for (let p = 1; p < this.players; p++) {
-      const effect = CIVS[this.civs[p]!]!.effect;
-      if (effect >= 0) doEffect(this.gameContext(), p, effect);
+      const effect = options.fullTechTree ? FULL_TECH_TREE_EFFECT : CIVS[this.civs[p]!]!.effect;
+      if (effect >= 0) doEffect(ctx, p, effect);
     }
+    const stockpiles = [START_STOCKPILES[options.resourceLevel ?? RESOURCES_DEFAULT], options.deathMatch ? DEATH_MATCH_STOCKPILE : undefined];
+    for (const stockpile of stockpiles) {
+      if (!stockpile) continue;
+      const [food, wood, gold, stone] = stockpile;
+      for (let p = 1; p < this.players; p++) {
+        const a = this.attributes[p]!;
+        [a[ATTR_FOOD], a[ATTR_WOOD], a[ATTR_GOLD], a[ATTR_STONE]] = [food, wood, gold, stone];
+      }
+    }
+    for (let p = 1; p < this.players; p++) startInAge(ctx, p, options.startingAge ?? AGE_DEFAULT);
   }
 
   /**
@@ -372,14 +426,15 @@ export class World {
    * draws stay before the seed (visibility.md §6). No player is left without objects on the dat's maps, so
    * `random_start` draws nothing (its stand-in Town Center for an empty player is not ported).
    */
-  private newRandomGame(type: number): void {
+  private newRandomGame(type: number, options: WorldOptions): void {
     const rng = this.rng;
     rng.srand(this.randomSeed);
     for (let i = 0; i < 5; i++) rng.rand();
     const m = new RmmMap(this.map, rng, this.rmmWorld());
-    // Multiplayer defaults: positions fixed, Default age; no alliances in a 2-player room.
+    // Positions fixed (the multiplayer default); no alliances in a 2-player room. Nomad: Villagers, no Town Center.
     this.randomMapSeed = rng.rand();
-    mapGenerate2(m, this.randomMapSeed, { type, players: this.players - 1, fixedPositions: true, nomad: false, allied: () => false });
+    const nomad = options.startingAge === AGE_NOMAD;
+    mapGenerate2(m, this.randomMapSeed, { type, players: this.players - 1, fixedPositions: true, nomad, allied: () => false });
     rng.rand();
     rng.rand();
     const ctx = this.gameContext();
@@ -398,7 +453,7 @@ export class World {
     // `artifact_count` / `ruin_count` (src/tworld.cpp:732, :736): what the all-relics and all-ruins holds count.
     this.victory.artifactCount = placed.artifactCount ?? 0;
     this.victory.ruinCount = placed.ruinCount ?? 0;
-    this.civEffects();
+    this.startEffects(options);
   }
 
   /** The generator's view of the world: masters, and objects made and removed as the game makes them. */

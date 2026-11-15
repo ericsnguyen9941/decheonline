@@ -5,16 +5,20 @@ import {
   LOBBY_MAP_SIZES,
   LOBBY_MAP_TYPES,
   LOBBY_POPULATION_LIMITS,
+  LOBBY_RESOURCES,
   LOBBY_SCORE_LIMITS,
+  LOBBY_STARTING_AGES,
   LOBBY_TIME_LIMITS,
   LOBBY_VICTORY_TYPES,
+  RESOURCES_DEFAULT,
   VICTORY_SCORE,
+  VICTORY_STANDARD,
   VICTORY_TIME_LIMIT,
   type GameSettings,
 } from '@aoe/sim';
 import type { LobbyState } from './session';
 import type { Session } from './session';
-import { civName, englishText, LABELS, mapSizeName, mapTypeName, summaryLines, timeLimitName, victoryName, type Text } from './setting-text';
+import { ageName, civName, englishText, gameName, LABELS, mapSizeName, mapTypeName, resourcesName, summaryLines, timeLimitName, victoryName, type Text } from './setting-text';
 
 const ERROR_TEXT: Record<string, string> = {
   'bad-code': 'No game with that invite code.',
@@ -39,6 +43,13 @@ function select(testid: string, label: string, options: [number, string][], valu
   const node = el('select', { ariaLabel: label, testid });
   for (const [v, text] of options) node.append(el('option', { value: String(v), selected: v === value }, text));
   node.addEventListener('change', () => onPick(Number(node.value)));
+  return node;
+}
+
+/** A check box showing `value`; `onPick` gets the new state. */
+function checkbox(testid: string, label: string, value: boolean, onPick: (v: boolean) => void): HTMLInputElement {
+  const node = el('input', { type: 'checkbox', ariaLabel: label, testid, checked: value });
+  node.addEventListener('change', () => onPick(node.checked));
   return node;
 }
 
@@ -176,8 +187,9 @@ export class LobbyView {
   }
 
   /**
-   * The host, while not ready, picks the map size, map type, victory condition and population limit (the Game Settings
-   * screen, src/scr_set.cpp); otherwise the setup screen's summary of them.
+   * The host, while not ready, picks Random Map or Death Match, the map size, map type, victory condition, starting age,
+   * resources, Reveal Map, Full Tech Tree and population limit (the Game Settings screen, src/scr_set.cpp); otherwise
+   * the setup screen's summary of them.
    */
   private settings(s: GameSettings, editable: boolean): HTMLElement {
     const box = el('div', { className: 'settings', testid: 'settings' }, el('h3', {}, this.label('settings')));
@@ -187,7 +199,12 @@ export class LobbyView {
     }
     const change = (patch: Partial<GameSettings>) => this.session.setSettings({ ...this.session.state.settings, ...patch });
     const field = (key: keyof typeof LABELS, control: HTMLElement) => el('label', {}, this.label(key), control);
+    // The scenario list's Random Map and Death Match lines (scr_set.cpp:616-623); picking another line selects the
+    // victory drop-down's first line (`fillMissionText`, :642-644), and Death Match stores Default resources (:746-750).
+    const games: [number, string][] = [0, 1].map((v) => [v, gameName(this.text, v === 1)]);
+    const pickGame = (v: number) => change({ deathMatch: v === 1, victory: { type: VICTORY_STANDARD }, ...(v === 1 ? { resources: RESOURCES_DEFAULT } : {}) });
     box.append(
+      field('game', select('game', this.label('game'), games, s.deathMatch ? 1 : 0, pickGame)),
       field('mapSize', select('map-size', this.label('mapSize'), LOBBY_MAP_SIZES.map((v) => [v, mapSizeName(this.text, v)]), s.mapSize, (mapSize) => change({ mapSize }))),
       field('mapType', select('map-type', this.label('mapType'), LOBBY_MAP_TYPES.map((v) => [v, mapTypeName(this.text, v)]), s.mapType, (mapType) => change({ mapType }))),
       field(
@@ -205,6 +222,15 @@ export class LobbyView {
       const pick = select('victory-amount', this.label(type === VICTORY_TIME_LIMIT ? 'timeLimit' : 'score'), options, amount ?? 0, (a) => change({ victory: { type, amount: a } }));
       box.append(field(type === VICTORY_TIME_LIMIT ? 'timeLimit' : 'score', pick));
     }
+    const ages: [number, string][] = LOBBY_STARTING_AGES.map((v) => [v, ageName(this.text, v)]);
+    box.append(field('startingAge', select('starting-age', this.label('startingAge'), ages, s.startingAge, (startingAge) => change({ startingAge }))));
+    // Inactive in a Death Match (`activatePanels`, scr_set.cpp:786-792).
+    const levels: [number, string][] = LOBBY_RESOURCES.map((v) => [v, resourcesName(this.text, v)]);
+    const resources = select('resources', this.label('resources'), levels, s.resources, (v) => change({ resources: v }));
+    resources.disabled = s.deathMatch;
+    box.append(field('resources', resources));
+    box.append(field('fullTechTree', checkbox('full-tech-tree', this.label('fullTechTree'), s.fullTechTree, (fullTechTree) => change({ fullTechTree }))));
+    box.append(field('revealMap', checkbox('reveal-map', this.label('revealMap'), s.revealMap, (revealMap) => change({ revealMap }))));
     // The dialog's numbers, "25" .. "200" (scr_set.cpp:189-192).
     const limits: [number, string][] = LOBBY_POPULATION_LIMITS.map((v) => [v, String(v)]);
     box.append(field('populationLimit', select('population-limit', this.label('populationLimit'), limits, s.populationLimit, (populationLimit) => change({ populationLimit }))));

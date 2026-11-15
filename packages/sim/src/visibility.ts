@@ -200,6 +200,21 @@ export class Visibility {
     }
   }
 
+  /**
+   * `RGE_Visible_Map::explore_all` (src/visible.cpp:331-353, Reveal Map): every unexplored tile becomes explored and
+   * unseen; no viewer is added.
+   */
+  exploreAll(player: number): void {
+    const counts = this.counts[player]!;
+    const exploredBit = 1 << (player + EXPLORED_SHIFT);
+    for (let i = 0; i < counts.length; i++) {
+      if (counts[i] !== VIS_UNEXPLORED) continue;
+      counts[i] = 0;
+      this.explored[player]!++;
+      this.unified[i]! |= exploredBit;
+    }
+  }
+
   private addRow(player: number, y: number, x1: number, x2: number): number {
     const counts = this.counts[player]!;
     const visibleBit = 1 << player;

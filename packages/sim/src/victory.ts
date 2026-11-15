@@ -174,10 +174,10 @@ const MILITARY_TOWERS = [79, 199, 69];
 
 /**
  * `TRIBE_World::new_game` for a random-map game (victory.md §2, §11): every player but Gaia gets the score table (with
- * `percentExplored`'s "highest" entry, the game has no full visibility); a Score game adds the "average team points ≥
- * amount" condition, a time-limit game starts the countdown.
+ * `percentExplored`'s "highest" entry, id 8, only without Reveal Map, src/tworld.cpp:885-887); a Score game adds the
+ * "average team points ≥ amount" condition, a time-limit game starts the countdown.
  */
-export function newVictory(players: number, settings: VictorySettings = { type: VICTORY_STANDARD }): VictoryState {
+export function newVictory(players: number, settings: VictorySettings = { type: VICTORY_STANDARD }, revealMap = false): VictoryState {
   const amount = settings.amount ?? 0;
   const v: VictoryState = {
     type: settings.type,
@@ -200,6 +200,7 @@ export function newVictory(players: number, settings: VictorySettings = { type: 
     if (settings.type === VICTORY_SCORE) v.conditions[p]!.unshift({ command: CONDITION_VICTORY_POINTS, group: 0, ally: true, state: 0, count: amount });
     // `add_point` prepends.
     for (const [group, id, command, attribute, n, points] of SCORE_TABLE) {
+      if (revealMap && id === 8) continue;
       v.scores[p]!.unshift({ id, group, command, attribute, amount: n, points, state: 0, current: 0, currPoints: 0 });
     }
   }

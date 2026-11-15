@@ -7,8 +7,11 @@ import {
   LOBBY_MAP_SIZES,
   LOBBY_MAP_TYPES,
   LOBBY_POPULATION_LIMITS,
+  LOBBY_RESOURCES,
+  LOBBY_STARTING_AGES,
   lobbyWorldOptions,
   resolveCivs,
+  type GameSettings,
 } from './game-settings';
 import { MAP_ALL_WATER, MAP_HILLY, MAP_ISTHMAS, MAP_MOSTLY_WATER } from './rmm-controller';
 import { runReplay, sampleLobbyReplay } from './replay';
@@ -17,11 +20,21 @@ import { ObjectState } from './entities';
 import { CrtRand } from './rng';
 import { BOWMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SCORE, VICTORY_SPECIAL, VICTORY_STANDARD, VICTORY_TIME_LIMIT } from './victory';
-import { ATTR_FOOD, DEFAULT_RANDOM_MAP, startingObjects, World } from './world';
+import { AGE_BRONZE, AGE_DEFAULT, AGE_TOOL, ATTR_FOOD, DEFAULT_RANDOM_MAP, RESOURCES_DEFAULT, RESOURCES_HIGH, RESOURCES_LOW, startingObjects, World } from './world';
 
 describe('lobby settings (docs/spec/lobby.md)', () => {
-  test('the defaults are the multiplayer screen\'s: Large, Mostly Land, Standard, population limit 50', () => {
-    expect(DEFAULT_GAME_SETTINGS).toEqual({ mapType: DEFAULT_RANDOM_MAP.type, mapSize: DEFAULT_RANDOM_MAP.size, victory: { type: VICTORY_STANDARD }, populationLimit: 50 });
+  test('the defaults are the multiplayer screen\'s: Random Map, Large, Mostly Land, Standard, Default age and resources, population limit 50', () => {
+    expect(DEFAULT_GAME_SETTINGS).toEqual({
+      deathMatch: false,
+      mapType: DEFAULT_RANDOM_MAP.type,
+      mapSize: DEFAULT_RANDOM_MAP.size,
+      victory: { type: VICTORY_STANDARD },
+      startingAge: AGE_DEFAULT,
+      resources: RESOURCES_DEFAULT,
+      revealMap: false,
+      fullTechTree: false,
+      populationLimit: 50,
+    });
     expect(isLobbySettings(DEFAULT_GAME_SETTINGS)).toBe(true);
   });
 
@@ -29,7 +42,7 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     for (const water of [MAP_ALL_WATER, MAP_MOSTLY_WATER, MAP_ISTHMAS]) expect(LOBBY_MAP_TYPES).not.toContain(water);
     expect(LOBBY_MAP_SIZES).toEqual([72, 96, 120, 144, 200, 250]);
     const s = (mapType: number, mapSize: number, type: number, amount?: number, populationLimit = 50) =>
-      isLobbySettings({ mapType, mapSize, victory: amount === undefined ? { type } : { type, amount }, populationLimit });
+      isLobbySettings({ ...DEFAULT_GAME_SETTINGS, mapType, mapSize, victory: amount === undefined ? { type } : { type, amount }, populationLimit });
     expect(s(MAP_HILLY, 72, VICTORY_TIME_LIMIT, 3000)).toBe(true);
     expect(s(MAP_HILLY, 72, VICTORY_SCORE, 900)).toBe(true);
     expect(s(MAP_HILLY, 72, VICTORY_SCORE, 950)).toBe(false);
@@ -41,6 +54,16 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     for (const limit of LOBBY_POPULATION_LIMITS) expect(s(MAP_HILLY, 72, VICTORY_STANDARD, undefined, limit)).toBe(true);
     for (const limit of [0, 24, 30, 225, 50.5]) expect(s(MAP_HILLY, 72, VICTORY_STANDARD, undefined, limit)).toBe(false);
     expect([0, 1, 16, 17, 18, 1.5].map(isLobbyCiv)).toEqual([false, true, true, true, false, false]);
+    // Starting Age: Default, Nomad, Stone, Tool, Bronze, Iron (scr_set.cpp:148-154); Resources: Default, Medium, High
+    // (:162-165), and Default only in a Death Match (sendSettings, :746-750).
+    expect(LOBBY_STARTING_AGES).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(LOBBY_RESOURCES).toEqual([0, 2, 3]);
+    const t = (patch: Partial<GameSettings>) => isLobbySettings({ ...DEFAULT_GAME_SETTINGS, ...patch });
+    for (const startingAge of LOBBY_STARTING_AGES) expect(t({ startingAge })).toBe(true);
+    for (const resources of LOBBY_RESOURCES) expect(t({ resources })).toBe(true);
+    expect([t({ startingAge: 6 }), t({ startingAge: -1 }), t({ resources: RESOURCES_LOW }), t({ resources: 4 })]).toEqual([false, false, false, false]);
+    expect([t({ deathMatch: true }), t({ deathMatch: true, resources: RESOURCES_HIGH })]).toEqual([true, false]);
+    expect([t({ revealMap: true, fullTechTree: true })]).toEqual([true]);
   });
 
   test('Random draws rand() * 16 / 0x7FFF + 1 from the game seed, in player order (tribegam.cpp:2865-2870)', () => {
@@ -68,11 +91,13 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
   });
 
   test('settings and civs change the world', () => {
-    const options = lobbyWorldOptions(99, { mapType: MAP_HILLY, mapSize: 96, victory: { type: VICTORY_SCORE, amount: 300 }, populationLimit: 150 }, [9, CIV_RANDOM]);
+    const settings: GameSettings = { ...DEFAULT_GAME_SETTINGS, mapType: MAP_HILLY, mapSize: 96, victory: { type: VICTORY_SCORE, amount: 300 }, startingAge: AGE_TOOL, resources: RESOURCES_HIGH, revealMap: true, fullTechTree: true, populationLimit: 150 };
+    const options = lobbyWorldOptions(99, settings, [9, CIV_RANDOM]);
     expect(options.randomMap).toEqual({ type: MAP_HILLY, size: 96 });
     expect(options.civs).toEqual([0, 9, resolveCivs(99, [9, CIV_RANDOM])[1]]);
     expect(options.victory).toEqual({ type: VICTORY_SCORE, amount: 300 });
     expect(options.populationLimit).toBe(150);
+    expect([options.startingAge, options.resourceLevel, options.deathMatch, options.revealMap, options.fullTechTree]).toEqual([AGE_TOOL, RESOURCES_HIGH, false, true, true]);
     const world = new World(options);
     expect(world.map.width).toBe(96);
     expect(world.attributes.map((a) => a[ATTR_POPULATION_LIMIT])).toEqual([0, 150, 150]);
@@ -85,6 +110,7 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     expect(log.civs).toEqual([0, ...resolveCivs(log.randomSeed, [CIV_RANDOM, 10])]);
     expect(log.victory).toEqual({ type: VICTORY_TIME_LIMIT, amount: 3000 });
     expect(log.populationLimit).toBe(25);
+    expect(log.start).toEqual({ startingAge: AGE_BRONZE, resourceLevel: RESOURCES_DEFAULT, deathMatch: true, fullTechTree: true, revealMap: true });
     expect(runReplay(log)).toHaveLength(20);
   });
 

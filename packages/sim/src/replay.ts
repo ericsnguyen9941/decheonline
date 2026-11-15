@@ -1,11 +1,11 @@
 import type { Command } from './commands';
-import { CIV_RANDOM, lobbyWorldOptions, type GameSettings } from './game-settings';
+import { CIV_RANDOM, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, type GameSettings } from './game-settings';
 import { MAP_HILLY, MAP_MEDIUM } from './rmm-controller';
 import { CrtRand } from './rng';
 import { TOOL_AGE } from './techs';
 import { BARRACKS, BOWMAN, CLUBMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_TIME_LIMIT, type VictorySettings } from './victory';
-import { startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit } from './world';
+import { AGE_BRONZE, startingObjects, World, type RandomMapOptions, type SpeedChange, type StartUnit, type WorldOptions } from './world';
 
 /** Everything needed to rerun a game: start state plus every batch, keyed by the turn it was issued on. */
 export interface ReplayLog {
@@ -21,6 +21,8 @@ export interface ReplayLog {
   victory?: VictorySettings;
   /** The lobby's population limit; default 50. */
   populationLimit?: number;
+  /** The lobby's start settings (`WorldOptions`); default off. */
+  start?: Pick<WorldOptions, 'startingAge' | 'resourceLevel' | 'deathMatch' | 'fullTechTree' | 'revealMap'>;
   turns: number;
   batches: { turn: number; player: number; commands: Command[] }[];
   /** Step size and buffer frame changes, each given to the world on the turn it was agreed for (turn-timing.md §8.7). */
@@ -38,6 +40,7 @@ export function runReplay(
     ...(log.civs ? { civs: log.civs } : {}),
     ...(log.victory ? { victory: log.victory } : {}),
     ...(log.populationLimit !== undefined ? { populationLimit: log.populationLimit } : {}),
+    ...log.start,
   }),
 ): number[] {
   const hashes: number[] = [];
@@ -121,16 +124,30 @@ export function sampleRandomMapReplay(turns = 60, seed = 20261115, lobby?: { ran
     resources: objects.flatMap((e) => (e.owner === 0 && e.heldAmount > 0 ? [{ id: e.id, x: e.x, y: e.y }] : [])),
     at: (id) => world.entities.get(id),
   };
-  const settings = lobby ? { civs: [...world.civs], victory: options.victory!, populationLimit: options.populationLimit! } : {};
+  const { startingAge, resourceLevel, deathMatch, fullTechTree, revealMap } = options;
+  const settings = lobby
+    ? { civs: [...world.civs], victory: options.victory!, populationLimit: options.populationLimit!, start: { startingAge, resourceLevel, deathMatch, fullTechTree, revealMap } }
+    : {};
   return { players, randomSeed, randomMap, ...settings, turns, batches: sampleBatches(start, turns, seed, false), speeds: sampleSpeeds(turns) };
 }
 
 /**
- * The same on a game with lobby settings other than the defaults (docs/spec/lobby.md): Medium Hill Country, a
- * 3,000-year time limit, a population limit of 25, a Random civ (resolved from the seed) against Shang.
+ * The same on a game with lobby settings other than the defaults (docs/spec/lobby.md): a Death Match on Medium Hill
+ * Country, a 3,000-year time limit, the Bronze Age, Reveal Map, Full Tech Tree, a population limit of 25, a Random civ
+ * (resolved from the seed) against Shang.
  */
 export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
-  const settings: GameSettings = { mapType: MAP_HILLY, mapSize: MAP_MEDIUM, victory: { type: VICTORY_TIME_LIMIT, amount: 3000 }, populationLimit: 25 };
+  const settings: GameSettings = {
+    ...DEFAULT_GAME_SETTINGS,
+    deathMatch: true,
+    mapType: MAP_HILLY,
+    mapSize: MAP_MEDIUM,
+    victory: { type: VICTORY_TIME_LIMIT, amount: 3000 },
+    startingAge: AGE_BRONZE,
+    revealMap: true,
+    fullTechTree: true,
+    populationLimit: 25,
+  };
   return sampleRandomMapReplay(turns, seed, { randomSeed: 4244, settings, civs: [CIV_RANDOM, 10] });
 }
 

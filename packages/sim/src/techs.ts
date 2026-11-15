@@ -115,6 +115,63 @@ export function undoTech(ctx: TechContext, player: number, id: number): void {
   checkForNewTech(ctx, player);
 }
 
+/** `TRIBE_Player_Tech::enable` (`src/tech.cpp:614-626`): a disabled tech becomes locked. */
+function enableTech(states: number[], id: number): void {
+  if (states[id] === TECH_DISABLED) states[id] = TECH_LOCKED;
+}
+
+/**
+ * `do_rev_tech` (`src/tech.cpp:570-582`): first every prerequisite neither disabled nor done, depth first in slot order,
+ * then the tech itself (`do_tech`, which refuses a disabled one).
+ */
+function doRevTech(ctx: TechContext, player: number, id: number): void {
+  const states = ctx.techs[player]!;
+  for (const r of TECHS[id]!.requires) if (r >= 0 && states[r]! < TECH_DONE && states[r]! >= TECH_LOCKED) doRevTech(ctx, player, r);
+  doTech(ctx, player, id);
+}
+
+/**
+ * `TRIBE_Player_Tech::rev_tech` (`src/tech.cpp:585-598`): complete the tech, then, in id order, every tech that lists it
+ * among its prerequisites with all of that tech's own prerequisites (`do_rev_tech`), once per slot naming it.
+ */
+export function revTech(ctx: TechContext, player: number, id: number): void {
+  doTech(ctx, player, id);
+  for (let i = 0; i < TECHS.length; i++) for (const r of TECHS[i]!.requires) if (r === id) doRevTech(ctx, player, i);
+}
+
+/** `PLAYER_ATTRIBUTE_BRONZE_AGE_TECH`, `_IRON_AGE_TECH`, `_TOOL_AGE_TECH`: the player's age tech ids (102, 103, 101 in every civ). */
+const ATTR_BRONZE_AGE_TECH = 23;
+const ATTR_IRON_AGE_TECH = 24;
+const ATTR_TOOL_AGE_TECH = 25;
+
+/**
+ * `TRIBE_Player::rev_tech` (`src/tplayer.cpp:1132-1168`), a game started in the Tool (`age` 3), Bronze (4) or Iron (5)
+ * Age: the Tool Age is completed alone; for a later age the later age techs are disabled while the earlier ages are
+ * completed with every tech that requires them (`revTech`), then each is enabled and completed in turn, the last one
+ * alone. Each tech id is the player's attribute 25, 23, 24.
+ */
+export function startInAge(ctx: TechContext, player: number, age: number): void {
+  const a = ctx.attributes[player]!;
+  const states = ctx.techs[player]!;
+  const [tool, bronze, iron] = [a[ATTR_TOOL_AGE_TECH]!, a[ATTR_BRONZE_AGE_TECH]!, a[ATTR_IRON_AGE_TECH]!].map((v) => i16(toInt(v)));
+  if (age === 3) {
+    doTech(ctx, player, tool!);
+  } else if (age === 4) {
+    disableTech(states, bronze!);
+    revTech(ctx, player, tool!);
+    enableTech(states, bronze!);
+    doTech(ctx, player, bronze!);
+  } else if (age === 5) {
+    disableTech(states, bronze!);
+    disableTech(states, iron!);
+    revTech(ctx, player, tool!);
+    enableTech(states, bronze!);
+    revTech(ctx, player, bronze!);
+    enableTech(states, iron!);
+    doTech(ctx, player, iron!);
+  }
+}
+
 /**
  * `check_tech_cost` (`src/tech.cpp:374-421`, techs.md §3.2): only an available tech passes; every used cost slot must
  * be covered, a shortfall by gold when attribute 29 (gold replacement) is at least 1.
