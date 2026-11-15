@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 
 // The Game Settings dialog's start settings (docs/spec/lobby.md §2): the host picks Death Match or a Random Map, the
 // Starting Age, the Resources, Reveal Map and Full Tech Tree; the guest sees them in its summary and both games start
-// with them (tworld.cpp:796-855, rmm_tdbc.cpp:284-293, tribegam.cpp:3023-3032).
+// with them (tworld.cpp:796-855, rmm_tdbc.cpp:284-293, tribegam.cpp:3024-3033).
 const URL = '/?debug=net&speed=20';
 const VILLAGER = 83;
 const TOWN_CENTER = 109;
