@@ -241,6 +241,8 @@ export function teleport(ctx: MoveContext, e: Entity, t: UnitType, x: number, y:
   const rz = ctx.map.groundZ(nx, ny);
   e.z = !t.flying || rz > f32(z) ? rz : f32(z);
   if (moved && e.state === ObjectState.Active) exploreObject(ctx, e, t, false);
+  // `RGE_Combat_Object::teleport`: the object's visible-unit records follow it to its new tile.
+  if (moved && !placed && t.masterType >= 50) ctx.visibility?.moveRecords(e.id, t.group, toInt(e.x), toInt(e.y));
   ctx.pathing.stamp(e, t);
   return rz;
 }

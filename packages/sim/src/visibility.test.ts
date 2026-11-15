@@ -146,8 +146,8 @@ describe('visibility.md §7: vectors', () => {
     expect(hidden.entities.get(2)!.hp).toBe(25);
   });
 
-  test('V9 a record keeps the tile where its player first saw the object (stale position)', () => {
-    // A Town Center (LOS 7) sees the Villager at (14, 10); it then walks to (17, 10), next to the Clubman, still in view.
+  test('V9 a record follows its object to each new tile while its player keeps seeing it (src/com_obj.cpp:947-975)', () => {
+    // A Town Center (LOS 7) sees the Villager at (14, 10); it then moves to (17, 10), next to the Clubman, still in view.
     const units: StartUnit[] = [
       { owner: 1, type: TOWN_CENTER, x: 10.5, y: 10.5 },
       { owner: 1, type: CLUBMAN, x: 21.5, y: 10.5 },
@@ -155,17 +155,12 @@ describe('visibility.md §7: vectors', () => {
     ];
     const w = world(...units);
     w.runTurn();
+    expect(w.visibility.recordsOf(1, 4).map((r) => [r.id, r.x, r.y])).toEqual([[3, 14, 10]]);
     const villager = w.entities.get(3)!;
     teleport(w.gameContext(), villager, typeOf(w, villager), 17.5, 10.5, 0);
-    w.runTurn();
     expect(w.tileVisibility(1, 17, 10)).toBe(TILE_VISIBLE);
-    expect(w.visibility.recordsOf(1, 4).map((r) => [r.id, r.x, r.y])).toEqual([[3, 14, 10]]);
-    expect(bestUnitToAttack(w.gameContext(), w.entities.get(2)!, true, false)).toBe(-1);
-
-    // First seen at (17, 10), it is the Clubman's target.
-    const fresh = world(units[0]!, units[1]!, { ...units[2]!, x: 17.5 });
-    fresh.runTurn();
-    expect(bestUnitToAttack(fresh.gameContext(), fresh.entities.get(2)!, true, false)).toBe(3);
+    expect(w.visibility.recordsOf(1, 4).map((r) => [r.id, r.x, r.y])).toEqual([[3, 17, 10]]);
+    expect(bestUnitToAttack(w.gameContext(), w.entities.get(2)!, true, false)).toBe(3);
   });
 
   test('V10 an ordered attack on an enemy on a fogged tile fails (state 13) when its fog_flag is 0', () => {

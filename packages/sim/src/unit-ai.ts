@@ -108,6 +108,8 @@ const IMPORTANT: Partial<Record<number, readonly number[]>> = {
   [AiClass.Hunted]: [0, 4, 26, 24, 6, 25, 17, 10, 12, 35, 23, 36, 28, 18, 13, 39],
   [AiClass.Predator]: [29, 9, 0, 4, 26, 24, 6, 25, 17, 13, 12, 35, 23, 36, 28, 18, 39],
   [AiClass.Lion]: [29, 9, 0, 4, 26, 24, 6, 25, 17, 13, 12, 35, 23, 36, 28, 18, 39],
+  // `TribeArtifactUnitAIModule` (src/taiuaimd.cpp:1902-1927): units and boats, no buildings or walls.
+  [AiClass.Artifact]: [0, 4, 26, 24, 6, 35, 25, 17, 12, 23, 36, 28, 18, 13, 22, 20, 2, 21, 39],
 };
 
 /**
@@ -449,6 +451,14 @@ export function updateUnitAI(ctx: GameContext, e: Entity, uTime: number): void {
     for (let i = 0; i < ai.orders.length; i++) if (processOrder(ctx, e, i)) break;
   }
 
+  // `processMisc` (:563): the artifact's runs its idle check on every update (src/taiuaimd.cpp:2145-2162); the base
+  // one's DEFEND/FOLLOW upkeep is not ported.
+  if (ai.kind === AiClass.Artifact && artifactIdle(ctx, e) === IDLE_TASKED) {
+    removeCurrentTarget(ai);
+    stopObject(ctx, e, true);
+    ai.idleTimer = 0;
+  }
+
   if (ai.idleTimer > ai.adjustedIdleTimeout) {
     ai.idleTimer = 0;
     if (ai.action === -1 && ai.target === -1) processIdle(ctx, e, true);
@@ -584,6 +594,8 @@ function runAwayFromAttackers(ctx: GameContext, e: Entity): boolean {
 /** One visible-unit record (`VISIBLE_UNIT_REC`) as a search result. */
 interface Seen {
   id: number;
+  /** The record's player (`VisibleUnitList[..].player`), the owner when the record was made or last changed hands. */
+  owner: number;
   distance: number;
 }
 
@@ -617,7 +629,7 @@ function search(ctx: GameContext, e: Entity): Seen[][] {
       if (d > radius) continue;
       const list = buckets[bucketOf(e.owner, r.owner)]!;
       if (list.length >= 0x100) continue;
-      list.push({ id: r.id, distance: d });
+      list.push({ id: r.id, owner: r.owner, distance: d });
     }
   }
   return buckets;
@@ -767,6 +779,8 @@ function processIdle(ctx: GameContext, e: Entity, doSearch: boolean): number {
       return huntedIdle(ctx, e);
     case AiClass.Lion:
       return lionIdle(ctx, e);
+    case AiClass.Artifact:
+      return artifactIdle(ctx, e);
     default:
       // Civilians, buildings, priests and ships do nothing for a human; the elephant never acts when idle.
       return IDLE_NOTHING;
@@ -779,11 +793,21 @@ function processIdle(ctx: GameContext, e: Entity, doSearch: boolean): number {
  * removal, and of that group, state and master (-1 any).
  */
 function closestObject(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1): number {
+  return closestObjectAndPlayers(ctx, e, group, state, type)[0];
+}
+
+/**
+ * `closestObject` with `numberDifferentPlayerObjectsVisible` (src/aiuaimod.cpp:1524-1549): how many players 1-8 own a
+ * record in any bucket, whatever the filters (the object's own record included).
+ */
+function closestObjectAndPlayers(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1): [number, number] {
   const buckets = search(ctx, e);
   let closestId = -1;
   let closest = -1;
+  const players = new Set<number>();
   for (const bucket of buckets) {
     for (const r of bucket) {
+      if (r.owner >= 1 && r.owner < 9) players.add(r.owner);
       if (r.id === e.id) continue;
       const o = ctx.entities.get(r.id);
       if (!o || o.state >= ObjectState.PendingRemoval) continue;
@@ -794,7 +818,7 @@ function closestObject(ctx: GameContext, e: Entity, group = -1, state = -1, type
       }
     }
   }
-  return closestId;
+  return [closestId, players.size];
 }
 
 /** `closestAttacker` (src/aiuaimod.cpp:1475): the recorded attacker nearest by `distance_to_object`, first on a tie. */
@@ -811,6 +835,21 @@ function closestAttacker(ctx: GameContext, e: Entity): number {
     }
   }
   return closestId;
+}
+
+/**
+ * `TribeArtifactUnitAIModule::processIdle` (src/taiuaimd.cpp:2128-2143): when the closest important object in the
+ * owner's view is someone else's and at most one player (Gaia aside) has objects in view, the artifact becomes that
+ * object's owner's. So a relic or ruin goes to the only player near it, stays while two players are, and Gaia never
+ * takes it back.
+ */
+function artifactIdle(ctx: GameContext, e: Entity): number {
+  const [id, players] = closestObjectAndPlayers(ctx, e);
+  if (players > 1 || id === -1) return IDLE_NOTHING;
+  const target = ctx.entities.get(id);
+  if (!target || target.owner === e.owner) return IDLE_NOTHING;
+  ctx.changeOwnership(e, target.owner);
+  return IDLE_TASKED;
 }
 
 /** `TribeHuntedAnimalUnitAIModule::processIdle` (src/taiuaimd.cpp:89): run 3 × maximum speed away from the closest object. */

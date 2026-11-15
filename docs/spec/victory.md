@@ -349,6 +349,61 @@ Attributes 7 and 14 are fed by the relic (units 108 War Chest, 159) and ruin
 (units 158, 163) resource storages: type 7/14, amount 1, flag 2 in the
 captain's dat (given on gain, taken on loss).
 
+The held times start at −1 (`src/tplayer.cpp:206-207`); the game screen's
+timer panel shows a player's `artifact_held_time` / `ruin_held_time` while it
+is not −1 (`src/tpnl_tim.cpp:341-350`). Arming and losing also send
+`GAME_NOTIFY_ARTIFACTS_CAPTURED` / `_LOST` and `GAME_NOTIFY_RUINS_CAPTURED` /
+`_LOST` (`src/tworld.cpp:1013`, `:1031`, `:1054`, `:1072`), Standard only.
+
+### 10.1 Who holds a relic or ruin (capture)
+
+Relics (159) and ruins (158) are group 1 (artifact) combat objects; random
+maps make them Gaia's (§3, `add_quick_obj` owner 0). Ownership changes only
+through their unit AI, `TribeArtifactUnitAIModule` (`initUnitAI`,
+`src/t_c_obj.cpp:692-698`: every group-1 master except 99 and the
+discovery). `TRIBE_Action_Artifact` (action 107, `src/tact_art.cpp`) has its
+own tile-scan capture rule (`check_ownership`, `:126-189`: one player with
+active non-artifact, non-flag objects on the tiles under it), but nothing
+starts it by itself: task 107 is not a default task in the dat (`default` 0
+for 158 and 159). Whether a player's order to an owned relic reaches it
+(`work`/`move_to`, `:196-216`) is unverified; it is not ported.
+
+- **When:** on every unit-AI update of the artifact (its owner's AI turn,
+  unit-ai.md §1.3) through `processMisc` (`src/aiuaimod.cpp:563`,
+  override `src/taiuaimd.cpp:2145-2162`), and again from the idle timer
+  (`processIdle`, 5000 ms base timeout, `src/taiuaimd.cpp:1928-1929`).
+- **Rule** (`processIdle`, `src/taiuaimd.cpp:2128-2143`):
+  `closestObject(-1, -1, any, -1)` over the **owner's** visible-unit records
+  within the artifact's LOS (relic 2, ruin 4; unit-ai.md §3.2) of the
+  important groups 0, 4, 26, 24, 6, 35, 25, 17, 12, 23, 36, 28, 18, 13, 22,
+  20, 2, 21, 39 (`src/taiuaimd.cpp:1902-1927`: units and boats, no
+  buildings or walls). `closestObject` also counts the players 1..8 owning
+  any record in the result, whatever the filters
+  (`numberDifferentPlayerObjectsVisible`, `src/aiuaimod.cpp:1524-1549`).
+  When that count is ≤ 1 and there is a closest object whose owner is not
+  the artifact's, the artifact changes owner to it.
+- Consequences: a Gaia artifact goes to the first player whose unit comes
+  within its LOS alone; two players' units in view (the holder's included)
+  freeze it; the holder keeps it after walking away (no records → no
+  closest object; Gaia's own objects never count as a player); an enemy
+  takes it once it is the only player in view. The owner's sight of the
+  artifact's surroundings comes from the artifact itself (its LOS explores
+  for its owner), so records exist for whoever stands next to it.
+- **Change of owner** (`TRIBE_Combat_Object::change_ownership`,
+  `src/t_c_obj.cpp:240-251`, the artifact branch; then
+  `RGE_Action_Object::change_ownership`, `src/act_obj.cpp:425-429`, and
+  `RGE_Static_Object::change_ownership`, `src/stat_obj.cpp:1675-1720`):
+  nothing if the new owner has no such master; the object's visible-unit
+  records in every list take the new owner; its actions stop; the old owner
+  loses the flag-2 storage (attribute 7 or 14, −1;
+  `take_attribute_from_owner`, `src/stat_obj.cpp:458-468`) and the object's
+  sight; the object moves to the head of the new owner's list; it shows the
+  new master's sprite (Gaia's relic graphic 12 → a player's 11; one
+  `rand()` for a random start frame); hit points keep their ratio; the new
+  owner gets the sight and the flag 1/2 storages (+1). Then
+  `notify(0x20B)` to itself, which the artifact AI ignores
+  (`src/taiuaimd.cpp:2093-2111`), and `stopObject`.
+
 ## 11. Score
 
 **Location (pinned):** the score is the per-player victory-point list built in
@@ -592,6 +647,16 @@ Ported, with vectors in `victory.test.ts`:
   `RGE_Game_World::check_game_state` (§5). Once `game_state` is 1 the world is
   not updated again (`TRIBE_Screen_Game` stops calling `update`); the port's
   turn counters still advance.
+- Relics and ruins: the game-start rolls and placement (§3, in
+  `rmm-objects.ts` `placeRelicsAndRuins`; the world keeps `artifactCount` /
+  `ruinCount`), capture (§10.1: `artifactIdle` and the `processMisc` call in
+  `unit-ai.ts`, `World.changeOwnership`) and the all-relics / all-ruins holds
+  (§10, `hold` in `victory.ts`; Example 2). Vectors in `relics.test.ts`,
+  including a seeded Standard game won by holding the 5 relics. Client read
+  API: an object's `owner`; `World.victory.artifactHeld[p]` /
+  `ruinHeld[p]` (−1, or the countdown from 2000), `artifactCount` /
+  `ruinCount`; attributes 7, 14, 54, 55. The capture/lost notifications are
+  not sent: the client derives them from the held times.
 - Victory types 0 Standard, 1 Conquest, 2 time limit, 3 Score (world option
   `victory`, default Standard). Type 4 is accepted with no condition: conquest
   off, the game never ends (the sim's tests of other rules use it).
@@ -600,9 +665,6 @@ Not ported, for want of objects or systems the sim does not have yet:
 
 - Wonder victory (§8): no Wonder (unit 276) or `TRIBE_Action_Wonder` in the sim;
   attribute 42 stays 0. Example 1 has no test.
-- Relics and ruins (§3, §10): no relic (159) or ruin (158, 163) objects and no
-  random-map generator; the two game-start rolls belong with the generator and
-  are not drawn; attributes 7, 14, 54, 55 stay 0. Examples 2 and 6 have no test.
 - The scenario and MP special conditions of §7 other than "victory points"
   (ruins, artifacts, discoveries, exploration, gold settings): none of their
   lobby settings exist yet.

@@ -927,7 +927,11 @@ relics and ruins (`placeRelicsAndRuins`, drawing after the seed was kept, so
 they change the objects but not `random_seed`), the civ effects and the
 new-game attributes. Objects are made through `World.createObject` (its draws:
 setup, sprite, facing, unit AI). The special victories' wanted artifacts,
-discoveries and ruins are 0 (those victories are not ported). Not covered:
+discoveries and ruins are 0 (those victories are not ported). The returned
+`artifact_count` / `ruin_count` (5 or 0) go to the world's victory state for the
+all-relics / all-ruins holds; the objects are Gaia's until a player's unit takes
+them (victory.md §3, §10, §10.1; seeded counts per map type and size in
+`relics.test.ts`). Not covered:
 alliances (none in a 2-player room), randomized positions, Nomad, the
 resource levels.
 

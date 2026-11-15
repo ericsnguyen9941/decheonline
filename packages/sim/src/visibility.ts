@@ -269,6 +269,28 @@ export class Visibility {
     }
   }
 
+  /**
+   * `VUR_Ptrs[i]->player = new owner` (`TRIBE_Combat_Object::change_ownership`, src/t_c_obj.cpp:241-247): the object's
+   * record in every player's list takes its new owner; the record stays where it is.
+   */
+  setRecordOwner(id: number, group: number, owner: number): void {
+    for (const lists of this.records) for (const r of lists[group] ?? []) if (r.id === id) r.owner = owner;
+  }
+
+  /**
+   * `RGE_Combat_Object::teleport` (src/com_obj.cpp:947-975): when a combat object moves to another tile, its record in
+   * every player's list takes the new tile. So a record's tile follows the object while the player keeps seeing it.
+   */
+  moveRecords(id: number, group: number, x: number, y: number): void {
+    for (const lists of this.records) {
+      for (const r of lists[group] ?? []) {
+        if (r.id !== id) continue;
+        r.x = x;
+        r.y = y;
+      }
+    }
+  }
+
   /** The records `player` holds for object group `group`, in list order. */
   recordsOf(player: number, group: number): readonly VisibleRecord[] {
     return this.records[player]![group] ?? [];

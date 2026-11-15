@@ -224,7 +224,7 @@ describe('victory.md Example 3: time limit', () => {
       v.totals[2] = 333;
       let steps = 0;
       while (v.gameState === 0) {
-        checkGameState(v, DT);
+        checkGameState(v, DT, [[], [], []]);
         steps++;
       }
       expect(steps).toBe(decrements);

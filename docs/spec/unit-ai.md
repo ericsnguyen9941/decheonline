@@ -228,7 +228,7 @@ says `accepted_logic`). Steps in order:
 | ships (fishing, trade, transport) | nothing for humans | `src/taiuaimd.cpp:1379`, `:1483`, `:1618`, M |
 | hunted animal | flee from the closest visible important object (§5.1) | `src/taiuaimd.cpp:89-109`, M |
 | lion | attack the closest visible important object within 2 × LOS (§5.3) | `src/taiuaimd.cpp:320-351`, M |
-| artifact | change owner to the closest object's owner when only one player is in view (also every update via `processMisc`) | `src/taiuaimd.cpp:2128-2162`, M |
+| artifact | change owner to the closest object's owner when only one player is in view (also every update via `processMisc`); victory.md §10.1, ported (`artifactIdle`) | `src/taiuaimd.cpp:2128-2162`, M |
 
 For the soldier, `processRetryableOrder` (`src/aiuaimod.cpp:3699`, M) runs
 first but the soldier class never retries, so it returns "nothing" (7).
@@ -256,14 +256,16 @@ per update (guard at `:1120-1123`) and fills five global result buckets via
 - Bucket: `owner.unitDiplomacy[record owner]`: 0 Gaia, 1 self, 2 ally,
   3 neutral, 4 enemy (`include/player.h:19-23`; set in
   `RGE_Player::set_relation`, `src/player.cpp:1263-1276`, M).
-- **Stale positions:** a record stores the object's tile only when it is
-  added; it is not updated while the object stays visible to that player,
-  because `Update_Unit_Info` runs only when the object's visibility bits
-  change (`src/com_obj.cpp:438-451`, with the decomp's `@bug` note at
-  `:443-446`). So both the radius filter and the distance use the tile at
-  which the searcher's player **first** saw the object. A unit that walks
-  past under continuous vision is searched at its old tile. The port keeps
-  the records in `visibility.ts` (visibility.md §4, vectors V8, V9).
+- **Positions:** a record gets the object's tile when it is added
+  (`Update_Unit_Info`, which runs only when the object's visibility bits
+  change, `src/com_obj.cpp:438-451`), and every move to another tile updates
+  it in all lists: `RGE_Combat_Object::teleport` (`src/com_obj.cpp:947-975`)
+  overrides the virtual `teleport` every movement step calls
+  (`src/move_obj.cpp:635-1379`) and writes the new tile through `VUR_Ptrs`.
+  So the search sees the unit where it is. The decomp's `@bug` note at
+  `src/com_obj.cpp:443-446` ("keeps its first-seen position") overlooks that
+  override; the port followed the note until the relic work (visibility.md
+  §4.1, vectors V8, V9).
 
 Distance table `d[dy][dx]` (|dy|, |dx| in tiles; `-` = beyond 16; derived
 from `src/visible.cpp:11-136` with the `src/vis_unit.cpp:87-116` rule

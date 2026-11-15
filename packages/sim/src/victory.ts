@@ -3,9 +3,9 @@
  * elimination check, resign, the time-limit countdown and the end-of-game resolution. Plain data, so the world hashes
  * and snapshots it as it is. No RNG anywhere (victory.md §3).
  *
- * Not ported, for want of the objects (victory.md §2, §3, §8, §10): the Wonder (unit 276) and its countdown, relics
- * (159) and ruins (158, 163) with their game-start rolls and hold timers, and the scenario/MP conditions of §7 other
- * than "victory points". The sim has no diplomacy, so every player is every other's enemy and the allied-victory
+ * The all-relics and all-ruins holds (victory.md §10) count the relics and ruins a random map placed (`artifactCount`,
+ * `ruinCount`). Not ported, for want of the objects (victory.md §2, §8): the Wonder (unit 276) and its countdown, and
+ * the scenario/MP conditions of §7 other than "victory points". The sim has no diplomacy, so every player is every other's enemy and the allied-victory
  * paths reduce to one-player teams (`teammates`).
  */
 import type { Entity } from './entities';
@@ -101,6 +101,15 @@ export interface VictoryState {
   conditions: ConditionEntry[][];
   /** Per player, `RGE_Victory_Conditions::victory`: 0 undecided, 1 failed, 2 achieved. */
   verdicts: number[];
+  /** `TRIBE_World::artifact_count` / `ruin_count`: the relics and ruins a random map placed (5 or 0, victory.md §3). */
+  artifactCount: number;
+  ruinCount: number;
+  /**
+   * Per player, `TRIBE_Player::artifact_held_time` / `ruin_held_time` (float32, victory.md §10): -1 while the player's
+   * team does not hold them all, else the countdown from 2000 (the timer panel shows it, `src/tpnl_tim.cpp:341-350`).
+   */
+  artifactHeld: number[];
+  ruinHeld: number[];
 }
 
 /** `[group, id, command, attribute, n, points]` in `TRIBE_World::new_game`'s order (victory.md §11.2). */
@@ -133,6 +142,14 @@ const SCORE_TABLE: readonly (readonly [number, number, number, number, number, n
 /** Score ids the achievements screen shows apart from the four groups (`src/scr_ach.cpp:445-466`). */
 const SCORE_SURVIVAL = 22;
 const SCORE_WONDER = 23;
+
+/** `PLAYER_ATTRIBUTE_ARTIFACTS` / `RUINS` (relics and ruins held, from their storages) and the all-held flags. */
+export const ATTR_ARTIFACTS = 7;
+export const ATTR_RUINS = 14;
+export const ATTR_ALL_RUINS = 54;
+export const ATTR_ALL_ARTIFACTS = 55;
+/** The all-relics / all-ruins countdown's start (`src/tworld.cpp:1012`, `:1053`). */
+const HOLD_TIME = 2000;
 
 const ATTR_KILLS = 20;
 const ATTR_TOTAL_UNITS = 19;
@@ -174,6 +191,10 @@ export function newVictory(players: number, settings: VictorySettings = { type: 
     totals: new Array<number>(players).fill(0),
     conditions: Array.from({ length: players }, () => []),
     verdicts: new Array<number>(players).fill(0),
+    artifactCount: 0,
+    ruinCount: 0,
+    artifactHeld: new Array<number>(players).fill(-1),
+    ruinHeld: new Array<number>(players).fill(-1),
   };
   for (let p = 1; p < players; p++) {
     if (settings.type === VICTORY_SCORE) v.conditions[p]!.unshift({ command: CONDITION_VICTORY_POINTS, group: 0, ally: true, state: 0, count: amount });
@@ -195,6 +216,8 @@ export function copyVictory(v: VictoryState): VictoryState {
     totals: [...v.totals],
     conditions: v.conditions.map((list) => list.map((e) => ({ ...e }))),
     verdicts: [...v.verdicts],
+    artifactHeld: [...v.artifactHeld],
+    ruinHeld: [...v.ruinHeld],
   };
 }
 
@@ -415,10 +438,10 @@ function checkForVictory(v: VictoryState, player: number): void {
 }
 
 /**
- * `TRIBE_World::check_game_state` then `RGE_Game_World::check_game_state` (victory.md §5, §9), after every player's
- * update. `deltaSeconds` is `world_time_delta_seconds`.
+ * `TRIBE_World::check_game_state` then `RGE_Game_World::check_game_state` (victory.md §5, §9, §10), after every player's
+ * update. `deltaSeconds` is `world_time_delta_seconds`; `attributes` every player's attributes.
  */
-export function checkGameState(v: VictoryState, deltaSeconds: number): void {
+export function checkGameState(v: VictoryState, deltaSeconds: number, attributes: number[][]): void {
   if (v.gameState === 0 && v.type === VICTORY_TIME_LIMIT && v.countdownVictory && v.countdownClock >= 1) {
     v.countdownClock = sub32(v.countdownClock, mul32(deltaSeconds, 2));
     if (v.countdownClock < 1) {
@@ -438,6 +461,13 @@ export function checkGameState(v: VictoryState, deltaSeconds: number): void {
         v.endCondition = END_TIME_LIMIT;
       }
     }
+  }
+  if (v.gameState === 0 && (v.artifactCount > 0 || v.ruinCount > 0)) {
+    // Teams from player 1 up: with no diplomacy each player is its own (src/tworld.cpp:974-994).
+    const teams: number[][] = [];
+    for (let i = 1; i < v.status.length; i++) teams.push([i, ...teammates()]);
+    if (v.artifactCount > 0) for (const team of teams) hold(v, team, deltaSeconds, attributes, v.artifactCount, ATTR_ARTIFACTS, ATTR_ALL_ARTIFACTS, v.artifactHeld, END_ALL_RELICS);
+    if (v.ruinCount > 0) for (const team of teams) hold(v, team, deltaSeconds, attributes, v.ruinCount, ATTR_RUINS, ATTR_ALL_RUINS, v.ruinHeld, END_ALL_RUINS);
   }
   // `RGE_Game_World::check_game_state`: `check_victory` for each player, then count statuses.
   let playing = 0;
@@ -467,6 +497,46 @@ export function checkGameState(v: VictoryState, deltaSeconds: number): void {
     v.gameState = 1;
     for (let i = 1; i < v.status.length; i++) victoryIfGameOn(v, i);
     v.endCondition = END_CONQUEST;
+  }
+}
+
+/**
+ * One team's all-relics or all-ruins hold (`src/tworld.cpp:996-1075`, victory.md §10): when the members' held count
+ * (each truncated to int) is exactly `count`, the first step sets the all-held attribute and, in a Standard game, starts
+ * the countdown at 2000; each later step takes `dt * 2` off it until below 1, when the first member wins. Holding fewer
+ * (or more) after the countdown started clears the attribute and the countdown. The original's captured/lost
+ * notifications (`GAME_NOTIFY_ARTIFACTS_CAPTURED` ...) are the client's to derive from `held`.
+ */
+function hold(
+  v: VictoryState,
+  team: readonly number[],
+  deltaSeconds: number,
+  attributes: number[][],
+  count: number,
+  attr: number,
+  allAttr: number,
+  held: number[],
+  endCondition: number,
+): void {
+  let total = 0;
+  for (const p of team) total += toInt(attributes[p]![attr] ?? 0);
+  const first = team[0]!;
+  if (total === count) {
+    const time = held[first]!;
+    if (time === -1) {
+      for (const p of team) attributes[p]![allAttr] = f32(1);
+      if (v.type === VICTORY_STANDARD) for (const p of team) held[p] = f32(HOLD_TIME);
+    } else if (time >= 1 && v.type === VICTORY_STANDARD) {
+      const next = sub32(time, mul32(deltaSeconds, 2));
+      for (const p of team) held[p] = next;
+      if (next < 1) {
+        winGameNow(v, first);
+        v.endCondition = endCondition;
+      }
+    }
+  } else if (held[first] !== -1) {
+    for (const p of team) attributes[p]![allAttr] = f32(0);
+    if (v.type === VICTORY_STANDARD) for (const p of team) held[p] = -1;
   }
 }
 

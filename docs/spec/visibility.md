@@ -151,9 +151,13 @@ record of that list into the object's record slot and shrink the list. The
 destructor removes every record the object still has
 (`src/com_obj.cpp:40-45`).
 
-So a record's tile and owner are those of the moment p started seeing the
-object; they do not follow it while p keeps seeing it (the decomp's `@bug`
-note at `src/com_obj.cpp:443-446`). The swap-removal changes list order,
+A record's tile follows the object: `RGE_Combat_Object::teleport`
+(`src/com_obj.cpp:947-975`), which every movement step reaches through the
+virtual `teleport`, writes the new tile into each of the object's records
+(`VUR_Ptrs`) whenever the tile changes (the decomp's `@bug` note at
+`src/com_obj.cpp:443-446` misses this; port: `Visibility.moveRecords` from
+`movement.ts` `teleport`). Its owner follows a change of ownership
+(`src/t_c_obj.cpp:241-247`, `Visibility.setRecordOwner`; victory.md §10.1). The swap-removal changes list order,
 which decides ties in the unit AI. The port assumes an object's group does
 not change while it has records (true for every type in the table). The
 `capture_flag` first-sight capture (`:452-479`) is for objects the sim does
@@ -229,10 +233,10 @@ Each has a test of the same name in `packages/sim/src/visibility.test.ts`
   player 1 never records it and after 60 turns the Clubman has no attack and
   the Villager has 25 hp.
 - **V9** Player 1's Town Center (LOS 7) at (10.5, 10.5) and Clubman at
-  (21.5, 10.5), player 2's Villager at (14.5, 10.5). After one turn the
-  Villager moves to (17.5, 10.5) (visible to player 1). After another turn
-  player 1's record is still `(3, 14, 10)` and the Clubman's
-  `bestUnitToAttack` is -1. Starting at (17.5, 10.5) instead, it is 3.
+  (21.5, 10.5), player 2's Villager at (14.5, 10.5). After one turn player
+  1's record is `(3, 14, 10)`; the Villager then moves to (17.5, 10.5)
+  (visible to player 1) and the record is `(3, 17, 10)` at once, and the
+  Clubman's `bestUnitToAttack` is 3.
 - **V10** Clubman (1) at (10.5, 10.5), Villager (2, fog_flag 0) at
   (11.5, 10.5), player 1's 3×3 around (11, 10) unexplored to fogged: an
   attack order ends in attack state 13, the Villager keeps 25 hp.

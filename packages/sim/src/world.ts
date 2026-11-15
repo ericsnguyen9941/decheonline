@@ -16,7 +16,7 @@ import {
 } from './commands';
 import type { GameContext } from './context';
 import { EntityStore, ObjectState, type Entity } from './entities';
-import { orderWork, workMoveTo } from './gather';
+import { deleteActions, orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
 import { createTestMap, TileMap, type MapSnapshot } from './map';
@@ -48,7 +48,7 @@ import {
   type VictoryState,
 } from './victory';
 import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, setAiState, standGround } from './unit-ai';
-import { forgetSighting, stateChanged, Visibility, type VisibilitySnapshot } from './visibility';
+import { exploreObject, forgetSighting, stateChanged, unexploreObject, Visibility, type VisibilitySnapshot } from './visibility';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
 
 /** Default base time per step: the network frame granularity `G` (src/com_spd.cpp:11-25). Never wall time. */
@@ -387,7 +387,7 @@ export class World {
     rng.rand();
     this.randomSeed = rng.rand();
     const { w, h } = m;
-    placeRelicsAndRuins(m, new MapStack(w, h), new Uint8Array(w * h), {
+    const placed = placeRelicsAndRuins(m, new MapStack(w, h), new Uint8Array(w * h), {
       victoryType: this.victory.type,
       // The special victories (ruins, artifacts, discoveries) are not ported (victory.md §2): none is wanted.
       artifacts: 0,
@@ -395,6 +395,9 @@ export class World {
       ruins: 0,
       owned: (types) => [...this.entities.all()].filter((e) => types.includes(e.type)).length,
     });
+    // `artifact_count` / `ruin_count` (src/tworld.cpp:732, :736): what the all-relics and all-ruins holds count.
+    this.victory.artifactCount = placed.artifactCount ?? 0;
+    this.victory.ruinCount = placed.ruinCount ?? 0;
     this.civEffects();
   }
 
@@ -477,6 +480,41 @@ export class World {
     return e;
   }
 
+  /**
+   * `TRIBE_Combat_Object::change_ownership` for an artifact (src/t_c_obj.cpp:240-251) through
+   * `RGE_Action_Object::change_ownership` (src/act_obj.cpp:425-429) and `RGE_Static_Object::change_ownership`
+   * (src/stat_obj.cpp:1675-1720): nothing when the new owner has no such master; else every visible-unit record of the
+   * object takes the new owner, its actions stop, the old owner loses its flag-2 storages and the object's sight, the
+   * object moves to the front of the new owner's list, shows the new master's sprite (one draw for a random start
+   * frame), keeps its hit-point ratio, and the new owner gets its sight and its flag 1/2 storages. Only artifacts
+   * change owner in the sim (conversion is not ported). The closing `notify(0x20B)` to itself is dropped: the artifact
+   * AI ignores it (src/taiuaimd.cpp:2093-2111).
+   */
+  private changeOwnership(e: Entity, owner: number): void {
+    if (!hasMaster(this, owner, e.type)) return;
+    const ctx = this.gameContext();
+    this.visibility.setRecordOwner(e.id, typeOf(this, e).group, owner);
+    deleteActions(ctx, e);
+    const old = typeOf(this, e);
+    const next = master(this, owner, e.type);
+    const hpRatio = div32(e.hp, f32(Math.trunc(old.hitPoints)));
+    giveStorages(this.attributes[e.owner]!, old, -1, [2]);
+    if (e.state === ObjectState.Active) unexploreObject(this, e, old, false);
+    const list = this.awake[e.owner]!;
+    const i = list.indexOf(e.id);
+    if (i !== -1) {
+      list.splice(i, 1);
+      this.awake[owner]!.unshift(e.id);
+    }
+    // `new_sprite` runs while the object still has its old master.
+    const sprite = old.dying && e.sprite?.graphic === old.dying.graphic ? next.dying : next.standing;
+    if (sprite) newSprite(ctx, e, sprite);
+    e.owner = owner;
+    e.hp = mul32(f32(Math.trunc(next.hitPoints)), hpRatio);
+    if (e.state === ObjectState.Active) exploreObject(this, e, next, false);
+    giveStorages(this.attributes[owner]!, next, 1, [1, 2]);
+  }
+
   /** The context object updates and orders run with (current RNG, delta and clock). */
   gameContext(): GameContext {
     return {
@@ -499,6 +537,7 @@ export class World {
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
+      changeOwnership: (e, owner) => this.changeOwnership(e, owner),
       mastersChanged: (player) => {
         this.mastersDigest[player] = undefined;
       },
@@ -608,7 +647,7 @@ export class World {
       rng.srand(rng.rand());
       this.playerTimeDelta[this.playerTurn] = 0;
       this.playerTurn = (this.playerTurn + 1) % this.players;
-      checkGameState(this.victory, this.deltaSeconds);
+      checkGameState(this.victory, this.deltaSeconds, this.attributes);
     }
     this.randomSeed = rng.rand();
   }

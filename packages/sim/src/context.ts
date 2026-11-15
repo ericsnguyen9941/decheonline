@@ -12,6 +12,8 @@ export interface GameContext extends MoveContext, TechContext {
   wake(e: Entity): void;
   /** The owner's updated objects in list order (newest or most recently woken first). */
   objectsOf(owner: number): Entity[];
+  /** `change_ownership`: the object becomes `owner`'s (artifacts only in the sim). */
+  changeOwnership(e: Entity, owner: number): void;
   /** The player whose turn it is (`is_player_turn`): only its units run their unit AI this step. */
   playerTurn: number;
   /** Per player, ms accumulated since its last turn (`get_accum_time_delta`). */
