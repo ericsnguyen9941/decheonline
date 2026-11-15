@@ -109,7 +109,7 @@ export class GameHud {
   private readonly objectIcon = box(this.object, 'hud-object-icon', 'object-icon');
   private readonly objectHealth = box(this.object, 'hud-object-health', 'object-health');
   private readonly objectHp = box(this.object, 'hud-object-hp', 'object-hp');
-  private rowEls: HTMLElement[] = [];
+  private rowEls: { kind: string; icon: HTMLElement; text: HTMLElement }[] = [];
   private readonly slots = Array.from({ length: 12 }, () => box(this.bottom, 'hud-slot', 'command-slot'));
   private readonly minimap = box(this.bottom, 'hud-minimap', 'minimap');
   private readonly message = box(this.root, 'hud-message', 'hud-message');
@@ -274,15 +274,30 @@ export class GameHud {
     const frame = Math.min(HEALTH_FRAMES - 1, Math.max(0, Math.trunc(HEALTH_FRAMES - (HEALTH_FRAMES * entity.hp) / type.hitPoints)));
     this.objectHealth.hidden = !showHp;
     paintFrame(this.objectHealth, showHp ? provider.interfaceFrame(SLP.health, frame) : null);
-    for (const el of this.rowEls) el.remove();
-    this.rowEls = rows.flatMap((r, i) => {
-      const icon = box(this.object, 'hud-object-row-icon', `object-${r.kind}-icon`);
-      const text = box(this.object, 'hud-object-row', `object-${r.kind}`);
-      icon.style.top = `${30 + i * ROW_HEIGHT}px`;
-      text.style.top = `${33 + i * ROW_HEIGHT}px`;
-      paintFrame(icon, provider.interfaceFrame(SLP.itemIcons, r.icon));
-      text.textContent = r.text;
-      return [icon, text];
+    // Rows of the same kind are updated in place, so a reader holding one never sees a detached element.
+    for (const r of this.rowEls.splice(rows.length)) {
+      r.icon.remove();
+      r.text.remove();
+    }
+    rows.forEach((r, i) => {
+      let el = this.rowEls[i];
+      if (el && el.kind !== r.kind) {
+        el.icon.remove();
+        el.text.remove();
+        el = undefined;
+      }
+      if (!el) {
+        el = {
+          kind: r.kind,
+          icon: box(this.object, 'hud-object-row-icon', `object-${r.kind}-icon`),
+          text: box(this.object, 'hud-object-row', `object-${r.kind}`),
+        };
+        this.rowEls[i] = el;
+      }
+      el.icon.style.top = `${30 + i * ROW_HEIGHT}px`;
+      el.text.style.top = `${33 + i * ROW_HEIGHT}px`;
+      paintFrame(el.icon, provider.interfaceFrame(SLP.itemIcons, r.icon));
+      el.text.textContent = r.text;
     });
   }
 

@@ -33,6 +33,7 @@ const MAX_SELECTED = 25;
 const FIRST_GROUP = 11;
 /** `select_level`s: a left click picks from 2 up, a selection box picks 4 (`pick_multi(4, ...)`). */
 const SELECT_CLICK = 2;
+const SELECT_BUILDING = 3;
 const SELECT_BOX = 4;
 /** Object group 11: missiles, dead units, the Flare. Without a pack nothing of it can be selected. */
 const GROUP_NONE = 11;
@@ -695,12 +696,15 @@ export class UnitLayer {
     });
   }
 
-  /** `select_level` of an object's master (the dat's interaction mode); without a pack, guessed from the sim's table. */
+  /**
+   * `select_level` of an object's master (the dat's interaction mode); without a pack, guessed from the sim's table:
+   * 4 for units, 3 for buildings as the dat has them, 2 for the rest (trees, mines, animals).
+   */
   private selectLevel(e: Entity): number {
     const known = this.o.provider.unitInfo(e.type)?.selectLevel;
     if (known !== undefined) return known;
     const t = unitType(e.type);
-    return t.group === GROUP_NONE ? 0 : isUnit(e) ? SELECT_BOX : SELECT_CLICK;
+    return t.group === GROUP_NONE ? 0 : isUnit(e) ? SELECT_BOX : isBuildingObject(e) ? SELECT_BUILDING : SELECT_CLICK;
   }
 
   /** `select_one_object`: adds `id` while the selection has room, and makes it the panel's object. False when full. */
