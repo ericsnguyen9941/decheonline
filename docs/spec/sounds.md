@@ -99,6 +99,10 @@ area of the canvas (not under the top strip or the bottom panel).
   is set to 20 (one less each second) and dat sound `attributes[26]` (`PLAYER_ATTRIBUTE_ATTACK_WARNING_SOUND`,
   include/player.h:43; 10 attack.wav for every civ) plays. The sim keeps the countdown in `World.alertCooldown`. The
   client plays the sound when the countdown goes up.
+- **Farm died** (`GAME_NOTIFY_OBJECT_DEPLETED`, src/act_make.cpp:46-56 -> `TRIBE_Game::notification`
+  src/tribegam.cpp:1728-1733): a Farm that has made all its food and is empty plays 16 farmdie.wav, only for its
+  owner (economy.md §4.7). The sim counts the notifications per player in `World.depleted`. The client plays the
+  sound when the count goes up.
 - A unit trained or a building finished has no game sound, only its own master sound (§3).
 - `RGE_Base_Game::play_sound` (src/basegame.cpp:3894) leaves a game sound alone while it is still playing. A
   button restarts its sound.
@@ -120,7 +124,7 @@ key-down. Sounds triggered before that are logged but not played.
   terrain sound from `sound/*.wav` plays for at most 6 s.
 - Music (src/music.cpp): CD audio tracks first (`MCI_DEVTYPE_CD_AUDIO`), else `sound/music%d.mid`.
 - Chat received (2), can't do (3), tribute (4), player killed or dropped (6, 7), wonder (8-10), artifact (11, 12),
-  conversion (13, 14) and farm died (16): their features or notifications are not in the client yet.
+  conversion (13, 14): their features or notifications are not in the client yet.
 - Gather and drop-off sounds (`resourceGatheringSoundId`, `resourceDepositSoundId` of a task): -1 for every 1.0a
   task.
 

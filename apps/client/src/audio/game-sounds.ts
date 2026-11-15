@@ -29,6 +29,7 @@ export type SoundEvent =
   | 'death'
   | 'research'
   | 'attacked'
+  | 'farm-died'
   | 'button'
   | 'sprite'
   | 'message'
@@ -67,6 +68,7 @@ export class GameSounds {
   private readonly states = new Map<number, number>();
   private techs: number[];
   private alert: number;
+  private depleted: number;
   private seenStep = -1;
 
   constructor(private readonly o: GameSoundsOptions) {
@@ -75,6 +77,7 @@ export class GameSounds {
     for (const e of world.entities.all()) this.states.set(e.id, e.state);
     this.techs = [...world.techs[player]!];
     this.alert = world.alertCooldown[player]!;
+    this.depleted = world.depleted[player]!;
     this.seenStep = this.stepOf();
   }
 
@@ -113,6 +116,10 @@ export class GameSounds {
     const alert = world.alertCooldown[player]!;
     if (alert > this.alert) this.dat('attacked', Math.trunc(world.attributes[player]![ATTR_ATTACK_WARNING_SOUND]!), -1);
     this.alert = alert;
+    // `GAME_NOTIFY_OBJECT_DEPLETED` for this player: a Farm used up.
+    const depleted = world.depleted[player]!;
+    if (depleted > this.depleted) this.game('farm-died', GameSound.FarmDied, -1);
+    this.depleted = depleted;
   }
 
   /** The player clicked `e` into the selection (`select_one_object` with play_sound). */

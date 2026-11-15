@@ -13,7 +13,7 @@ import { ActionResult, currentSprite, endAction, facetOf, MOVE_RANGE, startMoveT
 import { add32, div32, f32, mul32, sub32 } from './num';
 import { dropResearch } from './research';
 import { newSprite } from './sprites';
-import { aiStateForAction, setAiState } from './unit-ai';
+import { AI_ACTION_GATHER, AI_ACTION_HUNT, aiStateForAction, NOTIFY_REQUEST_TASK, notifyObject, setAiState } from './unit-ai';
 import type { SpriteInfo, Task, UnitType } from './units';
 import { exploreObject, unexploreObject } from './visibility';
 
@@ -52,6 +52,8 @@ export interface WorkAction {
   x: number;
   y: number;
   z: number;
+  /** Gather and hunt: `targetType`, the master id of the object the action was made for (-1 or absent: a point). */
+  targetType?: number;
 }
 
 /** `g_gather_dropoff_distance_threshold` / `g_hunt_drop_distance_threshold`, compared squared. */
@@ -157,6 +159,7 @@ export function transform(ctx: GameContext, e: Entity, next: UnitType): void {
 export function deleteActions(ctx: GameContext, e: Entity): void {
   e.work = null;
   e.attack = null;
+  e.make = null;
   if (e.mover) endAction(e.mover);
   dropResearch(ctx, e);
 }
@@ -184,7 +187,7 @@ export function orderWork(ctx: GameContext, e: Entity, target: Entity | undefine
   const action = startTask(ctx, e, t, task, target, f32(x), f32(y));
   // `setCurrentOrder` / `setCurrentAction` / `setCurrentTarget` with the clicked point, then `setTaskedByPlayer`.
   const [order, aiAction] = aiStateForAction(action);
-  setAiState(e, order, aiAction, target ? target.id : -1, x, y, 0);
+  setAiState(e, order, aiAction, target ? target.id : -1, target ? typeOf(ctx, target).group : -1, x, y, 0);
   if (e.ai) e.ai.notes = [];
 }
 
@@ -215,6 +218,7 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
   deleteActions(ctx, e);
   if (kind === ACTION_BUILD || kind === ACTION_GATHER || kind === ACTION_HUNT) {
     const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x, y, z: 0 };
+    if (kind !== ACTION_BUILD) a.targetType = target ? target.type : -1;
     e.work = a;
     if (kind === ACTION_BUILD) buildFirstInStack(ctx, e, a);
     else firstInStack(ctx, e, a);
@@ -356,6 +360,7 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
   const hunt = a.type === ACTION_HUNT;
   switch (state) {
     case WORK_WAITING:
+      requestTask(ctx, e, a);
       a.timer = f32(-10);
       newSprite(ctx, e, waitSprite(ctx, e, task));
       return;
@@ -422,6 +427,11 @@ function setState(ctx: GameContext, e: Entity, a: WorkAction, state: number): vo
       newSprite(ctx, e, waitSprite(ctx, e, task));
       return;
   }
+}
+
+/** Waiting asks the unit AI for a task (`UNIT_AI_NOTIFY_REQUEST_TASK`, src/act_gath.cpp:98-101, :252-257, src/tact_hnt.cpp:102, :270). */
+function requestTask(ctx: GameContext, e: Entity, a: WorkAction): void {
+  notifyObject(ctx, e, e.id, NOTIFY_REQUEST_TASK, a.type === ACTION_HUNT ? AI_ACTION_HUNT : AI_ACTION_GATHER, a.targetType ?? -1);
 }
 
 /** `keepGatheringWhenObjectIsOut` (src/t_c_obj.cpp:665): farms (50) and docks (45). */
@@ -492,8 +502,10 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
     case WORK_WAITING:
       if (a.timer < 0) {
         a.timer = add32(a.timer, ctx.deltaSeconds);
-        // The unit AI would be asked for a new task here; human players' units have none yet.
-        if (a.timer > 0) a.timer = f32(-10);
+        if (a.timer > 0) {
+          a.timer = f32(-10);
+          requestTask(ctx, e, a);
+        }
       }
       return ActionResult.Continue;
     case WORK_TO_POINT:

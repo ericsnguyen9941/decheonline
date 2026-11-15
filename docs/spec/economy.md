@@ -36,7 +36,8 @@ fixed economy tick: each world step applies one increment of `rate × dts`.
 | `TRIBE_Building_Object::update_production_queue` | `src/t_b_obj.cpp:959` | M | |
 | `TRIBE_Action_Make_Obj::first_in_stack` | `src/tact_mob.cpp:55` | **N** | |
 | `TRIBE_Action_Make_Obj::update`, `place_obj`, `stop` | `src/tact_mob.cpp:102`, `:161`, `:225` | M | |
-| `RGE_Action_Make::first_in_stack`, `set_state`, `update` | `src/act_make.cpp:20`, `:30`, `:35` | M | farm food production |
+| `RGE_Action_Make::first_in_stack`, `set_state`, `update` | `src/act_make.cpp:20`, `:30`, `:35` | M | farm food production, §4.7; ported (`make.ts`) |
+| `RGE_Action_Object::update` default task | `src/act_obj.cpp:403` | M | only the make task is started (§4.7) |
 | `TRIBE_Player::check_obj_cost`, `pay_obj_cost`, `reimburse_obj_cost` | `src/tplayer.cpp:1031`, `:1080`, `:1101` | M | |
 | `RGE_Player::add_attribute_num` / `TRIBE_Player::add_attribute_num` | `src/player.cpp:853` / `src/tplayer.cpp:3661` | M / M | |
 | `RGE_Static_Object::set_attribute_amount` | `src/stat_obj.cpp:2210` | M | |
@@ -67,7 +68,8 @@ is weak corroboration only.
 | `RGE_Task::attribute_type3` | `task.resourceOut` | player attribute credited on drop-off (`-1`: the carried type) |
 | `RGE_Task::work_val1` | `task.workValue1` | rate multiplier |
 | `RGE_Task::work_range` | `task.workRange` | approach range |
-| `RGE_Task::work_flag` | `task.gatherType` | farm: 0 = put food into the farm itself |
+| `RGE_Task::work_flag` | `task.gatherType` | farm: 0 = put food into the farm itself (sim `Task.workFlag`) |
+| `RGE_Task::is_default` | `task.isDefault` | the master's `default_task` (sim `Task.isDefault`) |
 
 The task field order is from `RGE_Task::load` (`src/task.cpp:71-93`, M).
 The name `gatherType` for `work_flag` is the reader's; the position match is
@@ -325,20 +327,7 @@ if the owner has no other *active* building of the same master, the building's
 `objects.ts` `setObjectState`. Only an object that was active counts: a
 foundation (unbuilt) that is cancelled or destroyed undoes nothing.
 
-The farm's own food comes from `RGE_Action_Make` (`src/act_make.cpp`, M),
-the farm's default task (task 21, `resourceIn` 16, `gatherType` 0):
-- On start, the farm's held load is replaced by 0 of type 16 (it held 15
-  food of type 0 from its storage) (`src/act_make.cpp:20-28`).
-- `timer = owner.attributes[36]` (250) at start (`src/act_make.cpp:30-33`).
-- Each step: `work = work_rate × dts × work_val1` (0.4 × dts). With
-  `work_flag` 0 the farm's held amount grows by `work`, clamped to its cap
-  15; `timer −= (actual increase)` (`src/act_make.cpp:60-69`).
-- When `timer ≤ 0` (and attribute 36 > 0) production stops; once the held
-  amount is ≤ 0 the farm reports depleted and dies (`:46-56`).
-So a farm yields 250 food in total at most 0.4 food/s, with at most 15
-stored; a farmer (0.45/s) is limited by the farm. When the farm's update
-runs relative to the farmer's within a step depends on list order
-(**unverified** which comes first in practice).
+The farm's own food comes from its default task, the make action (§4.7).
 
 ### 4.4 Cancelling a foundation (`cancel_build`, `src/t_b_obj.cpp:672-697`, M)
 
@@ -399,6 +388,135 @@ checks overlap among live objects only).
 Placement visibility (reason 5) is ported for the build command and trained
 units (visibility.md §5). Not ported: slope (3, the map has no tile shapes yet) and per-master tile requirements (1; no type in
 the table has any).
+
+### 4.7 Farms
+
+Port: `packages/sim/src/make.ts` (the make action), `build.ts` (the builder's
+hand-over), `gather.ts` (the Farmer's task requests), `unit-ai.ts`
+(`farmerRequest`); vectors and flows in `farms.test.ts`; e2e
+`e2e/tests/farm.spec.ts`.
+
+**Requirement.** The Farm (master 50) is disabled in every civ's table. The
+Market (84) has `techId` 26 ("Market"), whose effect 26 enables master 50
+(command type 2, `a` 50, `b` 1) and runs once the first Market is built
+(§4.3 step 5). The Market itself needs the Tool Age and a Granary (techs.md);
+losing the last Market undoes tech 26 (§4.3), so the Farm button goes again.
+
+**Building.** Farm (civ 1): `trainLocationId` 118 (the Builder: the
+Villager's build menu), cost 75 wood and 1 of attribute 30, 30 build points,
+50 hp, line of sight 4, radius 1.5 × 1.5 (3 × 3 tiles, stamped on the
+obstruction map: units walk round it), button location 8, icon 10, name
+string 5088, hotkey string 16089, selection sound 167, no dying sound,
+construction sprite 82 ("Build 3x3", 4 frames by progress), standing sprite
+273 ("Farm", one frame, one angle: the field looks the same however much food
+is left; no code picks a frame by the amount). Storages: (0, 15, flag 0) is
+the object's own starting load, so a foundation already holds 15 food of type
+0; (30, −1, flag 2) the building allowance. Placement and construction are
+those of any building (§4.1-4.6). A Farm is never repaired by a right click
+(`src/ttsk_lst.cpp:85`, commands.md).
+
+**Hand-over to the farmer** (`src/tact_bld.cpp:208-230`, D; decomp-marked bug,
+§9). When `build` reports the Farm done, the builder's build action sets its
+timer to −1 and stays in state 7. On each later update, while the timer is
+below 0: if the Farm holds more than 0, the builder (waiting to move; leaving
+its pathing group only for a computer player, `src/stat_obj.cpp:3254`) gets
+`do_command(farm)`, i.e. `work2` (§3.1): the Villager becomes the Farmer
+(259) with a gather action on the Farm; else `build` is called again, finds
+the Farm no longer unbuilt, and the timer is set to −1 again. The build
+action's timer is never reset to 0 (the start-of-update hand-off of a finished
+target to repair or wait needs `timer == 0`), so a builder retargeted in that
+window to another Farm foundation would be handed to it as a work order
+instead of building it: kept as the original.
+
+**Food: the make action** (`RGE_Action_Make`, `src/act_make.cpp`, M). The
+Farm's task 0 (action 21, `resourceIn` 16, `work_val1` 1, `work_flag` 0) has
+`is_default` 1, which makes it the master's `default_task`
+(`src/m_ac_obj.cpp:130-140`). `RGE_Action_Object::update` (`src/act_obj.cpp:
+403-407`): an object that is active and has no action calls
+`set_task(default_task)` and does nothing more that step. So the Farm starts
+on the first update after it is built (the step it completes, if its update
+comes after its builder's in the list, else the next).
+- `first_in_stack`: `set_state(6)` sets `timer = owner.attributes[36]`; a held
+  type other than 16 becomes 0 of type 16 (the 15 food of type 0 go).
+- `update`, state 6: if `timer ≤ 0` and `attributes[36] > 0`: when the held
+  amount is ≤ 0, `notification(GAME_NOTIFY_OBJECT_DEPLETED, owner, id, x, y)`
+  and `die_die_die` (hp 0); either way nothing grows. Otherwise
+  `work = work_rate × dts` then `× work_val1` (float, in that order);
+  `work_flag` 0: `set_attribute_amount(work, add, check_max)`, the held amount
+  grows by `work`, clamped to `(float)(int)` the cap 15; `timer −= held −
+  held_before`. (`work_flag` ≠ 0 would credit the owner's attribute
+  `resourceIn` directly; no master has that.)
+- With `attributes[36] ≤ 0` the timer is never checked: the Farm never runs
+  out. Attribute 36 is 250 for every civ at the start; farm techs change it
+  (out of scope here).
+- The make action has no `stop`: `RGE_Action_Object::stop`
+  (`src/act_obj.cpp:366-370`) deletes it, and the next update starts it again
+  with `timer = attributes[36]`. A Farm alone has no Stop button (§ hud.md,
+  the building branch shows Stop only for a queue or research), but a mixed
+  selection with a unit that has an action does (`any_selected_have_action`
+  counts the Farm's make action), and the stop command reaches the Farm: its
+  food left is reset to the full 250. Decomp behaviour, kept;
+  **unverified** in the retail exe.
+- RNG: none in the action. The death draws as any object's (§7).
+
+Rates: the Farm grows at most 0.4 food/s (`work_rate` 0.4) and stores at most
+15; the Farmer (259, `work_rate` 0.45, carries 10) takes 0.45/s, so it
+outpaces the Farm: the Farm empties and the Farmer stays on it (§3.4,
+`keepGatheringWhenObjectIsOut`) taking `min(0.45 × dts, held)`. A Farm makes
+250 food in all, plus the part of the last step's growth that takes the timer
+below 0 (at most one step's `work`).
+
+**Depletion.** The Farm dies through the normal dying path (hp 0 → dying,
+death sprite none, the death-sound fence `rand`/`srand`, §7), returns its
+flag-2 storage, and with nothing held becomes `Dead_Farm` (244, sprite 148,
+holds 60 of type 12 decaying at 1/s, can be built on). A Farm destroyed by an
+enemy goes the same way, its held food decaying at 10000/s (`resourceDecay`).
+
+**The Farmer** (gather action 5, task unit 50, `targetDiplomacy` 1: own Farms
+only, §3.2: another player's Farm ends the action). Sprites: walking 679,
+`work_sprite` 468 "Man Farm" (29 frames, 8 angles) while in states 6-7,
+carrying 829 "Carry Farmer" while holding at least 1 food, dead 257
+Dead_Farmer. Drop sites 109 Town Center, then 68 Granary. When its Farm is
+gone (pending removal), state 7 goes to 8 if it carries anything, else 3;
+after a drop-off with the target gone it walks back to the remembered point
+(11), then waits (3). Entering state 3, and every 10 s in it, the gather
+action notifies its unit AI `REQUEST_TASK` (p1 GATHER, p2 the gather action's
+`targetType`: the master id of the object it was made for, set only by the
+constructor, `src/act_gath.cpp:38`). The civilian unit AI
+(`src/taiuaimd.cpp:752-801`, L), when its current action is GATHER: target type
+= `currentTargetTypeValue` (the object group set with the target: 3 for a
+Farm), else `lastTargetTypeValue`; −1 → remove target, stop. A resource group
+(`convertToLOSResourceType`) goes to `closestResourceObject` (not ported). With
+p2 = 50: `closestObject(type, any relation, ACTIVE, 50)` over the search
+results; found → `gatherObject(id, 1)` (the gather action retargets; no check
+that another Farmer works it, decomp-marked bug); not found and a human
+player → `evasiveMoveTo(x ∓ 2.5, y ∓ 2.5)` (minus when the coordinate is above
+5, else plus; float), the gather action takes the walk (state 15) and the
+Farmer ends idle (state 2) as a Farmer. Computer players' Farmers stop
+instead. The same notification for other gather and hunt targets reaches the
+unit AI but its re-task is not ported.
+
+**Gaia and ownership.** Farms are never Gaia's: they are built by a player.
+The gather update ends (state 1, `TARGET_INVALID`) on a target owned by
+another non-Gaia player, and the Farmer's task only matches own Farms.
+
+**Sounds.** `GAME_NOTIFY_OBJECT_DEPLETED` (`src/tribegam.cpp:1728-1733`): for
+the owner, if it is the local player, game sound 16 farmdie.wav and
+`add_notification_loc(x, y)` (the last-event location; not ported). No
+other sound: the Farm has no dying sound; built and selected play its master
+sounds (sounds.md §3).
+
+**UI.** The Farm's button is in the Villager's build menu (location 8) once
+the Farm is enabled. The object panel of an own, active Farm with its make
+action shows a food row (item icon 2):
+`(int)(timer + held − g_tactical_panel_rounding_offset)`, the offset −0.5
+(`src/tpnl_obj.cpp:474-484`, `src/game_globals.cpp:381`), i.e. the food left;
+the Farm's held amount is not shown as a resource row (`:495`). Cursor
+(`get_mouse_pointer_action_vars`, `src/tplayer.cpp:3714`): a Villager over an
+own Farm reads action 5 (repair/build) of the right-click table, which needs
+hp below the maximum; an intact Farm falls back to the left-click table:
+the arrow and "Click to select" (decomp-marked bug), though a right click
+works it. A foundation or a damaged Farm shows the hand (facet 3).
 
 ## 5. Training
 
@@ -693,7 +811,12 @@ Kept as behaviour (the target is the original game):
   server/peer should reject such commands (**port decision**, not the
   game's).
 - Farm completion arms the builder to farm immediately and discards a
-  non-food load (`src/tact_bld.cpp:224-230`, `src/act_gath.cpp:59`).
+  non-food load (`src/tact_bld.cpp:224-230`, `src/act_gath.cpp:59`). The
+  build action's timer stays at −1 after the hand-over (§4.7).
+- A Farmer whose Farm is gone takes the closest active Farm with no check
+  that another Farmer works it (`src/taiuaimd.cpp:785`, §4.7).
+- A Villager over an own intact Farm shows the arrow, not the hand
+  (`src/tplayer.cpp:3714`, §4.7).
 - `update_production_queue` step 2 calls `remove_from_production_queue`
   with count −1: the refund loop runs 0 times and the count goes **up** by
   1 per call (`src/t_b_obj.cpp:1024-1027`, `:872-884`). The count is a
@@ -711,7 +834,15 @@ Kept as behaviour (the target is the original game):
   when idle, but neither `unit-ai.md` §5 nor any other spec describes the
   action's states or RNG draws, so the sim does not port it. Whether idle
   animals move, and what they draw from the RNG, is **unknown**; in the sim they
-  stand still until hunted or until they flee.
+  stand still until hunted or until they flee. Of the default tasks only the
+  make action (21, the Farm's) is started (§4.7).
+- **Task requests of gatherers.** A waiting gather or hunt action notifies its
+  unit AI `REQUEST_TASK` (§4.7); only the Farm branch of the civilian AI's
+  answer is ported. Other gatherers stay waiting where the original looks for
+  the closest resource of the group (`closestResourceObject`) or object of the
+  type.
+- **Farm depleted location.** `add_notification_loc` (the last-event spot)
+  is not ported; farmdie.wav is (sounds.md §5).
 - The `fog_update` `rand()` at player creation and placement visibility are
   ported (visibility.md §5, §6).
 - Not ported: the civ effect;

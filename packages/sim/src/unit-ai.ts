@@ -17,7 +17,7 @@ import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { ACTION_REPAIR, aiRepair } from './repair';
 import { newSprite } from './sprites';
-import type { UnitType } from './units';
+import { FARM, type UnitType } from './units';
 import { TILE_VISIBLE } from './visibility';
 
 /** Unit AI actions (`UNIT_AI_ACTION_*`, include/stat_obj.h). */
@@ -50,8 +50,12 @@ export const NOTIFY_ACTION_FAILED = 0x1f9;
 export const NOTIFY_ACTION_COMPLETED = 0x1fa;
 export const NOTIFY_TARGET_INVALID = 0x1fb;
 const NOTIFY_UNDER_ATTACK = 0x201;
+export const NOTIFY_REQUEST_TASK = 0x202;
 const NOTIFY_KILLED = 0x209;
 const NOTIFY_STOPPED_WORKING = 0x2bb;
+
+/** `TribeCivilianUnitAIModule::convertToLOSResourceType` (src/taiuaimd.cpp:546): the groups with a resource type. */
+const LOS_RESOURCE_GROUPS = [7, 0x20, 8, 0x0f, 5, 0x1f, 0x21];
 
 /** `processIdle` / `processNotify` results. */
 const IDLE_NOTHING = 5;
@@ -166,6 +170,9 @@ export interface UnitAI {
   targetY: number;
   targetZ: number;
   lastTarget: number;
+  /** `currentTargetTypeValue` / `lastTargetTypeValue`: the target's object group, -1 none. */
+  targetType: number;
+  lastTargetType: number;
   /** `desiredTargetDistance`. */
   desiredDistance: number;
   attackers: number[];
@@ -232,6 +239,8 @@ export function createUnitAI(ctx: Pick<GameContext, 'rng'>, t: UnitType): UnitAI
     targetY: f32(-1),
     targetZ: f32(-1),
     lastTarget: -1,
+    targetType: -1,
+    lastTargetType: -1,
     desiredDistance: f32(2),
     attackers: [],
     underAttack: false,
@@ -268,13 +277,13 @@ export function aiStateForAction(action: number): [order: number, action: number
   }
 }
 
-/** `setCurrentAction`, `setCurrentOrder`, `setCurrentTarget`, `removeCurrentTarget`. */
-export function setAiState(e: Entity, order: number, action: number, target: number, x: number, y: number, z: number): void {
+/** `setCurrentAction`, `setCurrentOrder`, `setCurrentTarget` (`type` the target's object group, -1 none). */
+export function setAiState(e: Entity, order: number, action: number, target: number, type: number, x: number, y: number, z: number): void {
   const ai = e.ai;
   if (!ai) return;
   ai.order = order;
   setAction(ai, action);
-  setTarget(ai, target, x, y, z);
+  setTarget(ai, target, type, x, y, z);
 }
 
 /** `setCurrentAction(action)` then `setCurrentTarget(target, -1, -1, -1, -1)`, the order kept (a building's train or research). */
@@ -282,7 +291,7 @@ export function setAiAction(e: Entity, action: number, target: number): void {
   const ai = e.ai;
   if (!ai) return;
   setAction(ai, action);
-  setTarget(ai, target, -1, -1, -1);
+  setTarget(ai, target, -1, -1, -1, -1);
 }
 
 function setAction(ai: UnitAI, action: number): void {
@@ -290,9 +299,15 @@ function setAction(ai: UnitAI, action: number): void {
   ai.action = action;
 }
 
-function setTarget(ai: UnitAI, id: number, x: number, y: number, z: number): void {
+/**
+ * `setCurrentTarget(o, t, x, y, z)`. The original's `setCurrentTarget(o, x, y, z)` is this with `t` the object's group
+ * when `o` exists, else the type kept (src/aiuaimod.cpp:2332-2354).
+ */
+function setTarget(ai: UnitAI, id: number, type: number, x: number, y: number, z: number): void {
   ai.lastTarget = ai.target;
+  ai.lastTargetType = ai.targetType;
   ai.target = id;
+  ai.targetType = type;
   ai.targetX = f32(x);
   ai.targetY = f32(y);
   ai.targetZ = f32(z);
@@ -300,7 +315,9 @@ function setTarget(ai: UnitAI, id: number, x: number, y: number, z: number): voi
 
 function removeCurrentTarget(ai: UnitAI): void {
   ai.lastTarget = ai.target;
+  ai.lastTargetType = ai.targetType;
   ai.target = -1;
+  ai.targetType = -1;
   ai.targetX = f32(-1);
   ai.targetY = f32(-1);
   ai.targetZ = f32(-1);
@@ -308,7 +325,7 @@ function removeCurrentTarget(ai: UnitAI): void {
 
 /** The object has a game action at the top of its list (`have_action`). */
 export function hasAction(e: Entity): boolean {
-  return !!(e.work || e.attack || e.mover?.action || e.research);
+  return !!(e.work || e.attack || e.mover?.action || e.research || e.make);
 }
 
 /**
@@ -493,7 +510,7 @@ export function attackObject(ctx: GameContext, e: Entity, targetId: number, unco
   if (!combatAttack(ctx, e, target, unconditional)) return false;
   // `attack` may have transformed a villager; the AI record travels with the object.
   setAction(e.ai!, AI_ACTION_ATTACK);
-  setTarget(e.ai!, targetId, target.x, target.y, target.z);
+  setTarget(e.ai!, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
   return true;
 }
 
@@ -518,7 +535,7 @@ function aiMoveTo(ctx: GameContext, e: Entity, x: number, y: number, z: number, 
   if (!unconditional && ai.action !== -1) return false;
   if (!objectMoveTo(ctx, e, x, y, z, range, unconditional)) return false;
   setAction(ai, AI_ACTION_MOVE);
-  setTarget(ai, -1, x, y, z);
+  setTarget(ai, -1, ai.targetType, x, y, z);
   return true;
 }
 
@@ -757,10 +774,11 @@ function processIdle(ctx: GameContext, e: Entity, doSearch: boolean): number {
 }
 
 /**
- * `closestObject(-1, -1, ANY, -1)` (src/aiuaimod.cpp:1506, unit-ai.md §5.1): over the search results, buckets Gaia to
- * enemy, the first record with the smallest visible-unit distance whose object is not itself and not yet pending removal.
+ * `closestObject(group, -1, state, type)` (src/aiuaimod.cpp:1506, unit-ai.md §5.1): over the search results, buckets
+ * Gaia to enemy, the first record with the smallest visible-unit distance whose object is not itself, not yet pending
+ * removal, and of that group, state and master (-1 any).
  */
-function closestObject(ctx: GameContext, e: Entity): number {
+function closestObject(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1): number {
   const buckets = search(ctx, e);
   let closestId = -1;
   let closest = -1;
@@ -769,6 +787,7 @@ function closestObject(ctx: GameContext, e: Entity): number {
       if (r.id === e.id) continue;
       const o = ctx.entities.get(r.id);
       if (!o || o.state >= ObjectState.PendingRemoval) continue;
+      if ((group !== -1 && typeOf(ctx, o).group !== group) || (type !== -1 && o.type !== type) || (state !== -1 && o.state !== state)) continue;
       if (closestId === -1 || r.distance < closest) {
         closestId = r.id;
         closest = r.distance;
@@ -1025,10 +1044,41 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
       stopObject(ctx, e, true);
       playerNotify(ctx, e.owner, note.type, note.p1);
       return NOTE_DONE;
+    case NOTIFY_REQUEST_TASK:
+      // Of the re-task (src/taiuaimd.cpp:707-867) only a gatherer's whose action was made for a Farm is ported.
+      if (ai.action !== AI_ACTION_GATHER || note.p2 !== FARM) return NOTE_DONE;
+      return farmerRequest(ctx, e);
     default:
-      // Task requests re-task gatherers (economy); not ported yet.
       return NOTE_DONE;
   }
+}
+
+/**
+ * A waiting Farmer's task request (src/taiuaimd.cpp:752-801, economy.md §4.7): with no target type, current or last, it
+ * stops. Otherwise the closest active Farm among its search results, anyone's, is its next target (no check that
+ * another Farmer works it, a decomp-marked bug); with none, a human player's Farmer steps 2.5 tiles off on both axes.
+ * Resource groups (`convertToLOSResourceType`) go to `closestResourceObject`, which is not ported.
+ */
+function farmerRequest(ctx: GameContext, e: Entity): number {
+  const ai = e.ai!;
+  const type = ai.targetType !== -1 ? ai.targetType : ai.lastTargetType;
+  if (type === -1) {
+    removeCurrentTarget(ai);
+    stopObject(ctx, e, true);
+    return NOTE_DONE;
+  }
+  if (LOS_RESOURCE_GROUPS.includes(type)) return NOTE_DONE;
+  const id = closestObject(ctx, e, type, ObjectState.Active, FARM);
+  if (id !== -1) {
+    if (aiTask(ctx, e, id, ACTION_GATHER, AI_ACTION_GATHER)) return NOTE_STOP;
+    removeCurrentTarget(ai);
+    stopObject(ctx, e, true);
+    return NOTE_DONE;
+  }
+  const x = e.x > 5 ? sub32(e.x, 2.5) : add32(e.x, 2.5);
+  const y = e.y > 5 ? sub32(e.y, 2.5) : add32(e.y, 2.5);
+  evasiveMoveTo(ctx, e, x, y, e.z);
+  return NOTE_DONE;
 }
 
 /** `TribeBuildingUnitAIModule::processNotify` (src/taiuaimd.cpp:2238): alert, help call, attacker list. */
@@ -1175,7 +1225,7 @@ function repairObject(ctx: GameContext, e: Entity, targetId: number, uncondition
   const target = ctx.entities.get(targetId);
   if (!target || !aiRepair(ctx, e, target, unconditional)) return false;
   setAction(ai, AI_ACTION_REPAIR);
-  setTarget(ai, targetId, target.x, target.y, target.z);
+  setTarget(ai, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
   return true;
 }
 
@@ -1203,6 +1253,6 @@ function aiTask(ctx: GameContext, e: Entity, targetId: number, kind: number, act
   const target = ctx.entities.get(targetId);
   if (!target || !aiWork(ctx, e, target, kind)) return false;
   setAction(e.ai!, action);
-  setTarget(e.ai!, targetId, target.x, target.y, target.z);
+  setTarget(e.ai!, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
   return true;
 }

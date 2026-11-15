@@ -29,6 +29,8 @@ export const GameSound = {
   AgeDone: 5,
   /** res.wav: any other research completed. */
   ResearchDone: 15,
+  /** farmdie.wav: an own Farm used up (`GAME_NOTIFY_OBJECT_DEPLETED`, src/tribegam.cpp:1728-1733). */
+  FarmDied: 16,
 } as const;
 
 /** Tool, Bronze and Iron Age: their completion plays `GameSound.AgeDone` (src/tribegam.cpp:1753). */

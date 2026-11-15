@@ -7,13 +7,13 @@ import { build } from './buildings';
 import { turnTowards } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
-import type { WorkAction } from './gather';
+import { orderWork, type WorkAction } from './gather';
 import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, endAction, startMoveTo, updateMover } from './movement';
 import { f32, mul32 } from './num';
 import { newSprite } from './sprites';
 import { orderRepair } from './unit-ai';
-import type { Task } from './units';
+import { FARM, type Task } from './units';
 
 export const ACTION_BUILD = 101;
 
@@ -173,11 +173,23 @@ export function updateBuild(ctx: GameContext, e: Entity, a: WorkAction): ActionR
       if (target && turnTowards(ctx, e, target.x, target.y)) setState(ctx, e, a, BUILD_WORKING);
       return ActionResult.Continue;
     case BUILD_WORKING: {
-      // A finished Farm keeps its builder (timer -1, then `do_command(farm)`); the sim has no Farms yet, so every
-      // finished building sends the builder to wait.
+      // A finished Farm keeps its builder (timer -1); once the Farm holds food the builder, waiting to move, is
+      // ordered onto it (`do_command`) and becomes its Farmer (src/tact_bld.cpp:208-230). Leaving the pathing group
+      // there is for computer players only (src/stat_obj.cpp:3254).
+      if (a.timer < 0 && target && target.heldAmount > 0) {
+        e.mover!.waitingToMove = true;
+        orderWork(ctx, e, target, target.x, target.y);
+        return ActionResult.Continue;
+      }
       const task = taskOf(ctx, e, a);
       const work = mul32(mul32(task.workValue1, typeOf(ctx, e).action!.workRate), ctx.deltaSeconds);
-      if (!target || build(ctx, target, work)) setState(ctx, e, a, BUILD_WAITING);
+      if (!target || build(ctx, target, work)) {
+        if (target?.type === FARM) {
+          a.timer = f32(-1);
+          return ActionResult.Continue;
+        }
+        setState(ctx, e, a, BUILD_WAITING);
+      }
       return ActionResult.Continue;
     }
     case BUILD_DONE:

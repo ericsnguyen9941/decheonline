@@ -1,5 +1,5 @@
 import type { Application, Ticker } from 'pixi.js';
-import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, HOUSE, ObjectState, typeOf, type Command, type Entity, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, FARM, HOUSE, ObjectState, typeOf, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import type { MapView } from '../map/map-view';
 import { CommandPanel } from './command-panel';
@@ -476,7 +476,8 @@ export class GameHud {
 
   /**
    * The first row of the object panel for an own building (tpnl_obj.cpp:430-480): construction, research or training
-   * progress in percent, or for a House the population over the room the houses give (capped by the population limit).
+   * progress in percent, for a House the population over the room the houses give (capped by the population limit), or
+   * for a Farm the food it has left: its make action's timer plus what it holds, `(int)(timer + held + 0.5)`.
    */
   private itemRow(e: Entity): { icon: number; text: string } | null {
     const { world } = this.o;
@@ -485,6 +486,10 @@ export class GameHud {
     // `work_status`: the building's action, a research or the unit in training, else the queue's first unit.
     const work = researchStatus(world, e) ?? trainingStatus(world, e);
     if (work) return { icon: ITEM_PROGRESS, text: `${work.progress}%` };
+    if (e.type === FARM) {
+      if (!e.make) return null;
+      return { icon: ITEM_HELD[ATTR_FOOD]!, text: String(Math.trunc(Math.fround(Math.fround(e.make.timer + e.heldAmount) + 0.5))) };
+    }
     if (e.type !== HOUSE) return null;
     const a = this.o.world.attributes[this.o.player]!;
     const population = Math.trunc(a[ATTR_POPULATION]!);

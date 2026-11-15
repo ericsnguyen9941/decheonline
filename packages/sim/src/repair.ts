@@ -295,8 +295,8 @@ export function doRepair(ctx: GameContext, e: Entity, target: Entity): void {
     startRepair(ctx, e, task, target, target.x, target.y);
     repairing = true;
   }
-  if (repairing) setAiState(e, AI_ORDER_REPAIR, AI_ACTION_REPAIR, target.id, target.x, target.y, target.z);
-  else setAiState(e, -1, -1, target.id, target.x, target.y, target.z);
+  if (repairing) setAiState(e, AI_ORDER_REPAIR, AI_ACTION_REPAIR, target.id, tt.group, target.x, target.y, target.z);
+  else setAiState(e, -1, -1, target.id, tt.group, target.x, target.y, target.z);
 }
 
 /**

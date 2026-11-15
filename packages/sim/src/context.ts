@@ -18,4 +18,6 @@ export interface GameContext extends MoveContext, TechContext {
   playerTimeDelta: readonly number[];
   /** Per player, seconds left before another under-attack alert (`TRIBE_Player::update_count`). */
   alertCooldown: number[];
+  /** Per player, `GAME_NOTIFY_OBJECT_DEPLETED` notifications so far (a farm used up); the client plays farmdie.wav. */
+  depleted: number[];
 }

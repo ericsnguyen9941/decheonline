@@ -203,7 +203,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 10;
+  version: 11;
   players: number;
   turn: number;
   granularity: number;
@@ -216,6 +216,7 @@ export interface Snapshot {
   playerTimeDelta: number[];
   playerUpdateTime: number[];
   alertCooldown: number[];
+  depleted: number[];
   deltaSeconds: number;
   entities: { nextId: number; entities: Entity[] };
   queue: QueuedCommand[];
@@ -270,6 +271,8 @@ export class World {
   playerUpdateTime: number[];
   /** `TRIBE_Player::update_count`: seconds before the player hears another under-attack alert. */
   alertCooldown: number[];
+  /** Per player, the `GAME_NOTIFY_OBJECT_DEPLETED` notifications so far (farms used up, economy.md §4.7). */
+  depleted: number[];
   /**
    * `world_time_delta_seconds`. Commands run before a step recomputes it (src/world.cpp:1270-1272), so they
    * see the previous step's value: it is state, snapshotted and hashed.
@@ -319,6 +322,7 @@ export class World {
     this.playerTimeDelta = new Array<number>(this.players).fill(0);
     this.playerUpdateTime = new Array<number>(this.players).fill(0);
     this.alertCooldown = new Array<number>(this.players).fill(0);
+    this.depleted = new Array<number>(this.players).fill(0);
     this.civs = Array.from({ length: this.players }, (_, p) => options.civs?.[p] ?? (p === 0 ? CIV_GAIA : CIV_EGYPTIAN));
     this.attributes = this.civs.map((c) => [...CIVS[c]!.resources]);
     this.awake = Array.from({ length: this.players }, () => []);
@@ -491,6 +495,7 @@ export class World {
       playerTurn: this.playerTurn,
       playerTimeDelta: this.playerTimeDelta,
       alertCooldown: this.alertCooldown,
+      depleted: this.depleted,
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
@@ -747,7 +752,7 @@ export class World {
         e.attack = null;
         orderMove(this.gameContext(), e, tx, ty);
       }
-      setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, tx, ty, 0);
+      setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, -1, tx, ty, 0);
     });
   }
 
@@ -913,6 +918,7 @@ export class World {
     for (const d of this.playerTimeDelta) h.u32(d);
     for (const t of this.playerUpdateTime) h.f32(t);
     for (const c of this.alertCooldown) h.u32(c);
+    for (const c of this.depleted) h.u32(c);
     h.u32(this.entities.nextEntityId).u32(this.entities.size);
     for (const e of this.entities.all()) hashValue(h, e);
     hashValue(h, this.attributes);
@@ -947,7 +953,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 10,
+      version: 11,
       players: this.players,
       turn: this.turn,
       granularity: this.granularity,
@@ -960,6 +966,7 @@ export class World {
       playerTimeDelta: [...this.playerTimeDelta],
       playerUpdateTime: [...this.playerUpdateTime],
       alertCooldown: [...this.alertCooldown],
+      depleted: [...this.depleted],
       deltaSeconds: this.deltaSeconds,
       entities: this.entities.toJSON(),
       queue: this.queue.toJSON(),
@@ -979,7 +986,7 @@ export class World {
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 10) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 11) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -998,6 +1005,7 @@ export class World {
     w.playerTimeDelta = [...s.playerTimeDelta];
     w.playerUpdateTime = [...s.playerUpdateTime];
     w.alertCooldown = [...s.alertCooldown];
+    w.depleted = [...s.depleted];
     w.deltaSeconds = s.deltaSeconds;
     w.entities = EntityStore.fromJSON(s.entities);
     w.queue = CommandQueue.fromJSON(s.queue);

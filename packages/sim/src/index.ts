@@ -20,6 +20,7 @@ export * from './buildings';
 export * from './masters';
 export * from './techs';
 export * from './research';
+export * from './make';
 export * from './objects';
 export * from './commands';
 export * from './hash';

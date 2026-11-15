@@ -3,6 +3,7 @@ import type { AttackAction, MissileAction } from './combat';
 import type { WorkAction } from './gather';
 import { copyMover, type Mover } from './movement';
 import { f32 } from './num';
+import type { MakeAction } from './make';
 import type { ResearchAction } from './research';
 import type { ActiveSprite } from './sprites';
 import type { UnitAI } from './unit-ai';
@@ -60,6 +61,8 @@ export interface Entity {
   train?: TrainAction | null;
   /** Buildings: a research, the building's only action while it lasts (`TRIBE_Action_Make_Tech`). */
   research?: ResearchAction | null;
+  /** A Farm's food production (`RGE_Action_Make`), its default task while it is active. */
+  make?: MakeAction | null;
   /** Combat objects: the unified visibility cell of its tile at its last update (`Unified_Map_Value`, visibility.md §4.1). */
   sighted?: number;
   /** Combat objects: the unit AI (`unitAIValue`), absent for groups without one. */
@@ -143,6 +146,7 @@ function copyEntity(e: Entity): Entity {
   if (e.queue) copy.queue = e.queue.map((r) => ({ ...r }));
   if (e.train) copy.train = { ...e.train };
   if (e.research) copy.research = { ...e.research };
+  if (e.make) copy.make = { ...e.make };
   if (e.ai) {
     copy.ai = {
       ...e.ai,

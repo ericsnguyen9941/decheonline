@@ -64,6 +64,10 @@ export interface Task {
   /** `work_sprite2`. */
   working: SpriteInfo | null;
   carrying: SpriteInfo | null;
+  /** `is_default`: the task an idle, active object starts by itself (`default_task`, the first such). */
+  isDefault: number;
+  /** `work_flag` (the reader's `gatherType`); for a make task, 0 puts the work into the object itself. */
+  workFlag: number;
 }
 
 export interface ActionInfo {
@@ -266,6 +270,8 @@ function task(k: readonly (number | SimSprite | null)[]): Task {
     proceeding: s(14),
     working: s(15),
     carrying: s(16),
+    isDefault: n(17),
+    workFlag: n(18),
   };
 }
 

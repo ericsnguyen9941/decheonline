@@ -2,13 +2,14 @@
  * One object's update in its owner's list (economy.md §3, combat.md §5): the `RGE_Static_Object` →
  * `RGE_Animated_Object` → `RGE_Action_Object` → `RGE_Combat_Object` chain. Dying, death animation, resource decay,
  * removal and the spawned dead object live here; actions are gather/hunt/build (`gather.ts`), an attack, a plain walk,
- * or a missile; the unit AI (`unit-ai.ts`) runs last. Buildings wrap the chain with construction and their production queue (`buildings.ts`).
+ * a missile, or a Farm's food production (`make.ts`); the unit AI (`unit-ai.ts`) runs last. Buildings wrap the chain with construction and their production queue (`buildings.ts`).
  */
 import { emptyQueue, giveBuiltStorages, isBuilding, updateConstruction, updateQueue } from './buildings';
 import { updateAttack, updateMissile } from './combat';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, updateWork } from './gather';
+import { defaultMakeTask, startMake, updateMake } from './make';
 import { typeOf } from './masters';
 import { ActionResult, endAction, updateMover } from './movement';
 import { add32, f32, mul32, sub32 } from './num';
@@ -116,6 +117,12 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   } else if (e.mover?.action) {
     const r = updateMover(ctx, e);
     if (r === ActionResult.Failed || r === ActionResult.Remove) endAction(e.mover);
+  } else if (e.make) {
+    updateMake(ctx, e, e.make);
+  } else if (e.state === ObjectState.Active) {
+    // An active object with no action starts its default task, and does no more this step (src/act_obj.cpp:403-407).
+    const task = defaultMakeTask(t);
+    if (task !== -1) startMake(ctx, e, task);
   }
   // `RGE_Combat_Object::update` refreshes the object's visible-unit records, then ends with the unit AI, on the owner's
   // turn only, with the owner's accumulated time.

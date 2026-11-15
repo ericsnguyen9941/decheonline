@@ -1,5 +1,5 @@
 import type { Application } from 'pixi.js';
-import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, MARKET, TOWN_CENTER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { SoundPlayer } from './audio/sound-player';
@@ -172,6 +172,12 @@ export interface MultiplayerOptions {
    * attack (and its flare) without building an Archery Range first. Both clients must ask for the same N.
    */
   bowmen?: number;
+  /**
+   * Debug only (`?debug=net&market=1`): every player starts with a built Market left of its Town Center, so its Farm is
+   * enabled (tech 26) without the Tool Age first. Placed without a placement check: for the test map. Both clients must
+   * ask for it.
+   */
+  market?: boolean;
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
   /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
@@ -186,7 +192,7 @@ const BOWMAN = 4;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, testMap, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, testMap, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -253,6 +259,12 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       for (let p = 1; p < game.world.players; p++) {
         const villager = [...game.world.entities.ofPlayer(p)].find((e) => e.type === VILLAGER)!;
         for (let i = 0; i < bowmen; i++) game.world.createUnit({ owner: p, type: BOWMAN, x: villager.x + i, y: villager.y - 1 });
+      }
+    }
+    if (debug && market) {
+      for (let p = 1; p < game.world.players; p++) {
+        const tc = [...game.world.entities.ofPlayer(p)].find((e) => e.type === TOWN_CENTER);
+        if (tc) game.world.createUnit({ owner: p, type: MARKET, x: tc.x - 4, y: tc.y });
       }
     }
     setGameVisible(true);
