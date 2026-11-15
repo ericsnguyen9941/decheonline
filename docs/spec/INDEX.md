@@ -136,11 +136,11 @@ Spec: [support-actions.md](support-actions.md).
 | `src/t_c_obj.cpp` | 38/0/1/0 | `TRIBE_Combat_Object::convert` :525, `heal` :552, `repair` :579, `trade` :638 (all [M]) | R3 |
 | `src/tact_art.cpp`, `tact_dar.cpp`, `tact_wnd.cpp` | 11/0/0/0, 8/0/0/0, 6/0/0/0 | artifact capture (action 107: [victory.md](victory.md) §10.2), discovery, wonder (action 120: [victory.md](victory.md) §8, `wonder.ts`) | R3 |
 
-## Naval: Dock, boats, fishing, ship AI, boat repair
+## Naval: Dock, boats, fishing, ship AI, boat repair, transport
 
 Spec: [naval.md](naval.md) (zone maps and their uses §2, Dock placement and
 boat spawn §3, war ships §4, fishing and the fishing ship AI §5, boat repair
-§6).
+§6, transport: boarding, the Transport action, drops, Unload §7).
 
 | file | entry points | spec |
 | --- | --- | --- |
@@ -149,6 +149,13 @@ boat spawn §3, war ships §4, fishing and the fishing ship AI §5, boat repair
 | `src/taiuaimd.cpp` | fishing ship unit AI :1510-1641 | naval.md §5.2 |
 | `src/tact_rep.cpp` | `TRIBE_Action_Repair::meet_target` :354 | naval.md §6.1 |
 | `src/t_c_obj.cpp` | `useSameZoneDropsite` :685, `heal(float)` :982 | naval.md §2.2, §6.2 |
+| `src/act_entr.cpp` | `RGE_Action_Enter` (action 3) | naval.md §7.2 |
+| `src/act_tran.cpp` | `RGE_Action_Transport` (action 12), `next_to_drop_off_terrain` :193 | naval.md §7.4 |
+| `src/stat_obj.cpp` | `enter_obj` :2074, `exit_obj` :2097, `drop_held_objects` :2417, `find_drop_location` :2474, inside state copy :1233 | naval.md §7.3, §7.5 |
+| `src/com_obj.cpp` | `unload` :821, `stopAction` :843 | naval.md §7.6 |
+| `src/tcommand.cpp` | `do_command_unload` :513 | naval.md §7.6 |
+| `src/aiuaimod.cpp` | `UnitAIModule::order` :1000 (an immediate order stops first), `unload` :1980 | naval.md §7.6 |
+| `src/taiuaimd.cpp` | transport ship unit AI :1416-1480 | naval.md §7.7 |
 
 ## Game setup (lobby)
 

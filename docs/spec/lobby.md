@@ -229,14 +229,13 @@ the settings in the room panel, not in a separate dialog.
 
 Offered values (only what the sim can play):
 
-- Map types: Inland 3, Highland 4, Continental 5, Hill Country 7: the
-  Villager's terrain table joins the two Town Centers (4-neighbour flood
-  fill over the generated terrain) on every sampled 2-player map, 128 to 208
-  per type (20 seeds at each of the six sizes, more on Tiny, Medium, Large).
-  Not offered: Small Islands 0 and Large Islands 1 (separate in every
-  sample), Narrows 8 (separate in 16 of 168), Coastal 2 (1 of 168) and
-  Mediterranean 6 (1 of 208; both on Tiny). Those need the Dock and boats
-  (Fishing Boat, transport), which the sim does not have.
+- Map types: all nine, in the original's order (Small Islands 0 .. Narrows
+  8). Small Islands and Large Islands separate the two start positions on
+  every sampled 2-player map, Narrows on 16 of 168, Coastal and Mediterranean
+  rarely (Tiny): the Dock, its boats and the Transport Boat (naval.md §7)
+  carry a player across. A seeded 2-player game on each water type starts
+  both players with their Town Center and Villagers in one land zone that
+  has a beach (`transport.test.ts`).
 - Map sizes: all six. Victory: Standard, Conquest, Time Limit, Score with
   every amount (`victory.md` §15: wonder, relic and ruin wins are not
   ported, so Standard plays as Conquest).

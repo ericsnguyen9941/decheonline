@@ -185,4 +185,4 @@ original. The client's button, cursor and click mode are not ported yet
 
 | command | original | why |
 | --- | --- | --- |
-| Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | no transport boats in the sim |
+| Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | ported in the sim (command `unload`, naval.md §7.6); the client's button is not (C5) |

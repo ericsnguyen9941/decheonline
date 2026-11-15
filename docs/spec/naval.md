@@ -1,4 +1,4 @@
-# Naval: zone maps, the Dock, fishing, war ships, boat repair
+# Naval: zone maps, the Dock, fishing, war ships, boat repair, transport
 
 Source: aoe1-decomp @ `6d6d8b1` (July 1998 RoR beta; see `README.md` for the
 version caveat and reference format). Numbers are the 1.0a `data2/empires.dat`'s
@@ -423,8 +423,23 @@ drop-site zone filter (`gather.ts`), the 3-tile arrival allowance
 Fishing Boat's task pass, the fishing ship AI (`unit-ai.ts`
 `fishingShipNotify`), boat repair and its payment (`repair.ts`), the
 `command_flag` (`world.ts` `countCommand`). Tests `naval.test.ts`; replay
-`sampleNavalReplay` (in the determinism e2e).
+`sampleNavalReplay` (in the determinism e2e). Transport (§7, `transport.ts`):
+the Transport Boat and Ship, the enter pass of the task list (`gather.ts`
+`targetTask`, before repair) and the terrain pass (`terrainTask`), the Enter
+action, `enter_obj`/`exit_obj` (`Entity.inside`, `Entity.cargo`; a passenger
+is skipped by `objectsInTiles`, the blast list, the artifact count, its own
+sight and records, and its actions; `objects.ts` copies the boat's state into
+it, `world.ts` `removeObject` exits it), the Transport action as the default
+task, the drop (`drop_held_objects`, `find_drop_location`), the attack's
+inside check (`combat.ts`), the `unload` command (`commands.ts`, `world.ts`
+`doCommandUnload`, `unit-ai.ts` `orderUnload`/AI order 0x2D1), the transport
+ship AI (`transportShipNotify`), and the water maps in the lobby (lobby.md
+§6). Tests `transport.test.ts`; replay `sampleTransportReplay` (in the
+determinism e2e).
 
-Not ported: the slope check (placement return 3, no Dock needs it), transport
-and trade boats and their AI, water maps in the lobby, computer-player
-branches.
+Not ported: the slope check (placement return 3, no Dock needs it), trade
+boats and their AI, computer-player branches (the Enter constructor's
+computer branch, unload without the stop), the unit AI's ENTER/TRANSPORT
+orders in `processOrder` (a re-issued Enter order is dropped), the passengers'
+own actions' pending-removal target clearing while inside. The client (C5)
+does not yet hide passengers (`Entity.inside`), send `unload`, or show cargo.

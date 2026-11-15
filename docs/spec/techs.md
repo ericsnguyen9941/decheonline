@@ -718,12 +718,13 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
   238) with its boats: Fishing Boat 13 / Fishing Ship 14 (tech 4), Scout
   Ship 19 with War Galley 20 (5) and Trireme 21 (7) copied into it,
   Catapult Trireme 250 (9) with Juggernaught 277 (25) copied into it, Fire
-  Galley 360 (118) and the boat stone 368, so the Dock techs 3-9, 25, 118 and
-  the civ ship bonuses act (naval.md §3.3; Merchant Ship 6 and Heavy
-  Transport 8 copy into the trade and transport boats, not in the table,
-  and do nothing). Not in the table yet: the Transport 17/18 and the Trade
-  Boat 15/16. Blast and melee splash
+  Galley 360 (118), the boat stone 368 and Transport Boat 17 with Transport
+  Ship 18 (8, Heavy Transport) copied into it (`obj_max` 5 → 10, naval.md
+  §7.1), so the Dock techs 3-5, 7-9, 25, 118 and the civ ship bonuses act
+  (naval.md §3.3; Merchant Ship 6 copies into the trade boat, not in the
+  table, and does nothing). Not in the table yet: the Trade Boat 15/16.
+  Modify code 2 (`obj_max`) is not handled; no 1.0a tech uses it. Blast and melee splash
   (combat.md §4.3-§4.4) are ported. Tests: `land-units.test.ts` (training,
   the upgrade techs), `siege.test.ts` (Alchemy, Engineering, Ballistics),
   `priests.test.ts` (the Temple techs), `naval.test.ts` (the Dock techs,
-  the civ ship bonuses).
+  the civ ship bonuses), `transport.test.ts` (Heavy Transport).
