@@ -279,6 +279,14 @@ open, from the decomp:
 - A converted object's private master (`Entity.ownMaster`) is skipped by
   the owner's later tech effects and freed by a transform; it is in the
   snapshot and the hash.
+- Client (hud.md "Command buttons"): the Priest's Heal and Convert buttons
+  arm an order mode whose click sends `work` on the target its task list
+  gives action 105 or 104 (`targetActionType` in `gather.ts`); a right click
+  does the same. The ring cursor (mcursors facet 5) shows over such a
+  target. On a conversion the old owner hears convwarn (game sound 13) and
+  loses the object from its selection and numbered groups
+  (`unselect_one_object`); the colour follows the new owner. Test:
+  `e2e/tests/siege-priest.spec.ts`.
 
 Tests: `packages/sim/src/priests.test.ts` (roll vectors §4.4 and §10.1,
 range, rejuvenation, Monotheism, buildings, Temple, Martyrdom, owner

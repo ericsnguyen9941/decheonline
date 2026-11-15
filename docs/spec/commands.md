@@ -113,8 +113,8 @@ are ported: naval.md §6.
 
 **Sender** (`TRIBE_Player::command_attack_ground(x, y)`, `src/tplayer.cpp:963`):
 the selected objects that are active, the player's own, of select level 4 or
-more and of `unit_level` 4 (the dat's combat level; the Stone Thrower line,
-35/36/280, has it) and of master type 40 or more but not a tree
+more and of `unit_level` 4 (the dat's `interface_kind`, the pack's `level`, not a
+combat value; the Stone Thrower line, 35/36/280, has it) and of master type 40 or more but not a tree
 (`get_selected_objects_to_command(.., 4, -1, -1, 4)`, `src/player.cpp:1648`).
 The first plays its command sound. `TRIBE_Command::command_attack_ground`
 (`src/tcommand.cpp:852`) packs `TRIBE_COMMAND_ID_ATTACK_GROUND`, the unit
@@ -178,8 +178,8 @@ Ours: `{ type: 'attack-ground', units, x, y }` (`packages/sim/src/commands.ts`),
 another player than the sender, and objects not active, are skipped (the
 sender's own filter); objects without a mover or a combat block are skipped,
 as `combatAttack` does. The receiver does not check `unit_level`, as the
-original. The client's button, cursor and click mode are not ported yet
-(hud.md). Tests: `packages/sim/src/siege.test.ts` "commands.md §5".
+original. The client's button and click mode: hud.md "Command buttons"
+(there is no mode cursor in the original). Tests: `packages/sim/src/siege.test.ts` "commands.md §5".
 
 ## 6. Not ported
 

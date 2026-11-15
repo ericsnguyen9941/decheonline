@@ -131,8 +131,11 @@ key-down. Sounds triggered before that are logged but not played.
 - Terrain ambient sounds (`TRIBE_Screen_Game::handle_terrain_sound`, src/scr_game.cpp:3570): every 20 s, a
   terrain sound from `sound/*.wav` plays for at most 6 s.
 - Music (src/music.cpp): CD audio tracks first (`MCI_DEVTYPE_CD_AUDIO`), else `sound/music%d.mid`.
-- Chat received (2) plays for chat (docs/spec/chat.md §3), a late turn and a desync; tribute (4) for a tribute received (docs/spec/diplomacy.md §7.4). Can't do (3), player killed or dropped (6, 7),
-  conversion (13, 14): their features or notifications are not in the client yet.
+- Chat received (2) plays for chat (docs/spec/chat.md §3), a late turn and a desync; tribute (4) for a tribute received (docs/spec/diplomacy.md §7.4). Can't do (3), player killed or dropped (6, 7):
+  their features or notifications are not in the client yet.
+- Conversion: convwarn (13) plays for the old owner when another player converts its object
+  (`GAME_NOTIFY_CONVERSION_SUCCEEDED`, src/tact_cnv.cpp:321, :380; `game-sounds.ts` event `converted`; an artifact
+  changing hands is not a conversion). convdone (14) is never played by 1.0a.
 - Gather and drop-off sounds (`resourceGatheringSoundId`, `resourceDepositSoundId` of a task): -1 for every 1.0a
   task.
 

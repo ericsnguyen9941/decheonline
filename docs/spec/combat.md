@@ -248,7 +248,7 @@ attacks (right-click resolved through the task list) use the task's
 by `weapon_range`, and if that is 0 too by **0.4** (`src/act_atak.cpp:82-87`,
 N constructor). The object constructor leaves the latched target position at
 (−1, −1, −1) (`src/act_atak.cpp:55-57`), so the first `ready_to_attack`
-measures the target where it is (`startAttack`; `attackWork` still latches,
+measures the target where it is (`startAttack` and `attackWork` alike;
 commands.md §3). A unit whose order is STAND_GROUND never moves to its target
 (`:168-187`, `:499-530`; commands.md §3).
 
