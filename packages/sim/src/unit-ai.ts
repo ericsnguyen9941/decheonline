@@ -2,7 +2,8 @@
  * The per-unit AI (`UnitAIModule` and the TRIBE subclasses, docs/spec/unit-ai.md) for human and Gaia owners: the
  * idle-timeout draws at creation, the update on the owner's player turn, the notify queue (attacked, action completed /
  * failed / target invalid), the order queue, the idle scan for soldiers (`bestUnitToAttack`), the reaction to being
- * attacked (soldiers fight back, villagers flee player units and fight animals) and `askForHelp`. Computer-player
+ * attacked (soldiers fight back, villagers flee player units and fight animals), `askForHelp` and the Gaia animals
+ * (hunted animals run, the elephant fights back, the lion hunts what it sees; unit-ai.md §5). Computer-player
  * branches are left out (unit-ai.md §1.4). Fog of war is not ported: every combat object counts as visible, at its
  * current tile, and the visible-unit records are walked in id order.
  */
@@ -87,6 +88,8 @@ const TOWERS = [79, 199, 69, 278, 383, 380];
 const SWITCH_EXEMPT_TOWERS = [79, 199, 69];
 /** Groups that never answer `askForHelp`. */
 const NO_HELP_GROUPS = [1, 3, 4, 21, 18, 20, 27];
+/** `g_ai_evasive_distance_scale` (src/game_globals.cpp:368). */
+const EVASIVE_DISTANCE_SCALE = 3;
 const NO_AI_GROUPS = [5, 7, 8, 11, 14, 15, 16, 29, 30, 31, 32, 33];
 
 /** Important-object groups per class, in scan order (unit-ai.md §3.2). */
@@ -740,10 +743,82 @@ function processIdle(ctx: GameContext, e: Entity, doSearch: boolean): number {
       const id = bestUnitToAttack(ctx, e, true, false);
       return id !== -1 && attackObject(ctx, e, id, true) ? IDLE_TASKED : IDLE_NOTHING;
     }
+    case AiClass.Hunted:
+      return huntedIdle(ctx, e);
+    case AiClass.Lion:
+      return lionIdle(ctx, e);
     default:
-      // Civilians, buildings, priests and ships do nothing for a human; the animal classes are not ported yet.
+      // Civilians, buildings, priests and ships do nothing for a human; the elephant never acts when idle.
       return IDLE_NOTHING;
   }
+}
+
+/**
+ * `closestObject(-1, -1, ANY, -1)` (src/aiuaimod.cpp:1506, unit-ai.md §5.1): over the search results, buckets Gaia to
+ * enemy, the first record with the smallest visible-unit distance whose object is not itself and not yet pending removal.
+ */
+function closestObject(ctx: GameContext, e: Entity): number {
+  const buckets = search(ctx, e);
+  let closestId = -1;
+  let closest = -1;
+  for (const bucket of buckets) {
+    for (const r of bucket) {
+      if (r.id === e.id) continue;
+      const o = ctx.entities.get(r.id);
+      if (!o || o.state >= ObjectState.PendingRemoval) continue;
+      if (closestId === -1 || r.distance < closest) {
+        closestId = r.id;
+        closest = r.distance;
+      }
+    }
+  }
+  return closestId;
+}
+
+/** `closestAttacker` (src/aiuaimod.cpp:1475): the recorded attacker nearest by `distance_to_object`, first on a tie. */
+function closestAttacker(ctx: GameContext, e: Entity): number {
+  let closestId = -1;
+  let closest = 0;
+  for (const id of e.ai!.attackers) {
+    const a = ctx.entities.get(id);
+    if (!a) continue;
+    const d = distanceToObject(ctx, e, a);
+    if (closestId === -1 || d < closest) {
+      closestId = id;
+      closest = d;
+    }
+  }
+  return closestId;
+}
+
+/** `TribeHuntedAnimalUnitAIModule::processIdle` (src/taiuaimd.cpp:89): run 3 × maximum speed away from the closest object. */
+function huntedIdle(ctx: GameContext, e: Entity): number {
+  const target = ctx.entities.get(closestObject(ctx, e));
+  if (!target) return IDLE_NOTHING;
+  const distance = mul32(maximumSpeed(e, typeOf(ctx, e)), EVASIVE_DISTANCE_SCALE);
+  const dx = sub32(target.x, e.x);
+  const dy = sub32(target.y, e.y);
+  const length = sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));
+  const x = add32(-mul32(div32(dx, length), distance), e.x);
+  const y = add32(-mul32(div32(dy, length), distance), e.y);
+  evasiveMoveTo(ctx, e, x, y, e.z);
+  return IDLE_TASKED;
+}
+
+/**
+ * `TribeLionUnitAIModule::processIdle` (src/taiuaimd.cpp:320, unit-ai.md §5.3): a new 6 s timeout (one draw), then attack
+ * the closest object within 2 × LOS (the multiplayer branch).
+ */
+function lionIdle(ctx: GameContext, e: Entity): number {
+  const ai = e.ai!;
+  ai.idleTimeout = 6000;
+  adjustIdleTimeout(ctx, ai);
+  const id = closestObject(ctx, e);
+  const target = ctx.entities.get(id);
+  if (!target) return IDLE_NOTHING;
+  if (distanceToObject(ctx, e, target) > mul32(typeOf(ctx, e).los, 2)) return IDLE_NOTHING;
+  attackObject(ctx, e, id, false);
+  return IDLE_TASKED;
 }
 
 /** Remember the attacker (`attackingUnits`) and raise the under-attack flag. */
@@ -771,10 +846,49 @@ function processNotify(ctx: GameContext, e: Entity, note: Note): number {
       return civilianNotify(ctx, e, note);
     case AiClass.Building:
       return buildingNotify(ctx, e, note);
+    case AiClass.Hunted:
+    case AiClass.Elephant:
+      return animalNotify(ctx, e, note);
+    case AiClass.Lion:
+      return lionNotify(ctx, e, note);
     default:
-      // The animal, ship and artifact reactions are not ported yet.
+      // The ship and artifact reactions are not ported yet.
       return NOTE_DONE;
   }
+}
+
+/**
+ * `TribeHuntedAnimalUnitAIModule::processNotify` and `TribeElephantUnitAIModule::processNotify` (src/taiuaimd.cpp:39, :180;
+ * unit-ai.md §5.1, §5.2): when hit, record the attacker without an alert or a help call, then a hunted animal runs from
+ * every attacker and an elephant attacks the closest one. Every other note takes the base path.
+ */
+function animalNotify(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  if (note.type !== NOTIFY_ATTACKED) return baseNotify(ctx, e, note);
+  if (note.p2 <= 0) {
+    ai.notes = [];
+    return NOTE_DIED;
+  }
+  recordAttacker(ai, note.caller);
+  if (ai.kind === AiClass.Hunted) runAwayFromAttackers(ctx, e);
+  else attackObject(ctx, e, closestAttacker(ctx, e), false);
+  return NOTE_STOP;
+}
+
+/**
+ * `TribeLionUnitAIModule::processNotify` (src/taiuaimd.cpp:263, unit-ai.md §5.3): after its own attack completes, rest 25 s
+ * (the multiplayer timeout, one draw) and stop; then, as for every note, the base reaction. The 0x1FC branch is not
+ * ported: the sim's move action never sends 0x1FC.
+ */
+function lionNotify(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  if (note.type === NOTIFY_ACTION_COMPLETED && note.p1 === AI_ACTION_ATTACK) {
+    ai.idleTimeout = 25000;
+    adjustIdleTimeout(ctx, ai);
+    removeCurrentTarget(ai);
+    stopObject(ctx, e, true);
+  }
+  return baseNotify(ctx, e, note);
 }
 
 /** `UnitAIModule::processNotify` (src/aiuaimod.cpp:2754, unit-ai.md §4.2, §4.6). */

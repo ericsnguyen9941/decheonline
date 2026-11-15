@@ -512,6 +512,17 @@ Gaia's units are updated on Gaia's AI turn (§1.3). Gaia's visibility and
 diplomacy buckets (which bucket player units land in for a Gaia searcher)
 were not checked: **unverified**.
 
+**Port** (`packages/sim/src/unit-ai.ts`): `huntedIdle`, `lionIdle`,
+`animalNotify` (hunted and elephant), `lionNotify`, `closestObject`,
+`closestAttacker`; vectors in `packages/sim/src/animals.test.ts`. The sim
+tables carry Gazelle 65, Elephant 48, Lion 126 and Alligator 1 (ROOTS in
+`tools/gen-sim-tables.mjs`). Not ported: the predator and lion `0x1FC`
+branches (`src/taiuaimd.cpp:147-172`, `:265-287`), because the sim's move
+action never sends `0x1FC` (the base `:3181` branch is not ported either);
+the `0x20F` early return of the hunted and elephant modules (nothing sends
+it). The hunted and elephant ATTACKED reactions raise no alert and call no
+help (no `notifyCommander`, no `askForHelp`), unlike §4.2.
+
 ### 5.1 Gazelle (hunted; also Horse 157 and Gazelle_King 384)
 
 - Idle every ~4 s (3000..4999 ms): `closestObject(any group, any relation)`
