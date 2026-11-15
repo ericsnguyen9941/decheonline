@@ -25,7 +25,8 @@
     "test": "npm run test --workspaces --if-present",
     "test:golden": "npm run test:golden --workspaces --if-present",
     "test:e2e": "cd e2e && playwright test",
-    "test:e2e:latency": "cd e2e && playwright test -c playwright.latency.config.ts"
+    "test:e2e:latency": "cd e2e && playwright test -c playwright.latency.config.ts",
+    "test:soak": "cd e2e && playwright test -c playwright.soak.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

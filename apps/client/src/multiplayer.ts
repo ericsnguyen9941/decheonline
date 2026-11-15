@@ -83,6 +83,12 @@ export interface NetDebug {
   score(player?: number): Score;
   /** Break the socket as a network fault would (close code 4000) and stay away `holdMs` before rejoining. */
   dropLink(holdMs: number): void;
+  /** Queue any command from this client, as the soak test's bot does. */
+  issue(command: Command): void;
+  /** Sim clock, ms of game time (`World.worldTime`). */
+  gameTime(): number;
+  /** The relay's report that the two games' hashes differ at `turn`; null while they agree. `hashes` is by slot. */
+  desync(): { turn: number; hashes: number[] } | null;
 }
 
 export interface DebugNet {
@@ -184,6 +190,11 @@ export interface MultiplayerOptions {
   testMap?: boolean;
   /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
   seed?: number;
+  /**
+   * Debug only (`?debug=net&perturb=N`): after turn N this client changes its own food by one, so the two games
+   * disagree from turn N + 1: the soak test's check that a desync is caught. Only one client passes it.
+   */
+  perturb?: number;
   /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
   setGameVisible(visible: boolean): void;
 }
@@ -196,7 +207,7 @@ const BOWMAN = 4;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, testMap, seed, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -295,6 +306,13 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       // After the end of the game the other player leaving changes nothing: this one stays until Menu/Quit Game.
     };
     if (debug) panel = debugPanel(host, game, link, player, () => units, () => hud, () => sounds, frames);
+    if (debug && perturb !== undefined) {
+      const shown = game.onTurn;
+      game.onTurn = (turn, hash) => {
+        shown(turn, hash);
+        if (turn === perturb) game.world.attributes[player]![ATTR_FOOD]! += 1;
+      };
+    }
     void createAssetProvider().then(async (provider) => {
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
@@ -385,6 +403,12 @@ function debugPanel(
   const issue = (x: number, y: number) => game.issue({ type: 'test', x, y });
   button.addEventListener('click', () => issue(10 + n++, 20));
   const stock = new Map<number, Resources[]>();
+  let desync: { turn: number; hashes: number[] } | null = null;
+  const shownDesync = game.onDesync;
+  game.onDesync = (turn, hashes) => {
+    desync = { turn, hashes };
+    shownDesync(turn, hashes);
+  };
   game.onTurn = (turn, hash) => {
     status.textContent = `turn ${turn} hash ${hash}`;
     const n = net();
@@ -475,6 +499,9 @@ function debugPanel(
     gameResult: () => game.world.gameResult(),
     score: (p = player) => game.world.score(p),
     dropLink: (ms) => link.drop?.(ms),
+    issue: (command) => game.issue(command),
+    gameTime: () => game.world.worldTime,
+    desync: () => desync,
   };
   return panel;
 }

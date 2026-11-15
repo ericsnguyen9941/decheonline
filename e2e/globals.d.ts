@@ -60,6 +60,9 @@ interface Window {
     gameResult(): { endCondition: number; winners: number[]; status: number[] } | null;
     score(player?: number): { total: number; military: number; economy: number; religion: number; technology: number; survival: number; wonder: number };
     dropLink(holdMs: number): void;
+    issue(command: { type: string; [field: string]: unknown }): void;
+    gameTime(): number;
+    desync(): { turn: number; hashes: number[] } | null;
   };
 }
 

@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     market: params.get('market') === '1',
     testMap: params.get('map') === 'test',
     seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
+    perturb: params.has('perturb') && Number.isInteger(Number(params.get('perturb'))) ? Number(params.get('perturb')) : undefined,
     setGameVisible,
   });
 }
