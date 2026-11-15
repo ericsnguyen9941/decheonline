@@ -12,6 +12,7 @@ import type { MapView } from '../map/map-view';
 import { composeGraphic, GROUND_LAYER, splitsShadow, type PartSet } from './composite';
 import { facingFrame } from './facing';
 import { Doppelgangers, fogDraw, type Doppelganger } from './fog-objects';
+import { groupKey } from './group-keys';
 import { ATTACK_CURSOR_FRAME, canAttack, isAttackable } from './mouse-actions';
 import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
 import { alignBuilding } from './placement';
@@ -250,6 +251,37 @@ export class UnitLayer {
     for (const id of this.selected) this.groups.delete(id);
   }
 
+  /**
+   * `group_objects(id)` for a numbered group (Ctrl+digit): the group's old members leave it, and the selected own
+   * objects join it, leaving any group they were in (an object has one `selected_group`). Nothing selected: nothing happens.
+   */
+  assignGroup(id: number): void {
+    if (this.selected.size === 0) return;
+    for (const [obj, g] of this.groups) if (g === id) this.groups.delete(obj);
+    for (const obj of this.selected) if (this.o.world.entities.get(obj)?.owner === this.o.player) this.groups.set(obj, id);
+  }
+
+  /**
+   * `select_group(id)` (digit; `command_select_group`): the objects of group `id` join the selection, `selected_obj`
+   * being the last of them, and the first one plays its selection sound. Without `add` the selection is emptied first
+   * (even when the group is empty); with `centre` the view then scrolls to `selected_obj` (Alt+digit).
+   */
+  recallGroup(id: number, add: boolean, centre: boolean): void {
+    if (!add) this.unselect();
+    let first = true;
+    for (const e of this.o.world.entities.ofPlayer(this.o.player)) {
+      if (this.groups.get(e.id) !== id || e.state > ObjectState.Active || this.selected.has(e.id)) continue;
+      if (!this.selectOne(e.id)) break;
+      if (first) this.o.sounds?.selected(e);
+      first = false;
+    }
+    const at = this.primary === null ? undefined : this.o.world.entities.get(this.primary);
+    if (centre && at) {
+      const p = tileCoordsToPixel(at.x, at.y, this.o.world.map.width);
+      this.o.view.centerOn(p.x, p.y);
+    }
+  }
+
   /** Own units, for centring the view at the start. */
   ownUnits(): Entity[] {
     return [...this.o.world.entities.ofPlayer(this.o.player)].filter(isUnit);
@@ -367,6 +399,11 @@ export class UnitLayer {
       // Probe entities of `test` commands have no sprite and are not drawn.
       if (!e.sprite) continue;
       alive.add(e.id);
+      // `die_die_die` and `destroy_obj` unselect the object: a dying one leaves the selection and its group.
+      if (e.state >= ObjectState.Dying) {
+        this.selected.delete(e.id);
+        this.groups.delete(e.id);
+      }
       let t = this.tracks.get(e.id);
       if (!t) {
         t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, frame: null, layer: DEFAULT_LAYER };
@@ -515,6 +552,9 @@ export class UnitLayer {
       g.putImageData(image, 0, 0);
       out = Texture.from(canvas);
       out.source.scaleMode = 'nearest';
+      // A canvas texture reads back opaque (`extract.pixels`), which would make every corner of a fogged sprite a pick hit:
+      // the pixels are known here.
+      this.alpha.set(out, { pixels: image.data, width });
     }
     pair[parity] = out;
     return out;
@@ -684,6 +724,17 @@ export class UnitLayer {
       this.box.clear().rect(Math.min(p.x, this.press.x), Math.min(p.y, this.press.y), Math.abs(p.x - this.press.x), Math.abs(p.y - this.press.y));
       this.box.stroke({ width: 1, color: SELECTION_COLOUR });
     });
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      const k = groupKey(e);
+      if (!k) return;
+      e.preventDefault();
+      if (k.action === 'assign') this.assignGroup(k.id);
+      else this.recallGroup(k.id, k.add, k.centre);
+    };
+    window.addEventListener('keydown', onKey);
+    this.cleanup.push(() => window.removeEventListener('keydown', onKey));
     on('pointerup', (e) => {
       if (e.button !== 0 || !this.press) return;
       const p = local(e);
