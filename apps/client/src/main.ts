@@ -67,6 +67,7 @@ async function main(): Promise<void> {
     bowmen: Number.isInteger(bowmen) && bowmen > 0 ? bowmen : undefined,
     market: params.get('market') === '1',
     testMap: params.get('map') === 'test',
+    seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
     setGameVisible,
   });
 }

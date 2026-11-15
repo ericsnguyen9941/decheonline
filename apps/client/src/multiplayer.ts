@@ -180,6 +180,8 @@ export interface MultiplayerOptions {
   market?: boolean;
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
+  /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
+  seed?: number;
   /** Show or hide the game canvas: hidden in the lobby, shown while a game runs. */
   setGameVisible(visible: boolean): void;
 }
@@ -192,7 +194,7 @@ const BOWMAN = 4;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, testMap, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, testMap, seed, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -241,7 +243,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       link,
       speed,
       // A broken socket comes back to the same room and slot (docs/spec/turn-timing.md §9).
-      start: { seed: start.seed, commandDelay: start.commandDelay, playerCount: start.players.length, rejoin: { code: session.state.code, slot: you, token: start.token }, testMap: debug && testMap },
+      start: { seed: debug && seed !== undefined ? seed : start.seed, commandDelay: start.commandDelay, playerCount: start.players.length, rejoin: { code: session.state.code, slot: you, token: start.token }, testMap: debug && testMap },
       frameMs: () => frames.average(),
     });
     // Player names by player number (slot + 1), as the score and the achievements show them.

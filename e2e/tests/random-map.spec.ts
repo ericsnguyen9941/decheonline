@@ -4,11 +4,14 @@ import { walkOntoHill } from '../hills';
 // A game without `map=test`: the random map the seed makes (docs/spec/random-maps.md), at the multiplayer defaults.
 const URL = '/?debug=net&speed=20';
 const TOWN_CENTER = 109;
+// A fixed random-map seed whose plateau a Villager reaches on foot (the server's seed is random, and some maps have none).
+const HILL_SEED = 1;
 
-async function startGame(browser: Browser): Promise<[Page, Page]> {
+async function startGame(browser: Browser, seed?: number): Promise<[Page, Page]> {
+  const url = seed === undefined ? URL : `${URL}&seed=${seed}`;
   const open = async () => {
     const page = await (await browser.newContext()).newPage();
-    await page.goto(URL);
+    await page.goto(url);
     return page;
   };
   const host = await open();
@@ -61,7 +64,7 @@ test('both players build the same 144-tile random map, start on their own Town C
 });
 
 test('a right click on a raised tile walks a Villager up the hill, drawn at its height, and a click on it there selects it', async ({ browser }) => {
-  const [host] = await startGame(browser);
+  const [host] = await startGame(browser, HILL_SEED);
   const walk = await walkOntoHill(host);
   console.log(`hill walk: ${JSON.stringify(walk)}`);
   // On a plateau tile the ground is the tile's height: 16 px per level.
