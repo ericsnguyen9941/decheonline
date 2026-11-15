@@ -16,10 +16,16 @@ export interface LobbyState {
   error: { code: ErrorCode | 'connection'; message: string } | null;
 }
 
+const sameJson = (a: unknown, b: unknown): boolean => {
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return a === b;
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => sameJson((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+};
+
 /** Lobby logic over a link, no DOM: create/join by code, ready, host start. Gameplay messages belong to lockstep. */
 export class Session {
-  /** Settings messages sent whose lobby echo has not come back. */
-  private settingsInFlight = 0;
+  /** Settings sent whose echo has not come back, oldest first; while any is pending the shown settings are the local ones. */
+  private pendingSettings: GameSettings[] = [];
   state: LobbyState = { phase: 'idle', code: '', you: -1, players: [], settings: DEFAULT_GAME_SETTINGS, error: null };
   /** Called after every state change. */
   onChange: (state: LobbyState) => void = () => {};
@@ -50,8 +56,8 @@ export class Session {
 
   /** Host only, while not ready: the game's settings (docs/spec/lobby.md §4). */
   setSettings(settings: GameSettings): void {
-    // Shown at once, so the next change builds on it; the echoes of the settings still in flight are older and ignored.
-    this.settingsInFlight++;
+    // Shown at once, so the next change builds on it; the echoes of the settings still pending are older and ignored.
+    this.pendingSettings.push(settings);
     this.set({ error: null, settings });
     this.link.send({ t: 'settings', settings });
   }
@@ -70,7 +76,7 @@ export class Session {
   /** Leave the room (or the game) and return to the entry screen. */
   leave(): void {
     this.link.send({ t: 'leave' });
-    this.settingsInFlight = 0;
+    this.pendingSettings = [];
     this.set({ phase: 'idle', code: '', you: -1, players: [], error: null });
   }
 
@@ -82,16 +88,19 @@ export class Session {
 
   private handle(m: ServerMessage): void {
     switch (m.t) {
-      case 'lobby':
-        if (this.settingsInFlight > 0) this.settingsInFlight--;
-        this.set({ phase: 'lobby', code: m.code, you: m.you, players: m.players, error: null, ...(this.settingsInFlight === 0 && { settings: m.settings }) });
+      case 'lobby': {
+        // An echo carrying a pending settings object answers it and every older one; others (a guest's ready or civ) change nothing here.
+        const answered = this.pendingSettings.findIndex((p) => sameJson(p, m.settings));
+        if (answered >= 0) this.pendingSettings.splice(0, answered + 1);
+        this.set({ phase: 'lobby', code: m.code, you: m.you, players: m.players, error: null, ...(this.pendingSettings.length === 0 && { settings: m.settings }) });
         return;
+      }
       case 'start':
         this.set({ phase: 'playing', players: m.players, settings: m.settings });
         this.onStart(m, this.state.you);
         return;
       case 'error':
-        this.settingsInFlight = 0;
+        this.pendingSettings = [];
         this.set({ error: { code: m.code, message: m.message } });
         return;
       default:

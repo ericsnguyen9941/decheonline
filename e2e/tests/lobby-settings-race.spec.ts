@@ -4,7 +4,8 @@ import { expect, test } from '@playwright/test';
 // and the guest, and the host's own selects keep what was picked (no lost update from a stale snapshot).
 const URL = '/?debug=net&speed=20';
 
-test('quick successive setting changes by the host all arrive, with the server slow to answer', async ({ browser }) => {
+for (const guestActs of [false, true]) {
+test(`quick successive setting changes by the host all arrive, with the server slow to answer${guestActs ? ' and the guest picking a civ meanwhile' : ''}`, async ({ browser }) => {
   const hostPage = await (await browser.newContext()).newPage();
   const guest = await (await browser.newContext()).newPage();
   // Server -> host messages are held back 300 ms; host -> server ones go through at once.
@@ -25,6 +26,8 @@ test('quick successive setting changes by the host all arrive, with the server s
 
   await hostPage.getByTestId('map-size').selectOption('96');
   await hostPage.getByTestId('map-type').selectOption({ label: 'Hill Country' });
+  // A guest's lobby echo (its civ) lands between the host's changes and must not pass for the answer to them.
+  if (guestActs) await guest.getByTestId('civ-1').selectOption({ index: 2 });
   await hostPage.getByTestId('victory').selectOption({ label: 'Conquest' });
 
   const lines = ['Map Size: Small', 'Map Type: Hill Country', 'Victory: Conquest', 'Population Limit: 50'];
@@ -36,3 +39,4 @@ test('quick successive setting changes by the host all arrive, with the server s
   await expect(hostPage.getByTestId('victory').locator('option:checked')).toHaveText('Conquest');
   await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText(lines);
 });
+}
