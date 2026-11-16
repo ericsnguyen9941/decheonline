@@ -135,6 +135,15 @@ match, and **transforms** the unit into that master
 (`src/act_obj.cpp:160-172`): first match wins. This is how a Man (83)
 becomes Lumberjack (123), Miner-Gold (251), and so on.
 
+The unit AI's `huntObject`/`gatherObject`/`buildObject` (`hunt`, `gather`,
+`build`: `src/t_c_obj.cpp:498`, `src/com_obj.cpp:700`, `src/t_c_obj.cpp:611`)
+take the same path: `getTask` (`src/act_obj.cpp:455`, the same swap) picks
+the task and transforms the unit, and an action of the called kind is built
+from it. That is how a villager that fought an animal as a Hunter (122,
+unit-ai.md §4.3 step 4) becomes a Lumberjack again when its queued hunt on
+the tree is replayed. Port: `gather.ts` `aiWork` calls `getTask`; unlike the
+original it refuses a task of another kind (the unit already transformed).
+
 When a gather or hunt action becomes active, if the unit holds a type other
 than the task's `attribute_type`, its load is replaced by 0 of the task type
 (`src/act_gath.cpp:60-62`, `src/tact_hnt.cpp:60-63`): **switching task

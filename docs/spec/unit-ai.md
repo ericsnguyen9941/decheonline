@@ -495,7 +495,9 @@ Soldier override (`src/taiuaimd.cpp:1688-1850`, M): only the computer
    re-queue it at the back of the order queue (not immediate), mark the
    order ATTACK with priority 100 and `stopAfterTargetKilled = 1`; then
    `attackObject(attacker)` (the civilian override hunts groups 9, 10, 15
-   instead, `:513-525`). Return 3 (`:649-662`).
+   instead, `:513-525`; ported: `unit-ai.ts` `attackObject` → `huntObject`,
+   so the villager fights as a Hunter and the queued order then swaps it back,
+   economy.md §3.1; test `animals.test.ts`). Return 3 (`:649-662`).
 5. Attacker is a player unit: if already walking (action MOVE, speed ≠ 0)
    return 3. Otherwise re-queue the current order (back of queue),
    `stopObject(1)`, and **run away** (§4.5). Return 3 (`:664-680`).

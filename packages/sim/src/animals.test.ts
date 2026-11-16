@@ -3,7 +3,7 @@ import type { Command } from './commands';
 import { ObjectState, type Entity } from './entities';
 import { mul32 } from './num';
 import { AiClass } from './unit-ai';
-import { ALLIGATOR, BOWMAN, CLUBMAN, ELEPHANT, GAZELLE, HUNTER, LION, TOWN_CENTER, VILLAGER } from './units';
+import { ALLIGATOR, BOWMAN, CLUBMAN, ELEPHANT, GAZELLE, HUNTER, LION, LUMBERJACK, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SPECIAL } from './victory';
 import { World, type StartUnit } from './world';
 
@@ -150,5 +150,29 @@ describe('unit-ai.md §4.2: a soldier attacked at range closes in', () => {
     expect(clubman.ai!.target).toBe(1);
     runUntil(w, () => bowman.hp < 35 || clubman.state > ObjectState.Active);
     expect(distance(clubman, start)).toBeGreaterThan(3);
+  });
+});
+
+describe('unit-ai.md §4.3 step 4: a villager whose work an animal interrupts hunts it, then returns to the work', () => {
+  test('a Lumberjack attacked by an Alligator on the way kills it as a Hunter, then goes back to its tree as a Lumberjack', () => {
+    const w = world(
+      { owner: 1, type: VILLAGER, x: 10.5, y: 10.5 },
+      { owner: 0, type: 143, x: 22.5, y: 10.5 },
+      { owner: 0, type: ALLIGATOR, x: 16.5, y: 12.5 },
+    );
+    const [v, tree, gator] = [w.entities.get(1)!, w.entities.get(2)!, w.entities.get(3)!];
+    order(w, 1, { type: 'work', units: [1], target: 2, x: tree.x, y: tree.y });
+    // The attack hunts the Alligator (the civilian override) and the unit becomes the Hunter.
+    runUntil(w, () => v.ai!.target === 3);
+    expect(v.type).toBe(HUNTER);
+    expect(v.ai!.action).toBe(0x265);
+    runUntil(w, () => gator.state > ObjectState.Active);
+    // The queued hunt on the tree is replayed: the task group swaps the Hunter back into a Lumberjack.
+    runUntil(w, () => v.ai!.target === 2, 10);
+    expect(v.type).toBe(LUMBERJACK);
+    expect(v.work?.target).toBe(2);
+    expect(v.ai!.order).toBe(0x2c9);
+    runUntil(w, () => v.heldAmount > 0, 40);
+    expect(v.heldType).toBe(1);
   });
 });

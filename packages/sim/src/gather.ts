@@ -337,8 +337,9 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
 
 /**
  * `gather` / `hunt` / `build` on the object for the unit AI (src/t_c_obj.cpp:498, 611): the current action of that kind
- * takes the new target; otherwise the unit's own task for the target, if it is of that kind, replaces every action.
- * The port does not swap the unit type here.
+ * takes the new target; otherwise the task `getTask` finds for the target (the unit becomes the type of its task group
+ * that has one), if it is of that kind, replaces every action. The original builds the action of the kind from any task;
+ * the port refuses a task of another kind, the unit already transformed.
  */
 export function aiWork(ctx: GameContext, e: Entity, target: Entity, kind: number): boolean {
   const w = e.work;
@@ -347,8 +348,8 @@ export function aiWork(ctx: GameContext, e: Entity, target: Entity, kind: number
     else workRetarget(ctx, e, w, target, target.x, target.y);
     return true;
   }
+  const task = getTask(ctx, e, target);
   const t = typeOf(ctx, e);
-  const task = targetTask(ctx, t, e, target);
   if (task === -1 || t.action!.tasks[task]!.actionType !== kind) return false;
   startTask(ctx, e, t, task, target, target.x, target.y);
   return true;

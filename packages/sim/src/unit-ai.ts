@@ -128,7 +128,9 @@ export const AiClass = {
 const GROUP_ARTIFACT = 1;
 export const GROUP_BUILDING = 3;
 const GROUP_CIVILIAN = 4;
+const GROUP_HUNTED_ANIMAL = 9;
 const GROUP_PREDATOR = 10;
+const GROUP_TREE = 15;
 export const GROUP_WALL = 27;
 const SCOUT = 299;
 const CATAPULTS = [35, 36];
@@ -615,6 +617,13 @@ export function attackObject(ctx: GameContext, e: Entity, targetId: number, unco
     // A computer player's priest walks into range instead; humans only.
     const target = ctx.entities.get(targetId);
     return !!target && canConvert(ctx, e, target) && priestObject(ctx, e, targetId, ACTION_CONVERT, unconditional);
+  }
+  if (ai.kind === AiClass.Civilian) {
+    // `TribeCivilianUnitAIModule::attackObject` (src/taiuaimd.cpp:513): hunted animals, predators and trees are hunted, not fought.
+    const target = ctx.entities.get(targetId);
+    if (!target) return false;
+    const group = typeOf(ctx, target).group;
+    if (group === GROUP_HUNTED_ANIMAL || group === GROUP_PREDATOR || group === GROUP_TREE) return huntObject(ctx, e, targetId, unconditional);
   }
   if (!unconditional && ai.action !== -1) return false;
   const target = ctx.entities.get(targetId);
@@ -1834,6 +1843,16 @@ export function orderUnload(ctx: GameContext, e: Entity, x: number, y: number): 
 export function orderRepair(ctx: GameContext, e: Entity, target: Entity): void {
   if (!e.ai) return;
   aiOrder(ctx, e, e.owner, AI_ORDER_REPAIR, target.id, target.owner, target.x, target.y, target.z, 1, true, false, 100);
+}
+
+/**
+ * `UnitAIModule::huntObject` (src/aiuaimod.cpp:1791): unless the unit is already hunting and the call is not
+ * unconditional, stop, then start the hunt on the target.
+ */
+function huntObject(ctx: GameContext, e: Entity, targetId: number, unconditional: boolean): boolean {
+  if (!unconditional && e.ai!.action === AI_ACTION_HUNT) return false;
+  stopObject(ctx, e, true);
+  return aiTask(ctx, e, targetId, ACTION_HUNT, AI_ACTION_HUNT);
 }
 
 /** `gatherObject` / `huntObject` / `buildObject`: start the task of that kind on the target, then record it. */
