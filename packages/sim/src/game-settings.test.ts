@@ -19,7 +19,7 @@ import {
 } from './game-settings';
 import { MAP_ALL_WATER, MAP_HILLY, MAP_MOSTLY_LAND, MAP_SMALL, RmmController } from './rmm-controller';
 import { rmmFixture } from './rmm-testing';
-import { runReplay, sampleLobbyReplay } from './replay';
+import { replayWorld, runReplay, sampleLobbyReplay } from './replay';
 import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT } from './buildings';
 import { ObjectState } from './entities';
 import { CrtRand } from './rng';
@@ -166,8 +166,22 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
     expect(log.civs).toEqual([0, ...resolveCivs(log.randomSeed, [CIV_RANDOM, 10])]);
     expect(log.victory).toEqual({ type: VICTORY_TIME_LIMIT, amount: 3000 });
     expect(log.populationLimit).toBe(25);
-    expect(log.start).toEqual({ startingAge: AGE_BRONZE, resourceLevel: RESOURCES_DEFAULT, deathMatch: true, fullTechTree: true, revealMap: true });
-    expect(runReplay(log)).toHaveLength(20);
+    expect(log.start).toEqual({
+      startingAge: AGE_BRONZE,
+      resourceLevel: RESOURCES_DEFAULT,
+      deathMatch: true,
+      fullTechTree: true,
+      revealMap: true,
+      pathingIterations: 7500,
+      fixedPositions: false,
+      cheating: true,
+    });
+    const world = replayWorld(log);
+    expect(runReplay(log, world)).toHaveLength(20);
+    // Its cheats took effect: Photon Man for player 1, Bigdaddy and REVEAL MAP for player 2, STEROIDS still on at turn 20.
+    expect([...world.entities.ofPlayer(1)].filter((e) => e.type === 274)).toHaveLength(1);
+    expect([...world.entities.ofPlayer(2)].filter((e) => e.type === 372)).toHaveLength(1);
+    expect([world.cheats.mapVisible, world.cheats.quickBuild, world.pathing.iterations]).toEqual([true, true, 7500]);
   });
 
   // `TRIBE_World::new_game` gives every player the lobby's limit as attribute 32 (tworld.cpp:869-872); a production

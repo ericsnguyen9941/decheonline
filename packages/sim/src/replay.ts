@@ -1,5 +1,5 @@
 import type { Command } from './commands';
-import { CIV_RANDOM, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, type GameSettings } from './game-settings';
+import { CIV_RANDOM, DEFAULT_GAME_SETTINGS, lobbyWorldOptions, PATH_FINDING_HIGH, type GameSettings } from './game-settings';
 import { MAP_HILLY, MAP_MEDIUM } from './rmm-controller';
 import { TileMap } from './map';
 import { CrtRand } from './rng';
@@ -25,17 +25,16 @@ export interface ReplayLog {
   /** The lobby's population limit; default 50. */
   populationLimit?: number;
   /** The lobby's start settings (`WorldOptions`); default off. */
-  start?: Pick<WorldOptions, 'startingAge' | 'resourceLevel' | 'deathMatch' | 'fullTechTree' | 'revealMap'>;
+  start?: Pick<WorldOptions, 'startingAge' | 'resourceLevel' | 'deathMatch' | 'fullTechTree' | 'revealMap' | 'pathingIterations' | 'fixedPositions' | 'cheating'>;
   turns: number;
   batches: { turn: number; player: number; commands: Command[] }[];
   /** Step size and buffer frame changes, each given to the world on the turn it was agreed for (turn-timing.md §8.7). */
   speeds?: SpeedChange[];
 }
 
-/** Run a log from the start; returns the state hash after every turn. */
-export function runReplay(
-  log: ReplayLog,
-  world = new World({
+/** The world a log starts from. */
+export function replayWorld(log: ReplayLog): World {
+  return new World({
     players: log.players,
     randomSeed: log.randomSeed,
     units: log.units,
@@ -45,8 +44,11 @@ export function runReplay(
     ...(log.victory ? { victory: log.victory } : {}),
     ...(log.populationLimit !== undefined ? { populationLimit: log.populationLimit } : {}),
     ...log.start,
-  }),
-): number[] {
+  });
+}
+
+/** Run a log from the start; returns the state hash after every turn. */
+export function runReplay(log: ReplayLog, world = replayWorld(log)): number[] {
   const hashes: number[] = [];
   while (world.turn < log.turns) {
     for (const b of log.batches) if (b.turn === world.turn) world.addBatch(b.turn, b.player, b.commands);
@@ -128,9 +130,10 @@ export function sampleRandomMapReplay(turns = 60, seed = 20261115, lobby?: { ran
     resources: objects.flatMap((e) => (e.owner === 0 && e.heldAmount > 0 ? [{ id: e.id, x: e.x, y: e.y }] : [])),
     at: (id) => world.entities.get(id),
   };
-  const { startingAge, resourceLevel, deathMatch, fullTechTree, revealMap } = options;
+  const { startingAge, resourceLevel, deathMatch, fullTechTree, revealMap, pathingIterations, fixedPositions, cheating } = options;
+  const lobbyStart = { startingAge, resourceLevel, deathMatch, fullTechTree, revealMap, pathingIterations, fixedPositions, cheating };
   const settings = lobby
-    ? { civs: [...world.civs], victory: options.victory!, populationLimit: options.populationLimit!, start: { startingAge, resourceLevel, deathMatch, fullTechTree, revealMap } }
+    ? { civs: [...world.civs], victory: options.victory!, populationLimit: options.populationLimit!, start: lobbyStart }
     : {};
   return { players, randomSeed, randomMap, ...settings, turns, batches: sampleBatches(start, turns, seed, false), speeds: sampleSpeeds(turns) };
 }
@@ -138,7 +141,8 @@ export function sampleRandomMapReplay(turns = 60, seed = 20261115, lobby?: { ran
 /**
  * The same on a game with lobby settings other than the defaults (docs/spec/lobby.md): a Death Match on Medium Hill
  * Country, a 3,000-year time limit, the Bronze Age, Reveal Map, Full Tech Tree, a population limit of 25, a Random civ
- * (resolved from the seed) against Shang.
+ * (resolved from the seed) against Shang, High Path Finding, random positions and Enable Cheating, with cheat codes
+ * (chat.md §7), STEROIDS and a formation (commands.md §6) among the orders.
  */
 export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
   const settings: GameSettings = {
@@ -151,8 +155,26 @@ export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
     revealMap: true,
     fullTechTree: true,
     populationLimit: 25,
+    pathFinding: PATH_FINDING_HIGH,
+    fixedPositions: false,
+    cheating: true,
   };
-  return sampleRandomMapReplay(turns, seed, { randomSeed: 4244, settings, civs: [CIV_RANDOM, 10] });
+  const log = sampleRandomMapReplay(turns, seed, { randomSeed: 4244, settings, civs: [CIV_RANDOM, 10] });
+  const units = log.batches.flatMap((b) => b.commands).find((c) => c.type === 'move' && c.units.length > 1);
+  const extra: { turn: number; player: number; commands: Command[] }[] = [
+    { turn: 3, player: 1, commands: [{ type: 'cheat', code: 21 }, { type: 'cheat', code: 0 }] },
+    { turn: 6, player: 2, commands: [{ type: 'quick-build', on: true }, { type: 'cheat', code: 12 }] },
+    { turn: 9, player: 2, commands: [{ type: 'cheat', code: 220 }, { type: 'cheat', code: 230 }] },
+    { turn: 12, player: 1, commands: units?.type === 'move' ? [{ type: 'formation', units: units.units, formation: 4 }] : [] },
+    { turn: 20, player: 1, commands: [{ type: 'quick-build', on: false }, { type: 'cheat', code: 8 }] },
+  ];
+  const batches = [...log.batches];
+  for (const { turn, player, commands } of extra) {
+    const batch = batches.find((b) => b.turn === turn && b.player === player);
+    if (batch) batch.commands = [...batch.commands, ...commands];
+    else batches.push({ turn, player, commands });
+  }
+  return { ...log, batches };
 }
 
 /**
