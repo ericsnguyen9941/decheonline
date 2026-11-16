@@ -13,14 +13,22 @@
 html,
 body {
   margin: 0;
-  height: 100%;
-  overflow: hidden;
+  min-height: 100%;
   background: #000;
   color: var(--parchment);
   font-family: Georgia, 'Palatino Linotype', Palatino, serif;
 }
 
+/* The lobby scrolls when the window is smaller than its content; the game screen never does. */
+html:has(#game:not([hidden])),
+html:has(#game:not([hidden])) body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
+  box-sizing: border-box;
+  padding: 1rem 0;
   display: flex;
   flex-direction: column;
   align-items: center;
