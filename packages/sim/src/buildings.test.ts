@@ -3,8 +3,10 @@ import { ACTION_BUILD } from './build';
 import { addToQueue, ATTR_HEADROOM, ATTR_POPULATION, cancelBuild, updateQueue } from './buildings';
 import type { Command } from './commands';
 import { ObjectState, type Entity } from './entities';
+import { NOTIFY_NO_ROOM_FOR_UNIT } from './game-log';
 import { updateWork } from './gather';
 import { MS_TO_SECONDS, mul32 } from './num';
+import { TileMap } from './map';
 import { CrtRand } from './rng';
 import { isEnabled, TECH_DONE } from './techs';
 import { BARRACKS, BUILDER, CLUBMAN, HOUSE, TOWN_CENTER, unitType, VILLAGER } from './units';
@@ -137,6 +139,19 @@ describe('economy.md §8.3 vector E3: Town Center trains a villager and places i
     after.rand();
     expect(ctx.rng.rand()).toBe(after.rand());
     expect([attributes[ATTR_HEADROOM], attributes[ATTR_POPULATION]]).toEqual([3, 1]);
+  });
+
+  test('no room to place the unit: its cost is paid back and the owner is told (0x68, cantdo.wav)', () => {
+    // Water all round the Town Center's 3 x 3 of grass: no try of the three rings finds land.
+    const tiles = Array.from({ length: 40 * 40 }, (_, i) => (Math.abs((i % 40) - 20) <= 1 && Math.abs(Math.trunc(i / 40) - 20) <= 1 ? 0 : 1));
+    const world = new World({ players: 2, map: new TileMap(40, 40, tiles), units: [{ owner: 1, type: TOWN_CENTER, x: 20.5, y: 20.5 }] });
+    const tc = world.entities.get(1)!;
+    const ctx = stepContext(world);
+    addToQueue(ctx, tc, VILLAGER, 1);
+    expect(world.attributes[1]![ATTR_FOOD]).toBe(150);
+    for (let step = 1; step <= 401; step++) updateQueue(ctx, tc);
+    expect([tc.train, world.entities.size, world.attributes[1]![ATTR_FOOD]]).toEqual([null, 1, 200]);
+    expect(world.log.notifications.map((n) => [n.type, ...n.args.slice(0, 2)])).toEqual([[NOTIFY_NO_ROOM_FOR_UNIT, 1, VILLAGER]]);
   });
 
   test('the train time adds up as n float32 increments: 20.04998016357422 after 401 steps', () => {

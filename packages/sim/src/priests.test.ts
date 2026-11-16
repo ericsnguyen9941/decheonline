@@ -2,6 +2,13 @@ import { describe, expect, test } from 'vitest';
 import { ATTR_HEADROOM, ATTR_POPULATION } from './buildings';
 import type { Command } from './commands';
 import { ObjectState, type Entity } from './entities';
+import {
+  CANT_DO_NOTIFICATIONS,
+  NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_NO_FAITH,
+  NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_TOWN_CENTER,
+} from './game-log';
 import { targetActionType, type WorkAction } from './gather';
 import { master, typeOf } from './masters';
 import { f32 } from './num';
@@ -59,6 +66,11 @@ function entity(w: World, id: number): Entity {
 }
 
 /** Run turns until `done` holds; fails after `limit` turns. */
+/** The can't-do notifications logged so far, as `[type, player told]`. */
+function cantDo(w: World): number[][] {
+  return w.log.notifications.filter((n) => CANT_DO_NOTIFICATIONS.has(n.type)).map((n) => [n.type, n.args[0]!]);
+}
+
 function runUntil(w: World, done: () => boolean, limit = 400): void {
   for (let i = 0; i < limit && !done(); i++) w.runTurn();
   expect(done()).toBe(true);
@@ -263,11 +275,17 @@ describe('support-actions.md §4.2-§4.3, §4.6: a conversion', () => {
       { owner: 2, type: BARRACKS, x: 15.5, y: 16.5 },
       { owner: 2, type: TOWN_CENTER, x: 22.5, y: 10.5 },
     ];
-    for (const target of [2, 3, 4]) {
+    // Each refusal tells the priest's owner, whose screen plays cantdo.wav (sounds.md §5).
+    for (const [target, refusal] of [
+      [2, NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM],
+      [3, NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM],
+      [4, NOTIFY_CONVERSION_TOWN_CENTER],
+    ] as const) {
       const w = world(units, [CIV_BABYLONIAN, CIV_GREEK], { startingAge: AGE_IRON });
       order(w, 1, { type: 'work', units: [1], target, x: entity(w, target).x, y: entity(w, target).y });
       for (let i = 0; i < 200; i++) w.runTurn();
       expect([target, entity(w, target).owner, entity(w, 1).work ?? null]).toEqual([target, 2, null]);
+      expect(cantDo(w)).toEqual([[refusal, 1]]);
     }
     for (const [target, range] of [
       [2, 10],
@@ -287,6 +305,7 @@ describe('support-actions.md §4.2-§4.3, §4.6: a conversion', () => {
     order(w, 1, { type: 'work', units: [1], target: 4, x: 22.5, y: 10.5 });
     for (let i = 0; i < 200; i++) w.runTurn();
     expect([entity(w, 4).owner, entity(w, 1).work ?? null]).toEqual([2, null]);
+    expect(cantDo(w)).toEqual([[NOTIFY_CONVERSION_TOWN_CENTER, 1]]);
   });
 
   test('Afterlife lengthens the convert range to 13', () => {
@@ -310,6 +329,7 @@ describe('support-actions.md §4.2-§4.3, §4.6: a conversion', () => {
     order(w, 1, { type: 'work', units: [1], target: 2, x: 14.5, y: 10.5 });
     for (let i = 0; i <= COMMAND_DELAY_TURNS; i++) w.runTurn();
     expect(priest.work ?? null).toBeNull();
+    expect(cantDo(w)).toEqual([[NOTIFY_CONVERSION_NO_FAITH, 1]]);
     runUntil(w, () => priest.heldAmount === FAITH_MAX, 100);
     expect(entity(w, 2).owner).toBe(2);
     order(w, 1, { type: 'work', units: [1], target: 2, x: 14.5, y: 10.5 });

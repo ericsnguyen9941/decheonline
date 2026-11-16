@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { ATTACK_FAILED } from './combat';
 import { parseCommand, type Command } from './commands';
 import { ObjectState, type Entity } from './entities';
+import { NOTIFY_CANNOT_REPAIR } from './game-log';
 import { ACTION_GATHER } from './gather';
 import { typeOf } from './masters';
 import { add32, div32, f32, mul32, sub32 } from './num';
@@ -174,13 +175,15 @@ describe('support-actions.md §6 / §10.4 Example D: repair', () => {
     expect([v.type, v.ai!.order, v.ai!.action]).toEqual([REPAIR_MAN, -1, -1]);
   });
 
-  test('without wood nothing is repaired and the repair ends', () => {
+  test('without wood nothing is repaired and the repair ends; the owner is told it cannot repair (cantdo.wav)', () => {
     const { w, v, tc } = damagedTownCenter();
     w.attributes[1]![ATTR_WOOD] = 0;
     order(w, 1, { type: 'repair', units: [2], target: 1 });
     applied(w);
     runUntil(w, () => v.work === null, 40);
     expect([tc.hp, v.ai!.action]).toEqual([300, -1]);
+    const refusals = w.log.notifications.filter((n) => n.type === NOTIFY_CANNOT_REPAIR).map((n) => n.args.slice(0, 2));
+    expect(refusals).toEqual([[1, tc.id]]);
   });
 
   test('a right-click work order on a damaged own building repairs it (the Villager swaps to the Repair_Man)', () => {

@@ -1,5 +1,23 @@
 import { describe, expect, test } from 'vitest';
-import { BUILDER, HOUSE, LUMBERJACK, ObjectState, startingObjects, TECH_DONE, TECH_RESEARCHING, TOOL_AGE, TOWN_CENTER, TREES, VILLAGER, World, type Entity } from '@aoe/sim';
+import {
+  BUILDER,
+  HOUSE,
+  LUMBERJACK,
+  NOTIFY_CANNOT_REPAIR,
+  NOTIFY_CONVERSION_TOWN_CENTER,
+  NOTIFY_PLAYER_RESIGNED,
+  ObjectState,
+  startingObjects,
+  TECH_DONE,
+  TECH_RESEARCHING,
+  TOOL_AGE,
+  TOWN_CENTER,
+  TREES,
+  VILLAGER,
+  World,
+  type Entity,
+} from '@aoe/sim';
+import { GAME_SOUND_IDS } from '@aoe/assets-import/manifest';
 import type { SoundTable } from '../assets';
 import { GameSounds } from './game-sounds';
 import type { SoundPlayer } from './sound-player';
@@ -139,6 +157,22 @@ describe('GameSounds', () => {
     const count = sounds.log.length;
     sounds.command({ type: 'move', units: [], x: 1, y: 1 });
     expect(sounds.log.length).toBe(count);
+  });
+
+  test('a can’t-do notification in the sim’s log plays cantdo.wav for the player told, once; others do not', () => {
+    const { world, sounds, played } = game();
+    const ctx = world.gameContext();
+    // Cannot repair (0x6B) for player 1, a refused conversion (0x79) for player 2, a resignation (5) for player 1.
+    ctx.notify(NOTIFY_CANNOT_REPAIR, 1, 7);
+    ctx.notify(NOTIFY_CONVERSION_TOWN_CENTER, 2);
+    ctx.notify(NOTIFY_PLAYER_RESIGNED, 1);
+    const count = sounds.log.length;
+    step(world, sounds);
+    const cantDo = sounds.log.slice(count).filter((t) => t.event === 'cant-do');
+    expect(cantDo).toEqual([{ event: 'cant-do', sound: -1, game: GameSound.CantDo, wav: GAME_SOUND_IDS[GameSound.CantDo], source: NOTIFY_CANNOT_REPAIR }]);
+    expect(played.at(-1)).toEqual([`/assets/sounds/${GAME_SOUND_IDS[GameSound.CantDo]}.wav`, false]);
+    step(world, sounds);
+    expect(sounds.log.filter((t) => t.event === 'cant-do')).toHaveLength(1);
   });
 
   test('selection sound of own and Gaia objects only', () => {

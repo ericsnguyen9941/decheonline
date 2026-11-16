@@ -3,13 +3,20 @@ import { ATTR_POPULATION } from './buildings';
 import { ATTACK_ATTACKING } from './combat';
 import { parseCommand, type Command } from './commands';
 import type { Entity } from './entities';
+import {
+  NOTIFY_CANNOT_TRADE_WITH_ENEMY,
+  NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND,
+  NOTIFY_NOT_ENOUGH_UNLOAD_SPACE,
+} from './game-log';
 import { DEFAULT_GAME_SETTINGS, LOBBY_MAP_TYPES, lobbyWorldOptions } from './game-settings';
 import { TERRAIN_WATER, TileMap } from './map';
 import { master, typeOf } from './masters';
 import { navalTerrain, runReplay, sampleTransportReplay } from './replay';
 import { MAP_ALL_WATER, MAP_ISTHMAS, MAP_LAKE, MAP_MOSTLY_WATER, MAP_WATER_AND_LAND } from './rmm-controller';
 import { TECH_AVAILABLE, TECH_DONE } from './techs';
-import { ACTION_ENTER, ACTION_TRANSPORT } from './transport';
+import { AI_ACTION_TRADE } from './trade';
+import { ACTION_ENTER, ACTION_TRANSPORT, AI_ACTION_TRANSPORT } from './transport';
+import { playerNotify } from './unit-ai';
 import { CLUBMAN, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SPECIAL } from './victory';
 import { AGE_IRON, World, type Snapshot, type StartUnit } from './world';
@@ -208,6 +215,21 @@ describe('naval.md §7: transports', () => {
     order(w, 1, { type: 'unload', units: [boat.id], x: boat.x, y: boat.y });
     runUntil(w, () => (boat.cargo?.length ?? 0) === 0, 50);
     for (const u of units) expect(terrainUnder(w, u)).toBe(TERRAIN_SHALLOWS);
+  });
+
+  test('the boat’s refusals reach the game’s notifications for its owner, who hears cantdo.wav (src/tplayer.cpp:1765-1774, sounds.md §5)', () => {
+    const w = world([]);
+    const ctx = w.gameContext();
+    playerNotify(ctx, 1, 0x207, AI_ACTION_TRANSPORT);
+    playerNotify(ctx, 2, 0x206, AI_ACTION_TRANSPORT);
+    playerNotify(ctx, 1, 0x20c, AI_ACTION_TRADE);
+    // A 0x20c of another action is not trade's refusal.
+    playerNotify(ctx, 1, 0x20c, AI_ACTION_TRANSPORT);
+    expect(w.log.notifications.map((n) => [n.type, n.args[0]])).toEqual([
+      [NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND, 1],
+      [NOTIFY_NOT_ENOUGH_UNLOAD_SPACE, 2],
+      [NOTIFY_CANNOT_TRADE_WITH_ENEMY, 1],
+    ]);
   });
 
   test('the unload command parses as the wire sends it and ignores another player’s transports', () => {
