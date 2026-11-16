@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { decodeClientMessage, encode, isLobbyCiv } from '@aoe/protocol';
-import { DEFAULT_ASSETS_DIR, serveAsset } from './assets';
+import { DEFAULT_ASSETS_DIR, DEFAULT_CLIENT_DIR, serveAsset, serveClient } from './assets';
 import { RoomRegistry, type Peer, type RoomRegistryOptions } from './rooms';
 
 const MAX_FRAME_BYTES = 64 * 1024;
@@ -10,6 +10,8 @@ export interface AppOptions {
   rooms?: RoomRegistry;
   /** Folder served at `/assets/` (the pack from `npm run assets:import`). */
   assetsDir?: string;
+  /** Folder served at `/`: the built client (`npm run build`). */
+  clientDir?: string;
 }
 
 /**
@@ -21,10 +23,11 @@ function roomOptionsFromEnv(): RoomRegistryOptions {
   return isLobbyCiv(civ) ? { generateCiv: () => civ } : {};
 }
 
-/** HTTP server with `/health`, `/assets/*` and the game relay on WebSocket path `/ws`. */
+/** HTTP server with `/health`, `/assets/*`, the built client at `/` and the game relay on WebSocket path `/ws`. */
 export function createApp({
   rooms = new RoomRegistry(roomOptionsFromEnv()),
   assetsDir = process.env.ASSETS_DIR ?? DEFAULT_ASSETS_DIR,
+  clientDir = process.env.CLIENT_DIR ?? DEFAULT_CLIENT_DIR,
 }: AppOptions = {}): Server {
   const server = createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
@@ -32,8 +35,9 @@ export function createApp({
       res.end(JSON.stringify({ status: 'ok' }));
       return;
     }
-    if (req.method === 'GET' && req.url?.startsWith('/assets/')) {
-      void serveAsset(req.url, assetsDir, res);
+    const { method, url } = req;
+    if ((method === 'GET' || method === 'HEAD') && url !== undefined) {
+      void (url.startsWith('/assets/') ? serveAsset(req, url, assetsDir, res) : serveClient(req, url, clientDir, res));
       return;
     }
     res.writeHead(404, { 'content-type': 'text/plain' });

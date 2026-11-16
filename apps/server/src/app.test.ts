@@ -71,3 +71,76 @@ describe('GET /assets', () => {
     }
   });
 });
+
+describe('conditional requests and the built client', () => {
+  let dir: string;
+  let server: Server;
+  let base: string;
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'aoe-client-'));
+    await mkdir(join(dir, 'pack'));
+    await mkdir(join(dir, 'client', 'bundle'), { recursive: true });
+    await writeFile(join(dir, 'pack', 'manifest.json'), '{"version":1}');
+    await writeFile(join(dir, 'client', 'index.html'), '<title>AoE1 Web</title>');
+    await writeFile(join(dir, 'client', 'bundle', 'index-abc123.js'), 'export {};');
+    await writeFile(join(dir, 'client', 'bundle', 'index-abc123.css'), 'body{}');
+    await writeFile(join(dir, 'client', 'bundle', 'x.exe'), 'nope');
+    await writeFile(join(dir, 'secret.json'), '{}');
+    server = createApp({ assetsDir: join(dir, 'pack'), clientDir: join(dir, 'client') });
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test('serves the page at / (query string ignored) and /index.html', async () => {
+    for (const path of ['/', '/?debug=net', '/index.html']) {
+      const res = await fetch(`${base}${path}`);
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get('content-type'), path).toBe('text/html; charset=utf-8');
+      expect(await res.text(), path).toBe('<title>AoE1 Web</title>');
+    }
+  });
+
+  test('serves the bundle with content types and an immutable cache', async () => {
+    const js = await fetch(`${base}/bundle/index-abc123.js`);
+    expect(js.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
+    expect(js.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect((await fetch(`${base}/bundle/index-abc123.css`)).headers.get('content-type')).toBe('text/css; charset=utf-8');
+  });
+
+  test('a file with a validator answers 304 to If-None-Match and If-Modified-Since, and a stale one 200', async () => {
+    for (const path of ['/', '/assets/manifest.json', '/bundle/index-abc123.js']) {
+      const first = await fetch(`${base}${path}`);
+      const etag = first.headers.get('etag');
+      const modified = first.headers.get('last-modified');
+      expect(etag, path).toBeTruthy();
+      expect(modified, path).toBeTruthy();
+      const byTag = await fetch(`${base}${path}`, { headers: { 'if-none-match': etag! } });
+      expect(byTag.status, path).toBe(304);
+      expect(await byTag.text(), path).toBe('');
+      expect((await fetch(`${base}${path}`, { headers: { 'if-modified-since': modified! } })).status, path).toBe(304);
+      expect((await fetch(`${base}${path}`, { headers: { 'if-none-match': 'W/"0-0"' } })).status, path).toBe(200);
+    }
+  });
+
+  test('HEAD answers the headers without a body', async () => {
+    const res = await fetch(`${base}/assets/manifest.json`, { method: 'HEAD' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-length')).toBe('13');
+    expect(await res.text()).toBe('');
+  });
+
+  test('404s for a missing file, an unknown type and a path outside the client folder', async () => {
+    for (const path of ['/nope.js', '/bundle/x.exe', '/bundle/', '/..%2Fsecret.json', '/%2e%2e/secret.json']) {
+      expect((await fetch(`${base}${path}`)).status, path).toBe(404);
+    }
+  });
+
+  test('POST is a 404 and /health still answers', async () => {
+    expect((await fetch(`${base}/`, { method: 'POST' })).status).toBe(404);
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+  });
+});
