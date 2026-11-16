@@ -378,8 +378,13 @@ and `lockstep/lockstep.ts`.
 The original exchanges checksums every 4 turns (`com_sync.cpp:132`); a mismatch is `COMM_SYNC_ERROR`, which
 `tribegam.cpp` `case 0x17b0` answers with sound 2 and the system message "Out of sync detected by comm..." on the game
 screen (the host also saves the game; the popup `STRING_ID_ERROR_SYNC` and a loss only come with the `SKIPSYNCSAVE`
-argument). The port reports a hash every turn: `Lockstep.endTurn` sends `hash {turn}` just before the batch of
-`turn`, so the relay gets a player's hash before it has released that turn. `rooms.ts` `reportHash` therefore accepts a
-hash for any turn up to the member's `nextTurn` and holds it until every other connected member has reported that turn;
-a mismatch is broadcast as `desync {turn, hashes}`. The client stops its loop and shows the system message
+argument). The port checks at the same cadence: `Lockstep.endTurn` sends `hash {turn}` on every turn that is a multiple of
+`SYNC_INTERVAL_TURNS` (4), including turn 0, just before the batch of `turn`, so the relay gets a player's hash before it
+has released that turn; on the other turns nothing is sent. A divergence is therefore reported up to 3 turns after it
+starts. The value is `World.syncChecksum()`, not the deep `World.hash()`: like the original's `GetWorldChecksums`
+(`basegame.cpp:3699`, `RGE_Player::get_checksums`, `player.cpp:801`) it is a cheap summary (the clock, the random seed,
+the stockpiles, techs and victory state, and each object's id, owner, type, position, hit points, state and load; 0.3 ms
+against 8-25 ms on a Large map, which had dropped a frame at every turn end). `hash()` stays for replays and snapshots.
+`rooms.ts` `reportHash` accepts a hash for any turn up to the member's `nextTurn` and holds it until every other
+connected member has reported that turn; a mismatch is broadcast as `desync {turn, hashes}`. The client stops its loop and shows the system message
 (`GameHud.outOfSync`), keeping the game screen; Menu still works.

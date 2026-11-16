@@ -31,3 +31,26 @@ test('snapshot round-trip through JSON restores the same state and the same futu
   expect(rest.at(-1)).toBe(full.at(-1));
   expect(restored.entities.size).toBeGreaterThan(0);
 }, REPLAY_TIMEOUT);
+
+test('the sync checksum agrees between twin worlds and changes with a stockpile, a position, hit points or the random seed', () => {
+  const log = sampleReplay();
+  const a = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units });
+  const b = new World({ players: log.players, randomSeed: log.randomSeed, units: log.units });
+  runReplay({ ...log, turns: 10 }, a);
+  runReplay({ ...log, turns: 10 }, b);
+  const sum = a.syncChecksum();
+  expect(b.syncChecksum()).toBe(sum);
+  a.attributes[1]![0]! += 1;
+  expect(a.syncChecksum()).not.toBe(sum);
+  a.attributes[1]![0]! -= 1;
+  expect(a.syncChecksum()).toBe(sum);
+  const unit = [...a.entities.all()][0]!;
+  unit.x += 0.5;
+  expect(a.syncChecksum()).not.toBe(sum);
+  unit.x -= 0.5;
+  unit.hp -= 1;
+  expect(a.syncChecksum()).not.toBe(sum);
+  unit.hp += 1;
+  a.randomSeed += 1;
+  expect(a.syncChecksum()).not.toBe(sum);
+}, REPLAY_TIMEOUT);

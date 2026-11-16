@@ -96,9 +96,11 @@ test('a client whose state differs after one turn is reported as a desync naming
   await host.waitForFunction(() => window.__game!.desync() !== null, undefined, { timeout: STALL_MS });
   const message = await desyncMessage(host, guest);
   console.log(`forced desync caught: ${message}`);
-  // The guest changed its food after turn 30 (its hash of 30 was already sent), so the games differ from turn 31.
-  expect(message).toMatch(new RegExp(`^desync at turn ${PERTURB + 1}: host hash [0-9a-f]{8}, guest hash [0-9a-f]{8}$`));
-  const [h, g] = await hashesAt(host, guest, PERTURB + 1);
+  // The guest changed its food after turn 30, so the games differ from turn 31; the sync check runs on every 4th turn
+  // (turn-timing.md §9.1), so the relay reports the first of them: turn 32, at most 3 turns after the change.
+  const checked = Math.ceil((PERTURB + 1) / 4) * 4;
+  expect(message).toMatch(new RegExp(`^desync at turn ${checked}: host hash [0-9a-f]{8}, guest hash [0-9a-f]{8}$`));
+  const [h, g] = await hashesAt(host, guest, checked);
   expect(h).not.toBe(g);
 });
 
@@ -300,8 +302,9 @@ async function playGame(browser: Browser, n: number, limitMs: number, issued: Ma
     await host.waitForFunction((t) => window.__game!.turn() > t + 2, last, { timeout: STALL_MS });
     const failure = await desyncMessage(host, guest);
     if (failure) throw new Error(failure);
-    const [h, g] = await hashesAt(host, guest, last);
-    if (h !== g) throw new Error(`desync at turn ${last}: host hash ${hex(h)}, guest hash ${hex(g)} (the relay reported nothing)`);
+    const checked = Math.floor(last / 4) * 4; // the clients keep a checksum for every 4th turn
+    const [h, g] = await hashesAt(host, guest, checked);
+    if (h !== g) throw new Error(`desync at turn ${checked}: host hash ${hex(h)}, guest hash ${hex(g)} (the relay reported nothing)`);
 
     const summary = await Promise.all(
       pages.map((page) =>
@@ -321,7 +324,7 @@ async function playGame(browser: Browser, n: number, limitMs: number, issued: Ma
       for (const [k, v] of bot.issued) issued.set(k, (issued.get(k) ?? 0) + v);
     }
     console.log(`soak: game ${n + 1}: ${summary[0]!.join('; ')}`);
-    return { turn: last, timeMs: time, ended, hashes: [h, g] };
+    return { turn: checked, timeMs: time, ended, hashes: [h, g] };
   } finally {
     for (const page of pages) await page.context().close();
   }

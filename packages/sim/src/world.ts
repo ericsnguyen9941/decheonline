@@ -1431,6 +1431,24 @@ export class World {
     return this.visibility.get(player, col, row);
   }
 
+  /**
+   * The live sync check's checksum (`GetWorldChecksums`, `RGE_Player::get_checksums`): the clock, the random seed, every
+   * player's stockpiles and techs, and each object's id, owner, type, position, hit points, state and load. It costs
+   * a fraction of `hash()`, which walks every field of every object: a divergence that starts in an object's inner
+   * state shows here once it moves an object, changes a stockpile or draws a different `rand()`.
+   */
+  syncChecksum(): number {
+    const h = new Hasher().u32(this.turn).u32(this.turnStep).u32(this.worldTime).u32(this.randomSeed).u32(this.entities.nextEntityId).u32(this.entities.size);
+    hashValue(h, this.attributes);
+    hashValue(h, this.techs);
+    hashValue(h, this.researchDone);
+    hashValue(h, this.victory);
+    for (const e of this.entities.all()) {
+      h.u32(e.id).u32(e.owner).u32(e.type).f32(e.x).f32(e.y).f32(e.z).f32(e.hp).u32(e.state).u32(e.heldType).f32(e.heldAmount);
+    }
+    return h.digest();
+  }
+
   /** 32-bit hash of the whole state; equal on every peer while they are in sync. */
   hash(): number {
     const h = new Hasher()

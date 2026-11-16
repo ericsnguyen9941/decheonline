@@ -16,7 +16,7 @@ import {
   World,
 } from '@aoe/sim';
 import type { Link } from '../net/link';
-import { Lockstep, NOT_RESPONDING_MS, type Timers } from './lockstep';
+import { Lockstep, NOT_RESPONDING_MS, SYNC_INTERVAL_TURNS, type Timers } from './lockstep';
 
 class FakeLink implements Link {
   sent: ClientMessage[] = [];
@@ -123,6 +123,19 @@ describe('lockstep', () => {
     expect(timers.clock).toBe(FRAME_MS);
   });
 
+  test('a checksum goes out on every 4th turn only', () => {
+    const { link, timers, lockstep } = setup();
+    const sent: number[] = [];
+    const send = link.send.bind(link);
+    link.send = (m) => {
+      if (m.t === 'hash') sent.push(m.turn);
+      send(m);
+    };
+    runThrough(link, timers, lockstep, 9);
+    expect(sent).toEqual([0, 4, 8]);
+    expect([...lockstep.hashes.keys()]).toEqual([0, 4, 8]);
+  });
+
   test('the boundary step of turn N waits for the release of turn N - 2', () => {
     const { link, timers, lockstep } = setup();
     timers.next();
@@ -184,7 +197,7 @@ describe('lockstep', () => {
       }
       reference.runTurn();
       while (lockstep.turn === turn) timers.next();
-      expect(lockstep.hashes.get(turn)).toBe(reference.hash());
+      expect(lockstep.hashes.get(turn)).toBe(turn % SYNC_INTERVAL_TURNS === 0 ? reference.syncChecksum() : undefined);
     }
     expect([lockstep.world.granularity, lockstep.world.frames]).toEqual([30, 9]);
     expect(lockstep.turnMs(20)).toBe(8 * 30 + FRAME_MS);

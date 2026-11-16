@@ -172,7 +172,7 @@ test('one player researches the Tool Age, builds an Archery Range and trains a B
     page.evaluate(() => ({ buildings: window.__game!.buildings(), ages: [window.__game!.age(1), window.__game!.age(2)], one: window.__game!.resources(1) }));
   await expect.poll(async () => JSON.stringify(await state(host)) === JSON.stringify(await state(guest))).toBe(true);
   const turns = await Promise.all(both.map((p) => p.evaluate(() => window.__game!.turn())));
-  const turn = Math.max(...turns) + 2;
+  const turn = Math.ceil((Math.max(...turns) + 2) / 4) * 4; // a checksum is kept for every 4th turn only
   for (const page of both) await page.waitForFunction((t) => window.__game!.turn() > t, turn);
   const [a, b] = await Promise.all(both.map((p) => p.evaluate((t) => window.__game!.hash(t), turn)));
   expect(a).toBeDefined();

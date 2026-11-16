@@ -29,6 +29,9 @@ export type LockstepEnd = EndReason | 'lost';
  */
 export const NOT_RESPONDING_MS = 25_000;
 
+/** The sync check (`World.syncChecksum`) runs on every 4th turn, as the original's `DoChecksum` does (turn-timing.md §9.1). */
+export const SYNC_INTERVAL_TURNS = 4;
+
 export interface Timers {
   set(fn: () => void, ms: number): unknown;
   clear(handle: unknown): void;
@@ -65,9 +68,10 @@ export class Lockstep {
    * the game speed per step (lobby.md §8).
    */
   baseTime = 0;
-  /** State hash after each executed turn, by turn number. */
+  /** Checksum after each sync-check turn (every `SYNC_INTERVAL_TURNS`th), by turn number. */
   readonly hashes = new Map<number, number>();
-  /** Called after each executed turn. */
+  private lastHash = 0;
+  /** Called after each executed turn, with the latest sync-check turn's checksum. */
   onTurn: (turn: number, hash: number) => void = () => {};
   /** Called with each sender's commands for `turn` (player number, as issued) before the step that runs them. */
   onCommands: (turn: number, batches: { player: number; commands: Command[] }[]) => void = () => {};
@@ -258,15 +262,17 @@ export class Lockstep {
   }
 
   private endTurn(turn: number): void {
-    const hash = this.world.hash();
-    this.hashes.set(turn, hash);
-    this.link.send({ t: 'hash', turn, hash });
+    if (turn % SYNC_INTERVAL_TURNS === 0) {
+      this.lastHash = this.world.syncChecksum();
+      this.hashes.set(turn, this.lastHash);
+      this.link.send({ t: 'hash', turn, hash: this.lastHash });
+    }
     const frameMs = Math.min(255, Math.round(this.frameMs()));
     const batch: ClientMessage = frameMs > 0 ? { t: 'turn', turn, commands: this.pending, frameMs } : { t: 'turn', turn, commands: this.pending };
     if (turn >= this.received) this.unreleased.set(turn, batch);
     this.link.send(batch);
     this.pending = [];
-    this.onTurn(turn, hash);
+    this.onTurn(turn, this.lastHash);
   }
 
   private wait(ms: number): void {
