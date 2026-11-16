@@ -201,8 +201,9 @@ describe('lockstep', () => {
     expect(link.sent).toHaveLength(1);
     while (!link.sent.some((m) => m.t === 'pong' && m.n === 2)) timers.next();
     expect(timers.clock).toBe(500);
-    link.receive({ t: 'rtt', rtt: [12, 40] });
+    link.receive({ t: 'rtt', rtt: [12, 40], frameMs: [17, 120] });
     expect(lockstep.rtt).toEqual([12, 40]);
+    expect(lockstep.frameTimes).toEqual([17, 120]);
   });
 
   test('waiting on a turn warns after 25 s and every 25 s after, until the turn comes', () => {

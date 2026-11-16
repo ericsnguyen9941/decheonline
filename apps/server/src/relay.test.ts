@@ -464,11 +464,21 @@ describe('speed control', () => {
     registry.handle(peers[0]!, { t: 'pong', n: 1 });
     clock += 30;
     registry.handle(peers[1]!, { t: 'pong', n: 1 });
-    expect(peers[0]!.take('rtt')).toEqual([{ t: 'rtt', rtt: [12, 0] }, { t: 'rtt', rtt: [12, 42] }]);
+    expect(peers[0]!.take('rtt')).toEqual([{ t: 'rtt', rtt: [12, 0], frameMs: [0, 0] }, { t: 'rtt', rtt: [12, 42], frameMs: [0, 0] }]);
     clock += PING_INTERVAL_MS;
     registry.handle(peers[1]!, { t: 'hash', turn: 0, hash: 0 });
     expect(peers[1]!.take('ping')).toEqual([{ t: 'ping', n: 2 }]);
     expect(peers[0]!.take('ping')).toEqual([]);
+  });
+
+  test("the round trips go out with each player's last reported frame time", () => {
+    let clock = 1000;
+    const { registry, peers } = started(() => clock);
+    registry.handle(peers[0]!, { t: 'turn', turn: 0, commands: [], frameMs: 17 });
+    registry.handle(peers[1]!, { t: 'turn', turn: 0, commands: [], frameMs: 120 });
+    clock += 25;
+    registry.handle(peers[1]!, { t: 'pong', n: 1 });
+    expect(peers[0]!.take('rtt')).toEqual([{ t: 'rtt', rtt: [0, 25], frameMs: [17, 120] }]);
   });
 
   test('a player away DROP_AFTER_MS after it was last heard is dropped: its next batch resigns it, then empty ones', () => {

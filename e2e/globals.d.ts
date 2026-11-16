@@ -50,8 +50,9 @@ interface Window {
     }[];
     queue(id: number): { records: { unit: number; count: number }[]; training: { unit: number; progress: number } | null } | null;
     ghost(): { unit: number; x: number; y: number; fits: boolean; segments?: { x: number; y: number; facet: number; fits: boolean }[] } | null;
-    net(): { granularity: number; frames: number; frameMs: number; rtt: number[] };
+    net(): { granularity: number; frames: number; frameMs: number; rtt: number[]; frameTimes: number[] };
     delayPongs(ms: number): void;
+    forceFrameMs(ms: number): void;
     age(player?: number): number;
     techState(tech: number, player?: number): number;
     objectName(id: number): string | null;

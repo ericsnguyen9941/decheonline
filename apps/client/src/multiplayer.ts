@@ -71,6 +71,8 @@ export interface NetDebug {
   net(): DebugNet;
   /** Hold every pong this long, faking a slow link to the server. */
   delayPongs(ms: number): void;
+  /** Report this mean frame time instead of the measured one (0: measure again), faking a slow machine. */
+  forceFrameMs(ms: number): void;
   /** Current age of `player` (default: this client's): 1 Stone .. 4 Iron (attribute 6). */
   age(player?: number): number;
   /** State of tech `tech` for `player` (default: this client's): -1 disabled, 0 locked, 1 available, 2 researching, 3 done. */
@@ -140,6 +142,8 @@ export interface DebugNet {
   frameMs: number;
   /** Round trip from the server to each slot, ms. */
   rtt: number[];
+  /** Each slot's mean frame time as the server last reported it, ms. */
+  frameTimes: number[];
 }
 
 export interface DebugPopulation {
@@ -516,6 +520,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
           onGameOver: () => layer.unselect(),
           reveal: () => layer.revealMap(),
           sendChat: (text, to) => link.send({ t: 'chat', text, to: to.map((p) => p - 1) }),
+          net: () => ({ rtt: game.rtt, frameMs: game.frameTimes }),
         },
       });
       // Start looking at this player's Town Center, else its newest object (`TRIBE_Player::random_start`'s view).
@@ -546,7 +551,7 @@ function debugPanel(
   status.dataset.testid = 'net-status';
   const speed = document.createElement('span');
   speed.dataset.testid = 'net-speed';
-  const net = (): DebugNet => ({ granularity: game.world.granularity, frames: game.world.frames, frameMs: frames.average(), rtt: game.rtt });
+  const net = (): DebugNet => ({ granularity: game.world.granularity, frames: game.world.frames, frameMs: frames.average(), rtt: game.rtt, frameTimes: game.frameTimes });
   const button = document.createElement('button');
   button.dataset.testid = 'send-test';
   button.textContent = 'Send test command';
@@ -656,6 +661,7 @@ function debugPanel(
     ghost: () => layer()?.ghost ?? null,
     net,
     delayPongs: (ms) => (game.pongDelayMs = ms),
+    forceFrameMs: (ms) => (frames.forcedMs = ms),
     age: (p = player) => game.world.attributes[p]![ATTR_CURRENT_AGE]!,
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
     objectName: (id) => hud()?.nameOf(id) ?? null,

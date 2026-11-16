@@ -202,10 +202,15 @@ export class CommandPanel {
    */
   private showHover(): void {
     const b = this.buttons[this.hovered];
+    this.hover(b ? commandMessage(this.o.provider, b, this.o.world, this.o.player) : null);
+  }
+
+  /** A button's `text_msg` on the message line while the mouse is on it (white, `InfoMessage`), or null to take it away. */
+  hover(text: string | null): void {
     const { message } = this.o;
-    if (b) {
+    if (text !== null) {
       clearTimeout(this.messageTimer);
-      message.textContent = commandMessage(this.o.provider, b, this.o.world, this.o.player);
+      message.textContent = text;
       message.hidden = false;
       message.dataset.hover = 'true';
     } else if (message.dataset.hover) {

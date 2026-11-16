@@ -89,6 +89,11 @@ export class Room {
     for (const m of this.members) m.peer?.send(message);
   }
 
+  /** Each member's round trip and last reported frame time, as the clients' score display reads them. */
+  rttMessage(): ServerMessage {
+    return { t: 'rtt', rtt: this.members.map((m) => m.rtt), frameMs: this.members.map((m) => m.frameMs) };
+  }
+
   sendLobby(): void {
     const players = this.players();
     this.members.forEach((m, you) => m.peer?.send({ t: 'lobby', code: this.code, you, players, settings: this.settings }));
@@ -279,7 +284,7 @@ export class RoomRegistry {
     this.byPeer.set(peer, room);
     peer.send({ t: 'rejoined', nextTurn: member.nextTurn });
     for (const record of room.log.slice(received)) peer.send({ t: 'turn', ...record });
-    peer.send({ t: 'rtt', rtt: room.members.map((m) => m.rtt) });
+    peer.send(room.rttMessage());
     this.ping(member, true);
   }
 
@@ -357,7 +362,7 @@ export class RoomRegistry {
   private pong(room: Room, member: Member, n: number): void {
     if (n !== member.pingN) return;
     member.rtt = Math.max(0, Math.round(this.now() - member.pingAt));
-    room.broadcast({ t: 'rtt', rtt: room.members.map((m) => m.rtt) });
+    room.broadcast(room.rttMessage());
   }
 
   private submitTurn(room: Room, member: Member, peer: Peer, turn: number, commands: Command[]): void {

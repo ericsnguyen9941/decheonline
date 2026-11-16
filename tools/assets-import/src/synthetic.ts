@@ -40,7 +40,7 @@ export const SYNTHETIC = {
    * the real letters), 16132 the Villager's, 9004/9005/3013 the end of the game's (`STRING_ID_VICTORY_MESSAGE` ...), 1217 a late turn's,
    * 3016/3026 the tribute and stance notifications, 3028-3030/11302 the relics' and 3019/3020/3022/3058/11301 the
    * Wonder's, 9851/9856/9863 the Diplomacy dialog's title, fee and Market texts, 11050 F11's population prefix, 3009 the
-   * gold tribute's notification.
+   * gold tribute's notification, 4132 the score button's rollover text.
    */
   strings: {
     10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
@@ -55,7 +55,7 @@ export const SYNTHETIC = {
     11302: 'Artifacts: %d Years', 3058: 'You have started building a Wonder!', 3019: '%s started building a Wonder!',
     3020: 'You completed a Wonder. You will win if it stands for 2000 years!',
     3022: '%s completed a Wonder. You will lose if it stands for 2000 years!', 11301: 'Wonder: %d Years',
-    11050: 'pop: ', 3009: '%s paid %d gold in tribute to you.',
+    11050: 'pop: ', 3009: '%s paid %d gold in tribute to you.', 4132: 'Score (F4)',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */

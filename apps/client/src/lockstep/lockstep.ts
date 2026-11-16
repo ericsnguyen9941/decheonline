@@ -81,6 +81,8 @@ export class Lockstep {
   readonly applied: Command[][] = [];
   /** The server's latest round trip to each slot, ms. */
   rtt: number[] = [];
+  /** Each slot's mean frame time as the server last heard it, ms (0 before the first). */
+  frameTimes: number[] = [];
   /** Hold each pong this long (debug: fakes a slow link). */
   pongDelayMs = 0;
 
@@ -140,6 +142,7 @@ export class Lockstep {
         else pong();
       } else if (m.t === 'rtt') {
         this.rtt = m.rtt;
+        this.frameTimes = m.frameMs;
       } else if (m.t === 'desync') {
         this.stop();
         this.onDesync(m.turn, m.hashes);

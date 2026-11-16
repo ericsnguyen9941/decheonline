@@ -35,6 +35,8 @@ export const SLP = {
   health: 50745,
   /** `groupnum`: the digits drawn over a selected object of group 1-9 (frame = group number). */
   groupNumbers: 50403,
+  /** `btn6`: the game screen's `button_pics`, the score display's latency and slow-player icons (frames 17, 19, 20). */
+  buttonPics: 50605,
   /** `mcursors`: the mouse cursors. */
   cursors: 51000,
 } as const;
@@ -42,7 +44,7 @@ export const SLP = {
 /** `RGE_CULTURE_ROMAN`: its art is in data2 under ids of its own. */
 const ROMAN = 4;
 /** The Roman ids of the per-culture SLPs (src/scr_game.cpp:166-171, :2158-2277). */
-const ROMAN_SLP: Readonly<Record<number, number>> = { 50704: 53005, 50713: 53006, 50717: 53007, 50747: 53008, 50733: 53010, 50737: 53011, 50741: 53012 };
+const ROMAN_SLP: Readonly<Record<number, number>> = { 50605: 53004, 50704: 53005, 50713: 53006, 50717: 53007, 50747: 53008, 50733: 53010, 50737: 53011, 50741: 53012 };
 
 /**
  * Interface SLP `base` (one of `SLP`'s per-culture ids) in the art of `culture`, a civ's `icon_set`; a culture past Roman

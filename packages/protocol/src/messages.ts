@@ -114,8 +114,11 @@ export type ServerMessage =
   | { t: 'turn'; turn: number; batches: TurnBatch[]; speed?: SpeedChange }
   /** Round-trip probe; answer with `pong` (docs/spec/turn-timing.md §8.3). */
   | { t: 'ping'; n: number }
-  /** The server's latest round trip to each slot, ms (0 before the first). */
-  | { t: 'rtt'; rtt: number[] }
+  /**
+   * The server's latest round trip to each slot, ms (0 before the first), and each slot's last reported mean frame
+   * time `frameMs`, ms (0 before the first): the score display's latency and slow-player icons (docs/spec/hud.md).
+   */
+  | { t: 'rtt'; rtt: number[]; frameMs: number[] }
   /** State hashes for `turn` disagreed. `hashes` is indexed by slot. */
   | { t: 'desync'; turn: number; hashes: number[] }
   /** Player `from`'s chat message to this client (docs/spec/chat.md §3). */

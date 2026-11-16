@@ -46,6 +46,8 @@ const FORMATION_KEYS = ['F2', 'F3', 'F4', 'F5', 'F6', 'F7'];
 const STRING_GAME_SPEED_CHANGED = 3059;
 /** `STRING_ID_SCORE_BUTTON_SHORTCUT`: the score button's text. */
 const SCORE_BUTTON = 0x1023;
+/** `STRING_ID_SCORE_BUTTON_MESSAGE`: the score button's `text_msg`, "Score (F4)" (scr_game.cpp:277-279). */
+const SCORE_BUTTON_MESSAGE = 0x1024;
 /** `STRING_ID_PLAYER_DROPPED_NOTICE`. */
 const DROPPED_NOTICE = 0x25c9;
 
@@ -150,6 +152,8 @@ export interface HudGame {
   reveal(): void;
   /** Send a chat message to players `to` (player numbers) through the relay, outside the turns (docs/spec/chat.md §3). */
   sendChat(text: string, to: number[]): void;
+  /** The server's round trip to each slot and each slot's mean frame time, ms: the score display's icons. */
+  net(): { rtt: readonly number[]; frameMs: readonly number[] };
 }
 
 function box(parent: HTMLElement | null, className: string, testid?: string): HTMLDivElement {
@@ -295,7 +299,12 @@ export class GameHud {
     const speed = { current: () => o.world.gameSpeed, disabled: () => this.gameOver.over, change: (s: number) => this.changeGameSpeed(s) };
     this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds, speed, o.music ?? null) : null;
     this.chat = new ChatLines(this.view);
-    this.scores = new ScoreDisplay(this.view, o.world, o.game.names);
+    this.scores = new ScoreDisplay(this.view, o.world, o.game.names, {
+      player: o.player,
+      status: () => o.game.net(),
+      dropped: (p) => o.game.dropped(p),
+      icon: (frame) => o.provider.interfaceFrame(cultureSlp(SLP.buttonPics, this.culture), frame),
+    });
     this.gameOver = new GameOver({
       view: this.view,
       provider: o.provider,
@@ -383,6 +392,11 @@ export class GameHud {
     this.scoreButton = easyButton(this.bottom, lookOf(o.provider, GAME_DIALOG_INFO), { x: 0, y: 0, w: 30, h: 30 }, o.provider.string(SCORE_BUTTON) ?? '', FONT.standard, () => this.scores.toggle(), click);
     this.scoreButton.classList.add('hud-score-button');
     this.scoreButton.dataset.testid = 'score-button';
+    // `handle_mouse_move` (scr_game.cpp:3650-3687): a move takes the message line's text away, then a move over a
+    // button with a `text_msg` shows it there in white.
+    const scoreMessage = o.provider.string(SCORE_BUTTON_MESSAGE) ?? '';
+    this.scoreButton.addEventListener('mousemove', () => this.commands.hover(scoreMessage));
+    this.scoreButton.addEventListener('mouseleave', () => this.commands.hover(null));
     this.minimapView = o.map ? new Minimap({ parent: this.minimap, world: o.world, provider: o.provider, player: o.player, ...o.map }) : null;
     topButtonLabels(o.provider).forEach((label, i) => (this.menus[i]!.textContent = label));
     this.root.classList.toggle('art', o.provider.interfaceFrame(cultureSlp(SLP.screen[1024], this.culture), 0) !== null);

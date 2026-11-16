@@ -634,3 +634,19 @@ dialog h2 {
 .hud-score-button {
   position: absolute;
 }
+/* An F4 score line, right-aligned: [slow icon] [latency icon] text (hud/score-display.ts). */
+.hud-score-line {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+.hud-score-line > span:last-child {
+  padding-left: 3px;
+}
+.hud-score-icon {
+  flex: none;
+  margin: 6px 4px 0 0;
+}
+.hud-score-icon[hidden] {
+  display: none;
+}
