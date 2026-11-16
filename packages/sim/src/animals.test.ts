@@ -26,6 +26,26 @@ function distance(a: Entity, b: { x: number; y: number }): number {
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 }
 
+describe('unit-ai.md §5.5: with nothing acting on them, animals stand still (captain\'s decision 2026-11-16)', () => {
+  test('a Gazelle, an Elephant, a Lion and an Alligator with no player unit near keep their exact position for 2 game minutes', () => {
+    // A lone player Villager far away keeps the game going; the animals stand in each other's view.
+    const w = world(
+      { owner: 1, type: VILLAGER, x: 40.5, y: 40.5 },
+      { owner: 0, type: GAZELLE, x: 10.5, y: 10.5 },
+      { owner: 0, type: ELEPHANT, x: 12.5, y: 10.5 },
+      { owner: 0, type: LION, x: 10.5, y: 12.5 },
+      { owner: 0, type: ALLIGATOR, x: 12.5, y: 12.5 },
+    );
+    const animals = [2, 3, 4, 5].map((id) => w.entities.get(id)!);
+    const start = animals.map((a) => [a.x, a.y]);
+    while (w.worldTime < 120000) {
+      w.runTurn();
+      expect(animals.map((a) => [a.x, a.y])).toEqual(start);
+    }
+    expect(animals.map((a) => [a.hp > 0, a.mover?.action ?? null, a.attack ?? null])).toEqual(animals.map(() => [true, null, null]));
+  });
+});
+
 describe('unit-ai.md §5.2: a hunted elephant fights back', () => {
   test('a Villager spears a wild Elephant: it records the hunter, charges it and kills it', () => {
     const w = world(
@@ -51,7 +71,7 @@ describe('unit-ai.md §5.2: a hunted elephant fights back', () => {
     expect(elephant.state).toBe(ObjectState.Active);
   });
 
-  test('an idle Elephant ignores a Villager in view and wanders on', () => {
+  test('an idle Elephant ignores a Villager in view and stands still', () => {
     const w = world({ owner: 1, type: VILLAGER, x: 12.5, y: 10.5 }, { owner: 0, type: ELEPHANT, x: 14.5, y: 10.5 });
     const [villager, elephant] = [w.entities.get(1)!, w.entities.get(2)!];
     for (let i = 0; i < 100; i++) {
@@ -59,7 +79,7 @@ describe('unit-ai.md §5.2: a hunted elephant fights back', () => {
       expect(elephant.attack).toBeFalsy();
     }
     expect([elephant.ai!.action, elephant.ai!.target, villager.hp]).toEqual([-1, -1, 25]);
-    expect(elephant.bird).toBeTruthy();
+    expect([elephant.x, elephant.y]).toEqual([14.5, 10.5]);
   });
 });
 
@@ -116,7 +136,7 @@ describe('unit-ai.md §5.1: a gazelle runs', () => {
     const gazelle = w.entities.get(2)!;
     expect(gazelle.ai!.kind).toBe(AiClass.Hunted);
     order(w, 1, { type: 'work', units: [1], target: 2, x: gazelle.x, y: gazelle.y });
-    // The Gazelle wanders (unit-ai.md §5.5), so step by step: the spear lands after the Gazelle's own update of that step.
+    // Step by step: the spear lands after the Gazelle's own update of that step.
     for (let i = 0; i < 20000 && gazelle.ai!.attackers.length === 0; i++) w.runStep();
     expect(gazelle.ai!.attackers).toEqual([1]);
     const [hunter, move] = [w.entities.get(1)!, gazelle.mover!.action!];
@@ -127,12 +147,14 @@ describe('unit-ai.md §5.1: a gazelle runs', () => {
     expect(gazelle.hp).toBeGreaterThan(0);
   });
 
-  test('an idle Gazelle runs from a Villager in its view and never attacks', () => {
-    // The Gazelle wanders from the start (unit-ai.md §5.5) and checks its view after 4.2 s: the Villager stands on its way.
-    const w = world({ owner: 1, type: VILLAGER, x: 19.5, y: 9.5 }, { owner: 0, type: GAZELLE, x: 15.5, y: 10.5 });
+  test('an idle Gazelle stands until a Villager walks up to it, then runs from it and never attacks', () => {
+    const w = world({ owner: 1, type: VILLAGER, x: 27.5, y: 10.5 }, { owner: 0, type: GAZELLE, x: 15.5, y: 10.5 });
     const [villager, gazelle] = [w.entities.get(1)!, w.entities.get(2)!];
+    for (let i = 0; i < 100; i++) w.runTurn();
+    expect([gazelle.x, gazelle.y, gazelle.ai!.action]).toEqual([15.5, 10.5, -1]);
+    order(w, 1, { type: 'move', units: [1], x: 16.5, y: 10.5 });
     runUntil(w, () => gazelle.ai!.action !== -1, 200);
-    expect(gazelle.bird).toBeFalsy();
+    expect(distance(villager, gazelle)).toBeLessThan(10);
     expect(distance(villager, gazelle.mover!.action!)).toBeGreaterThan(distance(villager, gazelle));
     runUntil(w, () => gazelle.ai!.action === -1, 200);
     expect(distance(gazelle, villager)).toBeGreaterThan(3);
@@ -158,7 +180,7 @@ describe('unit-ai.md §4.3 step 4: a villager whose work an animal interrupts hu
     const w = world(
       { owner: 1, type: VILLAGER, x: 10.5, y: 10.5 },
       { owner: 0, type: 143, x: 22.5, y: 10.5 },
-      { owner: 0, type: ALLIGATOR, x: 16.5, y: 12.5 },
+      { owner: 0, type: ALLIGATOR, x: 17.5, y: 11.5 },
     );
     const [v, tree, gator] = [w.entities.get(1)!, w.entities.get(2)!, w.entities.get(3)!];
     order(w, 1, { type: 'work', units: [1], target: 2, x: tree.x, y: tree.y });

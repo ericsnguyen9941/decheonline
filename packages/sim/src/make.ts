@@ -22,7 +22,7 @@ export interface MakeAction {
 
 /**
  * `default_task` (src/m_ac_obj.cpp:130-140): the first task flagged default, if it is a make task (the animals' wander,
- * action 6, is `bird.ts`).
+ * action 6, is not started, unit-ai.md §5.5).
  */
 export function defaultMakeTask(t: UnitType): number {
   const tasks = t.action?.tasks ?? [];

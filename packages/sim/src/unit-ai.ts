@@ -393,7 +393,7 @@ function removeCurrentTarget(ai: UnitAI): void {
 
 /** The object has a game action at the top of its list (`have_action`). */
 export function hasAction(e: Entity): boolean {
-  return !!(e.work || e.attack || e.mover?.action || e.research || e.make || e.bird);
+  return !!(e.work || e.attack || e.mover?.action || e.research || e.make);
 }
 
 /**
@@ -917,6 +917,15 @@ function closestObject(ctx: GameContext, e: Entity, group = -1, state = -1, type
   return closestObjectAndPlayers(ctx, e, group, state, type, relation)[0];
 }
 
+/**
+ * `closestObject` over players' objects only, Gaia's skipped: what a gazelle runs from and a lion attacks. The original
+ * takes Gaia's too (a lion hunts gazelles, a gazelle runs from an elephant); the captain's decision of 2026-11-16 keeps
+ * the animals still until a player's unit comes near (unit-ai.md §5).
+ */
+function closestPlayerObject(ctx: GameContext, e: Entity): number {
+  return closestObjectAndPlayers(ctx, e, -1, -1, -1, -1, true)[0];
+}
+
 /** `desiredRelation` of `closestObject` (src/aiuaimod.cpp:1527-1530): 0 self or ally, 1 neutral, 2 enemy, 3 self, else any bucket. */
 function relationBucket(relation: number, bucket: number): boolean {
   if (relation === 0) return bucket === UNIT_DIPLOMACY_ALLY || bucket === UNIT_DIPLOMACY_SELF;
@@ -930,7 +939,7 @@ function relationBucket(relation: number, bucket: number): boolean {
  * `closestObject` with `numberDifferentPlayerObjectsVisible` (src/aiuaimod.cpp:1524-1549): how many players 1-8 own a
  * record in any bucket, whatever the filters (the object's own record included).
  */
-function closestObjectAndPlayers(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1, relation = -1): [number, number] {
+function closestObjectAndPlayers(ctx: GameContext, e: Entity, group = -1, state = -1, type = -1, relation = -1, playersOnly = false): [number, number] {
   const buckets = search(ctx, e);
   let closestId = -1;
   let closest = -1;
@@ -938,7 +947,7 @@ function closestObjectAndPlayers(ctx: GameContext, e: Entity, group = -1, state 
   for (const [b, bucket] of buckets.entries()) {
     for (const r of bucket) {
       if (r.owner >= 1 && r.owner < 9) players.add(r.owner);
-      if (r.id === e.id || !relationBucket(relation, b)) continue;
+      if (r.id === e.id || !relationBucket(relation, b) || (playersOnly && r.owner === 0)) continue;
       const o = ctx.entities.get(r.id);
       if (!o || o.state >= ObjectState.PendingRemoval) continue;
       if ((group !== -1 && typeOf(ctx, o).group !== group) || (type !== -1 && o.type !== type) || (state !== -1 && o.state !== state)) continue;
@@ -984,7 +993,7 @@ function artifactIdle(ctx: GameContext, e: Entity): number {
 
 /** `TribeHuntedAnimalUnitAIModule::processIdle` (src/taiuaimd.cpp:89): run 3 × maximum speed away from the closest object. */
 function huntedIdle(ctx: GameContext, e: Entity): number {
-  const target = ctx.entities.get(closestObject(ctx, e));
+  const target = ctx.entities.get(closestPlayerObject(ctx, e));
   if (!target) return IDLE_NOTHING;
   const distance = mul32(maximumSpeed(e, typeOf(ctx, e)), EVASIVE_DISTANCE_SCALE);
   const dx = sub32(target.x, e.x);
@@ -1004,7 +1013,7 @@ function lionIdle(ctx: GameContext, e: Entity): number {
   const ai = e.ai!;
   ai.idleTimeout = 6000;
   adjustIdleTimeout(ctx, ai);
-  const id = closestObject(ctx, e);
+  const id = closestPlayerObject(ctx, e);
   const target = ctx.entities.get(id);
   if (!target) return IDLE_NOTHING;
   if (distanceToObject(ctx, e, target) > mul32(typeOf(ctx, e).los, 2)) return IDLE_NOTHING;

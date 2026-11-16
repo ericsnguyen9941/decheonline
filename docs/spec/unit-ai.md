@@ -612,7 +612,13 @@ tables carry Gazelle 65, Elephant 48, Lion 126 and Alligator 1 (ROOTS in
 branches (`src/taiuaimd.cpp:147-172`, `:265-287`), because the sim's move
 action never sends `0x1FC` (the base `:3181` branch is not ported either);
 the `0x20F` early return of the hunted and elephant modules (nothing sends
-it). The hunted and elephant ATTACKED reactions raise no alert and call no
+it). **Captain's decision 2026-11-16**: with nothing acting on them, the
+animals stand still. Besides the wander (§5.5), the gazelle's run (§5.1) and
+the lion's attack (§5.3) look only at players' objects (`closestPlayerObject`):
+in the original their `closestObject` also takes Gaia's, so a lion hunts the
+gazelles in its view and a gazelle runs from a nearby elephant, lion or
+alligator. The alligator (§5.4) only takes the enemy bucket, so no Gaia
+object, as in the original. The hunted and elephant ATTACKED reactions raise no alert and call no
 help (no `notifyCommander`, no `askForHelp`), unlike §4.2.
 
 ### 5.1 Gazelle (hunted; also Horse 157 and Gazelle_King 384)
@@ -690,9 +696,14 @@ everything drawn after them, the relics and ruins included (victory.md §3).
 The 1.0a exe has the same code at 0x402090-0x402330 (`objdump`, the
 `* 10 / 0x7FFF + 5` timer and the `6.0` height).
 
-**Port**: `packages/sim/src/bird.ts` (`startBird`, `updateBird`; started by
-the default-task chain in `objects.ts`, dropped by `deleteActions`); tests
-`packages/sim/src/bird.test.ts`.
+**Not ported: captain's decision 2026-11-16** ("các con vật này nếu k có tác
+động sẽ đứng im": with nothing acting on them, these animals stand still).
+The original has the wander as above; the sim's default-task chain in
+`objects.ts` does not start action 6, so a Gazelle, Elephant or Alligator
+stands where it is until a player's unit comes near or hits it (§5.1-§5.4),
+and draws none of the rand() below. The port was `bird.ts` (commit 7d8bbd3,
+removed); test `animals.test.ts` "keep their exact position for 2 game
+minutes".
 
 ## 6. Random draws in order
 
@@ -711,8 +722,8 @@ All draws are `debug_rand` → the C runtime `rand()` (`core.md` §4.1). A
 | lion idle check | 1 `rand()` (new adjusted timeout) | `src/taiuaimd.cpp:321-322` |
 | lion kill | 1 `rand()` | `src/taiuaimd.cpp:302` |
 | explore re-task | 1 `rand() % 3` per tile search | `src/aiuaimod.cpp:1643` |
-| animal wander: new point | 2 `rand()` (x, y), then 1 (timer) | §5.5, `src/act_bird.cpp:131-133`, `:68` |
-| animal wander: sprite swap | 1 `rand()` (timer) | §5.5, `src/act_bird.cpp:68`, `:76` |
+| animal wander: new point (not in the sim, §5.5) | 2 `rand()` (x, y), then 1 (timer) | §5.5, `src/act_bird.cpp:131-133`, `:68` |
+| animal wander: sprite swap (not in the sim, §5.5) | 1 `rand()` (timer) | §5.5, `src/act_bird.cpp:68`, `:76` |
 | ATTACKED forwarded straight to the owner because the AI refused it (object not active) | 1 fence | `src/com_obj.cpp:514-516` |
 | computer only (dead in 2-human games) | `lookAround` timeout `rand() % 1000 + 4000`; soldier `0x20F` two `rand() % 8`; priest `rand() % (n + 2)` | `src/aiuaimod.cpp:2473`, `src/taiuaimd.cpp:1721`, `:1730`, `:1138` |
 

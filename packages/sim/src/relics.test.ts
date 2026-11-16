@@ -46,9 +46,9 @@ function runUntil(w: World, done: () => boolean, limit = 200): void {
 describe('victory.md §3: relics and ruins on a random map (src/tworld.cpp:727-737)', () => {
   // Seeds 1..6 over three map types and sizes: 5 relics (159) and/or 5 ruins (158), Gaia's, as the two rolls say.
   const cases: [string, number, number, [number, number][]][] = [
-    ['Mostly Land, Large', MAP_MOSTLY_LAND, 144, [[0, 0], [0, 0], [0, 5], [0, 5], [5, 0], [0, 5]]],
-    ['Hill Country, Small', MAP_HILLY, MAP_SMALL, [[0, 0], [5, 0], [0, 0], [5, 0], [5, 5], [0, 5]]],
-    ['Lake, Tiny', MAP_LAKE, MAP_TINY, [[0, 5], [0, 5], [5, 5], [0, 5], [0, 0], [0, 5]]],
+    ['Mostly Land, Large', MAP_MOSTLY_LAND, 144, [[5, 0], [0, 0], [0, 0], [0, 0], [0, 0], [5, 5]]],
+    ['Hill Country, Small', MAP_HILLY, MAP_SMALL, [[5, 0], [0, 5], [5, 5], [0, 5], [5, 0], [5, 5]]],
+    ['Lake, Tiny', MAP_LAKE, MAP_TINY, [[5, 5], [0, 0], [5, 5], [0, 0], [0, 5], [5, 0]]],
   ];
   for (const [name, type, size, expected] of cases) {
     test(`${name}: relics and ruins per seed 1-6 are ${JSON.stringify(expected)}, each W/5 tiles apart`, () => {
@@ -202,8 +202,8 @@ describe('victory.md §10 / Example 2: all relics and all ruins held (src/tworld
     expect(a[1]![ATTR_ALL_ARTIFACTS]).toBe(1);
   });
 
-  test('a seeded Standard game (Mostly Land, Large, seed 5): player 1 takes the 5 relics and wins 11105 steps later', () => {
-    const w = new World({ players: 3, randomSeed: 5, randomMap: {} });
+  test('a seeded Standard game (Mostly Land, Large, seed 1): player 1 takes the 5 relics and wins 11105 steps later', () => {
+    const w = new World({ players: 3, randomSeed: 1, randomMap: {} });
     expect(w.victory.artifactCount).toBe(5);
     // Bring the map's relics next to player 1's Villagers, one tile apart.
     const [vx, vy] = tile(ofType(w, VILLAGER).find((e) => e.owner === 1)!);
@@ -222,6 +222,5 @@ describe('victory.md §10 / Example 2: all relics and all ruins held (src/tworld
     }
     expect(countdown).toBe(11105);
     expect(w.gameResult()).toEqual({ endCondition: END_ALL_RELICS, winners: [1], status: [0, STATUS_WON, STATUS_LOST] });
-    // 13 000 steps of a full map with its animals wandering (unit-ai.md §5.5).
   }, 60_000);
 });

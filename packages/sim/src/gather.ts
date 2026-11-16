@@ -221,7 +221,6 @@ export function deleteActions(ctx: GameContext, e: Entity): void {
   e.work = null;
   e.attack = null;
   e.make = null;
-  e.bird = null;
   endWonder(ctx, e);
   if (e.mover) endAction(e.mover);
   dropResearch(ctx, e);

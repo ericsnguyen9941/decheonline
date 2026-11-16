@@ -4,7 +4,6 @@
  * removal and the spawned dead object live here; actions are gather/hunt/build (`gather.ts`), an attack, a plain walk,
  * a missile, or a Farm's food production (`make.ts`); the unit AI (`unit-ai.ts`) runs last. Buildings wrap the chain with construction and their production queue (`buildings.ts`).
  */
-import { defaultBirdTask, startBird, updateBird } from './bird';
 import { emptyQueue, giveBuiltStorages, isBuilding, updateConstruction, updateQueue } from './buildings';
 import { updateAttack, updateMissile } from './combat';
 import { checkDamageSprites } from './damage';
@@ -123,8 +122,6 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
   } else if (e.work) {
     const r = updateWork(ctx, e);
     if (r === ActionResult.Failed || r === ActionResult.Remove) deleteActions(ctx, e);
-  } else if (e.bird) {
-    if (updateBird(ctx, e, e.bird) === ActionResult.Remove) deleteActions(ctx, e);
   } else if (e.attack) {
     // Only `remove` drops an attack; a failed one stays in state 13 and tells the unit AI every update.
     if (updateAttack(ctx, e) === ActionResult.Remove) deleteActions(ctx, e);
@@ -145,7 +142,7 @@ function updateChain(ctx: GameContext, e: Entity, t: UnitType): boolean {
     else if (defaultWonderTask(t) !== -1) startWonder(ctx, e);
     else if (defaultTransportTask(t) !== -1) startTransport(ctx, e, defaultTransportTask(t), -1, -1);
     else if (defaultTradeTask(t) !== -1) startTrade(ctx, e, defaultTradeTask(t), undefined, -1, -1);
-    else if (defaultBirdTask(t) !== -1) startBird(ctx, e, defaultBirdTask(t));
+    // The animals' default task, the wander (action 6, unit-ai.md §5.5), is not started: captain's decision 2026-11-16.
   }
   // `RGE_Combat_Object::update` refreshes the object's visible-unit records, then ends with the unit AI, on the owner's
   // turn only, with the owner's accumulated time.

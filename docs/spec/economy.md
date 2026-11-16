@@ -985,9 +985,10 @@ Kept as behaviour (the target is the original game):
 
 ## 10. Undocumented or not ported
 
-- **Animal wander (action 6).** Specified in `unit-ai.md` §5.5 and ported
-  (`bird.ts`): the second default task the sim starts after the make action
-  (21, the Farm's, §4.7).
+- **Animal wander (action 6).** Specified in `unit-ai.md` §5.5; not started
+  by the sim (captain's decision 2026-11-16: animals stand still), though the
+  original starts it as a default task like the make action (21, the Farm's,
+  §4.7).
 - **Task requests of gatherers (ported, `unit-ai.ts` `civilianRetask`).** A
   waiting gather or hunt action notifies its unit AI `REQUEST_TASK` (§4.7); a
   `TARGET_INVALID` for the current action takes the same path
