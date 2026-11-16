@@ -4,12 +4,16 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 // its Villagers (both clients ask for the same, so their games stay the same).
 const URL = '/?debug=net&map=test&speed=20&units=35,125,73';
 
-/** Master ids (empires.dat): Stone Thrower, Priest, Clubman, the Stone Thrower's stone. */
+/** Master ids (empires.dat): Stone Thrower, Priest, Clubman, Villager, the Stone Thrower's stone. */
 const STONE_THROWER = 35;
 const PRIEST = 125;
 const CLUBMAN = 73;
+const VILLAGER = 83;
 const STONE = 34;
-/** `relation` stance: neutral (the test map's bases are close; nobody fights unless ordered). */
+/**
+ * `relation` stance: neutral (the test map's bases are close). Soldiers still attack the other side's soldiers and Priests
+ * in sight, but leave its Villagers alone (diplomacy.md §2).
+ */
 const NEUTRAL = 1;
 /** Game sound 13, convwarn.wav: the old owner's conversion warning (docs/spec/sounds.md). */
 const CONVERTED = 13;
@@ -103,7 +107,7 @@ test('Attack Ground, Heal and Convert from their buttons, on two clients', async
   const priest = await unitOf(host, 1, PRIEST);
   const ownClub = await unitOf(host, 1, CLUBMAN);
   const enemyClub = await unitOf(host, 2, CLUBMAN);
-  const guestSt = await unitOf(host, 2, STONE_THROWER);
+  const guestVillager = await unitOf(host, 2, VILLAGER);
 
   // A click mode leaves only Cancel in the grid, and Esc leaves the mode with the selection kept.
   await selectUnit(host, st.id);
@@ -148,9 +152,11 @@ test('Attack Ground, Heal and Convert from their buttons, on two clients', async
   await guest.keyboard.press('Control+Digit1');
   await expect.poll(() => guest.evaluate(() => window.__game!.groupNumbers())).toContainEqual({ id: enemyClub.id, group: 1 });
 
-  // The guest's Clubman hurts the host's Clubman; the guest's Stone Thrower walks close so the guest sees.
+  // The guest's Clubman hurts the host's Clubman; a guest Villager walks close so the guest sees. Not a soldier: an idle
+  // soldier, or one its hurt Clubman calls to help (`askForHelp`), attacks the host's neutral units, the Priest walking in
+  // included, while soldiers leave a neutral Villager alone (diplomacy.md §2).
   await guest.evaluate(([a, t]) => window.__game!.issue({ type: 'attack', units: [a], target: t }), [enemyClub.id, ownClub.id] as const);
-  await guest.evaluate(([id, x, y]) => window.__game!.issueMove([id], x, y), [guestSt.id, club.x + 2, club.y + 2] as const);
+  await guest.evaluate(([id, x, y]) => window.__game!.issueMove([id], x, y), [guestVillager.id, club.x + 2, club.y + 2] as const);
   await host.waitForFunction(([id, hp]) => (window.__game!.objects().find((o) => o.id === id)?.hp ?? hp) < hp, [ownClub.id, (await objectById(host, ownClub.id))!.hp] as const);
   // Both stop: the host's Clubman hits back once attacked.
   await guest.evaluate((id) => window.__game!.issue({ type: 'stop', objects: [id] }), enemyClub.id);
