@@ -63,6 +63,8 @@ interface Seen {
   state: number;
   /** A dying tree's tile was visible at the last check (`RGE_Doppleganger_Creator`'s `Last_Map_Value` bit). */
   visible: boolean;
+  /** The last `update` that found the object. */
+  look: number;
 }
 
 /**
@@ -76,6 +78,7 @@ interface Seen {
 export class Doppelgangers {
   readonly copies = new Map<number, Doppelganger>();
   private readonly seen = new Map<number, Seen>();
+  private look = 0;
 
   constructor(
     private readonly player: number,
@@ -96,24 +99,39 @@ export class Doppelgangers {
     const keep = (s: Seen) => {
       if (tile(s.copy.x, s.copy.y) === TILE_FOGGED) this.copies.set(s.copy.id, { ...s.copy });
     };
-    const present = new Set<number>();
+    const look = ++this.look;
     for (const e of world.entities.all()) {
       const flag = this.flagOf(e.type);
       if (flag === 0 || !e.sprite) continue;
-      present.add(e.id);
-      const at = tile(e.x, e.y);
-      const copy: Doppelganger = { id: e.id, type: e.type, owner: e.owner, x: e.x, y: e.y, z: e.z, graphic: e.sprite.graphic, frame: e.sprite.frame, facet: e.facet };
-      const before = this.seen.get(e.id);
-      const now: Seen = { copy, state: e.state, visible: at === TILE_VISIBLE };
-      this.seen.set(e.id, now);
-      if (!before) continue;
-      if (flag === 2 && e.state >= ObjectState.Dying) {
-        if (before.state < ObjectState.Dying || (before.visible && !now.visible)) keep(now);
+      const visible = tile(e.x, e.y) === TILE_VISIBLE;
+      const now = this.seen.get(e.id);
+      if (!now) {
+        const copy: Doppelganger = { id: e.id, type: e.type, owner: e.owner, x: e.x, y: e.y, z: e.z, graphic: e.sprite.graphic, frame: e.sprite.frame, facet: e.facet };
+        this.seen.set(e.id, { copy, state: e.state, visible, look });
+        continue;
       }
-      if (flag === 1 && before.state < ObjectState.PendingRemoval && e.state >= ObjectState.PendingRemoval) keep(now);
+      // Updated in place, not copied: thousands of trees are looked at every step.
+      const state = now.state;
+      const wasVisible = now.visible;
+      const c = now.copy;
+      c.type = e.type;
+      c.owner = e.owner;
+      c.x = e.x;
+      c.y = e.y;
+      c.z = e.z;
+      c.graphic = e.sprite.graphic;
+      c.frame = e.sprite.frame;
+      c.facet = e.facet;
+      now.state = e.state;
+      now.visible = visible;
+      now.look = look;
+      if (flag === 2 && e.state >= ObjectState.Dying) {
+        if (state < ObjectState.Dying || (wasVisible && !visible)) keep(now);
+      }
+      if (flag === 1 && state < ObjectState.PendingRemoval && e.state >= ObjectState.PendingRemoval) keep(now);
     }
     for (const [id, s] of this.seen) {
-      if (present.has(id)) continue;
+      if (s.look === look) continue;
       this.seen.delete(id);
       // Removed between two looks: as at `remove_visible_resource`, from where it last was.
       if (this.flagOf(s.copy.type) === 1 && s.state < ObjectState.PendingRemoval) keep(s);

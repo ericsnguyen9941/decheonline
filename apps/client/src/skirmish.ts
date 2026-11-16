@@ -18,7 +18,7 @@ export interface SkirmishDebug {
   objects(): { id: number; owner: number; type: number; x: number; y: number; z: number; state: number; graphic: number }[];
   /** Objects drawn with pack sprites (not debug shapes). */
   packSprites(): number;
-  /** Objects the player's fog lets it see; every one shows pack art once `packSprites()` equals it. */
+  /** Objects near the view the player's fog lets it see; every one shows pack art once `packSprites()` equals it. */
   shownObjects(): number;
   /** Canvas pixel at the middle of object `id`'s drawn sprite; null when it is not drawn. */
   objectScreenPos(id: number): { x: number; y: number } | null;

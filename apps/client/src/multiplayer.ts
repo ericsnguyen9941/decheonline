@@ -48,7 +48,7 @@ export interface NetDebug {
   unitScreenPos(id: number): { x: number; y: number } | null;
   /** Objects drawn with pack sprites (not debug shapes). */
   packSprites(): number;
-  /** Objects the player's fog lets it see; every one shows pack art once `packSprites()` equals it. */
+  /** Objects near the view the player's fog lets it see; every one shows pack art once `packSprites()` equals it. */
   shownObjects(): number;
   /** Stockpile of `player` (default: this client's), whole numbers as the resource bar shows them. */
   resources(player?: number): Resources;

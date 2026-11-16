@@ -30,12 +30,14 @@ import { frameCursor } from '../hud/frame-image';
 import { HOTKEY_STRING, hotkeyLetter, pressedLetter } from '../hud/hotkeys';
 import { BOTTOM_HEIGHT, SLP, TOP_HEIGHT } from '../hud/layout';
 import { attackRollover } from '../hud/text';
-import { mapPixelSize } from '../map/iso';
+import { ELEV_H } from '../map/elevation';
+import { mapPixelSize, TILE_H, TILE_W, visibleRange, type TileRange } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import { composeGraphic, GROUND_LAYER, splitsShadow, splitsTerrain, type PartSet } from './composite';
 import { facingFrame } from './facing';
 import { Doppelgangers, fogDraw, TERRAIN_LAYER, type Doppelganger } from './fog-objects';
 import { FIRST_GROUP, GroupIds } from './group-ids';
+import { ObjectGrid } from './object-grid';
 import { groupKey } from './group-keys';
 import { GROUND_INTERVAL_MS, MOVE_INTERVAL_MS, MoveMarkers } from './move-marker';
 import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
@@ -125,6 +127,26 @@ interface Track {
   layer: number;
   /** The object's damage sprites drawn over it (`Entity.overlays`), by graphic, with when each first showed. */
   overlays: Map<number, { sprite: Sprite; start: number }>;
+  /** What a still object was drawn from at its last full draw, or null: while none of it changes it stays as drawn. */
+  still: Still | null;
+}
+
+/**
+ * A still object (no mover, a graphic of one frame, no damage sprites, art loaded; trees, mines, bushes): its look
+ * depends only on these, and on the camera's parity while it is drawn fogged (-1: not fogged).
+ */
+interface Still {
+  type: number;
+  graphic: number;
+  frame: number;
+  flag: number;
+  state: number;
+  owner: number;
+  facet: number | undefined;
+  tile: number;
+  parity: number;
+  /** The fog lets the player see it (`shownObjects`). */
+  shown: boolean;
 }
 
 /**
@@ -210,6 +232,16 @@ const HIT_ALPHA = 8;
 const Z_PIXELS = 16;
 /** `draw_level` of a graphic without pack data: above the low layers an unexplored tile still draws. */
 const DEFAULT_LAYER = 20;
+/**
+ * How far (map pixels) outside the view an object's point may stand and still be drawn: its sprite can reach into the
+ * view from there. The pack's widest frames reach 320-350 px sideways of their hotspot (Dock, Tree07), the tallest 441 px
+ * above it (cliffs) and 240 px below; a raised tile adds its height below (`objectArea`).
+ */
+const MARGIN_SIDE = 352;
+const MARGIN_ABOVE = 256;
+const MARGIN_BELOW = 480;
+/** Sprites in the same screen row draw by object id, the later object over the earlier: well under 1 / 1000 (overlays). */
+const ID_ORDER = 1e-9;
 
 /** A sim step's number: `turn` and `turn_step` together. */
 function stepOf(world: World): number {
@@ -217,7 +249,7 @@ function stepOf(world: World): number {
 }
 
 /**
- * Draws every sim object on the map layer (units, buildings, trees, mines, animals, carcasses) with its real sprite
+ * Draws every sim object near the view on the map layer (units, buildings, trees, mines, animals, carcasses) with its real sprite
  * as the sim reports it (owner colour, facing, task animation) and handles the original's mouse scheme: left click or
  * drag a box to select own units, or click any object to see it, right click to order the selected units to attack the
  * enemy object under the pointer (an `attack` command), to work on any other object there (a `work` command) or, over
@@ -247,7 +279,10 @@ export class UnitLayer {
   private lastClick: { x: number; y: number } | null = null;
   /** The object whose rollover text shows, or null. */
   private rolloverId: number | null = null;
+  /** The objects drawn at the last frame (those near the view, `objectArea`); an object leaving it loses its track. */
   private readonly tracks = new Map<number, Track>();
+  /** Every object by chunk of tiles, for the walk over the view's. */
+  private readonly grid: ObjectGrid;
   private readonly art = new Map<string, Art | null>();
   /** Selection diamonds, at the original's draw level 10: over the terrain, under every object. */
   private readonly outlines = new Graphics();
@@ -283,12 +318,13 @@ export class UnitLayer {
   private attackCursor = 'crosshair';
   /** The owner whose colour each object is drawn in (its art's), by id: for the tests. */
   private readonly drawnOwners = new Map<number, number>();
-  /** Each object's owner at the last frame: an own object that changed hands leaves the selection and its group. */
+  /** Each selected, grouped or flashing object's owner at the last frame: an own object that changed hands leaves the selection and its group. */
   private readonly owners = new Map<number, number>();
   private revealedMap = false;
 
   constructor(private readonly o: UnitLayerOptions) {
     this.seenStep = stepOf(o.world);
+    this.grid = new ObjectGrid(o.world, (x, y) => o.view.ground.pixel(x, y));
     this.doppelgangers = new Doppelgangers(o.player, (type) => o.provider.mapArt()?.doppelganger(type) ?? 0);
     // Each player sees the map through its own fog (`RGE_Player::visible`), in every mode.
     // After a multiplayer game ends the whole map shows without fog (`set_map_visible(1)`, `set_map_fog(0)`).
@@ -431,11 +467,12 @@ export class UnitLayer {
     return [...this.o.world.entities.ofPlayer(this.o.player)].filter(isUnit);
   }
 
-  /** Canvas pixel where unit `id` is drawn (its map position), or null. */
+  /** Canvas pixel where unit `id` is drawn (its map position; off the view, where it would be), or null. */
   screenPos(id: number): { x: number; y: number } | null {
     const t = this.tracks.get(id);
-    if (!t) return null;
-    const { x, y } = this.drawnAt(t, performance.now());
+    const e = t ? undefined : this.o.world.entities.get(id);
+    if (!t && !e?.sprite) return null;
+    const { x, y } = t ? this.drawnAt(t, performance.now()) : e!;
     const p = this.o.view.ground.pixel(x, y);
     return { x: p.x - this.o.view.camera.x, y: p.y - this.o.view.camera.y };
   }
@@ -465,14 +502,14 @@ export class UnitLayer {
     return this.tracks.get(id)?.sprite.visible ? (this.drawnOwners.get(id) ?? null) : null;
   }
 
-  /** How many drawn objects show pack art (not debug shapes). */
+  /** How many drawn objects (near the view) show pack art (not debug shapes). */
   get packSprites(): number {
     let n = 0;
     for (const t of this.tracks.values()) if (t.sprite.visible && t.pack) n++;
     return n;
   }
 
-  /** How many objects the player's fog lets it see (drawn plain or fogged) at the last frame, art loaded or not. */
+  /** How many objects near the view the player's fog lets it see (drawn plain or fogged) at the last frame, art loaded or not. */
   get shownObjects(): number {
     return this.shown;
   }
@@ -551,31 +588,30 @@ export class UnitLayer {
     const newStep = step !== this.seenStep;
     const duration = newStep ? this.o.stepMs() : 0;
     this.seenStep = step;
-    if (newStep) this.doppelgangers.update(world);
-    const alive = new Set<number>();
+    if (newStep) {
+      this.doppelgangers.update(world);
+      this.grid.update();
+    }
+    this.followSelection();
+    const area = this.objectArea();
+    const parity = (view.camera.x + view.camera.y) & 1;
+    const near = new Set<number>();
     this.shown = 0;
-    for (const e of world.entities.all()) {
+    for (const e of area.range ? this.grid.objects(area.range, (chunk) => this.chunkNear(chunk, area)) : []) {
       // Probe entities of `test` commands have no sprite and are not drawn.
       if (!e.sprite) continue;
-      alive.add(e.id);
-      // `die_die_die` and `destroy_obj` unselect the object: a dying one leaves the selection and its group.
-      if (e.state >= ObjectState.Dying) {
-        this.deselect(e.id);
-        this.groups.delete(e.id);
-      }
-      // `change_ownership` (a conversion, src/t_c_obj.cpp:254): the old owner's `unselect_one_object`. Its group number
-      // goes too: the old owner's group keys only ever take its own objects.
-      const before = this.owners.get(e.id);
-      if (before !== e.owner) {
-        this.owners.set(e.id, e.owner);
-        if (before === this.o.player) {
-          this.deselect(e.id);
-          this.groups.delete(e.id);
-        }
-      }
+      // Only what stands near the view is drawn (`RGE_View::draw`): the rest has no sprite on the stage.
+      const p = this.grid.at(e);
+      if (p.x < area.x0 || p.x > area.x1 || p.y < area.y0 || p.y > area.y1) continue;
+      near.add(e.id);
+      const tile = this.tileState(e.x, e.y);
       let t = this.tracks.get(e.id);
+      if (t?.still && this.isStill(t.still, e, tile, parity)) {
+        if (t.still.shown) this.shown++;
+        continue;
+      }
       if (!t) {
-        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, under: null, frame: null, layer: DEFAULT_LAYER, overlays: new Map() };
+        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, under: null, frame: null, layer: DEFAULT_LAYER, overlays: new Map(), still: null };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
       } else if (newStep) {
@@ -605,7 +641,6 @@ export class UnitLayer {
       const split = lift !== 0 && graphicInfo !== null && splitsShadow(this.o.provider, graphicInfo);
       // A tree's shadow part goes through the terrain's clip masks, the tree itself over them (src/view.cpp:2335-2377).
       const clipped = !split && graphicInfo !== null && splitsTerrain(this.o.provider, graphicInfo);
-      const tile = this.tileState(e.x, e.y);
       const layer = graphicInfo?.layer ?? DEFAULT_LAYER;
       const doppelganger = type.fogFlag === 4 && this.doppelgangers.onTile(Math.floor(e.x), Math.floor(e.y));
       // A passenger has left the map for its transport (`enter_obj` takes it off its tile): nothing draws or picks it.
@@ -621,8 +656,12 @@ export class UnitLayer {
       for (const o of t.overlays.values()) o.sprite.visible = false;
       t.sprite.visible = art !== null;
       const drawn = art ?? under;
+      // Unless something here changes, the next frame draws it the same (a stump's look also follows the copies).
+      const still = !e.mover && !aboard && type.fogFlag !== 4 && !e.overlays?.length && !(drawn?.info && drawn.info.frameCount > 1);
+      t.still = null;
       if (!drawn) {
         t.lastFrame = -1;
+        if (still && fog === 'hidden' && underFog === 'hidden') t.still = this.stillOf(e, tile, -1, false);
         continue;
       }
       t.pack = drawn.pack;
@@ -646,6 +685,7 @@ export class UnitLayer {
       }
       if (!art) {
         t.lastFrame = -1;
+        if (still && fog === 'hidden') t.still = this.stillOf(e, tile, -1, false);
         continue;
       }
       const frame = art.frames[pick.index] ?? art.frames[0]!;
@@ -656,7 +696,7 @@ export class UnitLayer {
       t.frame = frame;
       t.layer = info?.layer ?? DEFAULT_LAYER;
       // Above every terrain tile; nearer the bottom of the screen draws later. Draw levels 0-5 go under the fog overlay.
-      t.sprite.zIndex = fog === 'terrain' ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y);
+      t.sprite.zIndex = fog === 'terrain' ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y) + e.id * ID_ORDER;
       this.drawOverlays(t, e, pos.x, pos.y - lift, fog === 'fogged', now, parent);
       // `RGE_Active_Animated_Sprite::draw`: a frame change plays the sprite's sounds when it is drawn, and not fogged.
       const sounds = this.o.sounds;
@@ -671,23 +711,102 @@ export class UnitLayer {
         s.zIndex = t.sprite.zIndex - 1;
         s.visible = true;
       }
+      if (still && !split && (underFog === 'hidden' || under)) t.still = this.stillOf(e, tile, fog === 'fogged' ? parity : -1, true);
     }
-    this.drawDoppelgangers();
+    this.drawDoppelgangers(area);
     for (const [id, t] of this.tracks) {
-      if (alive.has(id)) continue;
+      if (near.has(id)) continue;
       t.sprite.destroy();
       t.shadow?.destroy();
       t.under?.destroy();
       for (const o of t.overlays.values()) o.sprite.destroy();
       this.tracks.delete(id);
-      this.deselect(id);
-      this.groups.delete(id);
-      this.flashes.delete(id);
-      this.owners.delete(id);
       this.drawnOwners.delete(id);
     }
     this.drawHighlight();
     this.drawGhost();
+  }
+
+  private stillOf(e: Entity, tile: number, parity: number, shown: boolean): Still {
+    const { graphic, frame, flag } = e.sprite!;
+    return { type: e.type, graphic, frame, flag, state: e.state, owner: e.owner, facet: e.facet, tile, parity, shown };
+  }
+
+  /** Would still object `e` be drawn as `s` says it was? */
+  private isStill(s: Still, e: Entity, tile: number, parity: number): boolean {
+    const sprite = e.sprite!;
+    return (
+      s.graphic === sprite.graphic &&
+      s.frame === sprite.frame &&
+      s.flag === sprite.flag &&
+      s.tile === tile &&
+      (s.parity === -1 || s.parity === parity) &&
+      s.state === e.state &&
+      s.owner === e.owner &&
+      s.type === e.type &&
+      s.facet === e.facet &&
+      !e.overlays?.length
+    );
+  }
+
+  /**
+   * The map pixels an object's point may stand in to be drawn: the view and the margins its sprite can reach into it
+   * from, and the tiles under them (a raised tile is drawn higher than its flat place, so as far below as the highest).
+   */
+  private objectArea(): { x0: number; x1: number; y0: number; y1: number; range: TileRange | null } {
+    const { view, world } = this.o;
+    const { x, y, w, h } = view.view;
+    const reach = view.ground.flat ? 0 : (view.ground.maxHeight + 1) * ELEV_H;
+    const area = { x0: x - MARGIN_SIDE, x1: x + w + MARGIN_SIDE, y0: y - MARGIN_ABOVE, y1: y + h + MARGIN_BELOW };
+    const range = visibleRange({ x: area.x0, y: area.y0, w: area.x1 - area.x0, h: area.y1 - area.y0 + reach }, world.map.width, world.map.height);
+    return { ...area, range };
+  }
+
+  /**
+   * Can an object on tiles `chunk` stand in `area`? Their flat places span the box of the chunk's corners, and a raised
+   * tile draws its objects higher, up to the highest tile's height.
+   */
+  private chunkNear(chunk: TileRange, area: { x0: number; x1: number; y0: number; y1: number }): boolean {
+    const { ground } = this.o.view;
+    const width = this.o.world.map.width;
+    const x0 = (chunk.col0 + chunk.row0) * (TILE_W / 2);
+    const x1 = (chunk.col1 + chunk.row1 + 2) * (TILE_W / 2);
+    const y0 = (chunk.row0 - chunk.col1 - 1 + width) * (TILE_H / 2) - (ground.flat ? 0 : (ground.maxHeight + 1) * ELEV_H);
+    const y1 = (chunk.row1 + 1 - chunk.col0 + width) * (TILE_H / 2);
+    return x1 >= area.x0 && x0 <= area.x1 && y1 >= area.y0 && y0 <= area.y1;
+  }
+
+  /**
+   * The selection, the groups and the flashing targets follow their objects, drawn or not: `die_die_die` and
+   * `destroy_obj` unselect the object, so a dying or removed one leaves the selection and its group; `change_ownership`
+   * (a conversion, src/t_c_obj.cpp:254) is the old owner's `unselect_one_object`, and its group number goes too: the old
+   * owner's group keys only ever take its own objects.
+   */
+  private followSelection(): void {
+    const { world, player } = this.o;
+    const ids = new Set([...this.selected, ...this.groups.keys(), ...this.flashes.keys()]);
+    for (const id of this.owners.keys()) if (!ids.has(id)) this.owners.delete(id);
+    for (const id of ids) {
+      const e = world.entities.get(id);
+      if (!e?.sprite) {
+        this.deselect(id);
+        this.groups.delete(id);
+        this.flashes.delete(id);
+        this.owners.delete(id);
+        continue;
+      }
+      if (e.state >= ObjectState.Dying) {
+        this.deselect(id);
+        this.groups.delete(id);
+      }
+      const before = this.owners.get(id);
+      if (before === e.owner) continue;
+      this.owners.set(id, e.owner);
+      if (before === player) {
+        this.deselect(id);
+        this.groups.delete(id);
+      }
+    }
   }
 
   /**
@@ -810,17 +929,14 @@ export class UnitLayer {
    * The player's doppelgangers (fog flag 3 in `RGE_Object_List::draw`): drawn fogged while their tile is fogged, in their
    * object's look and owner colour; on a visible tile the object itself shows, on an unexplored one nothing.
    */
-  private drawDoppelgangers(): void {
+  private drawDoppelgangers(area: { x0: number; x1: number; y0: number; y1: number }): void {
     const { world, view } = this.o;
     const copies = this.doppelgangers.copies;
-    for (const [id, s] of this.copySprites) {
-      if (copies.has(id)) continue;
-      s.destroy();
-      this.copySprites.delete(id);
-      this.copyUnder.get(id)?.destroy();
-      this.copyUnder.delete(id);
-    }
+    const drawn = new Set<number>();
     for (const c of copies.values()) {
+      const pos = view.ground.pixel(c.x, c.y);
+      if (pos.x < area.x0 || pos.x > area.x1 || pos.y < area.y0 || pos.y > area.y1) continue;
+      drawn.add(c.id);
       let sprite = this.copySprites.get(c.id);
       if (!sprite) {
         sprite = view.layer.addChild(new Sprite());
@@ -837,7 +953,6 @@ export class UnitLayer {
       if (underSprite) underSprite.visible = false;
       const info = (art ?? under)?.info;
       const pick = info ? facingFrame(copyFacet(c, info.angleCount), c.frame % Math.max(1, info.frameCount), info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
-      const pos = view.ground.pixel(c.x, c.y);
       if (under) {
         const s = underSprite ?? view.terrainLayer.addChild(new Sprite());
         this.copyUnder.set(c.id, s);
@@ -852,6 +967,13 @@ export class UnitLayer {
       const parent = low ? view.terrainLayer : view.layer;
       if (sprite.parent !== parent) parent.addChild(sprite);
       sprite.zIndex = low ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y);
+    }
+    for (const [id, s] of this.copySprites) {
+      if (drawn.has(id)) continue;
+      s.destroy();
+      this.copySprites.delete(id);
+      this.copyUnder.get(id)?.destroy();
+      this.copyUnder.delete(id);
     }
   }
 

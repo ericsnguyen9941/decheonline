@@ -56,10 +56,16 @@ export class Minimap {
   /** The terrain picture (`save_area`): background inside the lines, explored tiles drawn once (`draw_explored_tiles`). */
   private readonly terrain: Uint32Array;
   private readonly explored: Uint8Array;
+  /** The terrain picture with the objects over it, redrawn when the world or the selection changes. */
+  private readonly picture: Uint32Array;
   private readonly image: ImageData;
+  /** The image: the picture with the view's frame over it. */
   private readonly pixels: Uint32Array;
+  /** What the canvas shows: only the pixels that differ from it are put on it again. */
+  private readonly shown: Uint32Array;
   private scrolling = false;
   private drawnKey = '';
+  private framedAt = '';
   private flashOn = false;
   private lastFlash = 0;
   private readonly cleanup: (() => void)[] = [];
@@ -77,6 +83,8 @@ export class Minimap {
     this.g = this.canvas.getContext('2d')!;
     this.image = this.g.createImageData(shape.width, shape.height);
     this.pixels = new Uint32Array(this.image.data.buffer);
+    this.picture = new Uint32Array(shape.width * shape.height);
+    this.shown = new Uint32Array(shape.width * shape.height);
     this.terrain = new Uint32Array(shape.width * shape.height);
     this.explored = new Uint8Array(world.map.width * world.map.height);
     // `clear_image`: the lines in the panel's colour; outside them the panel's art shows.
@@ -95,7 +103,11 @@ export class Minimap {
     return objectPoint(this.geometry, col, row);
   }
 
-  /** Redraw when the world, the view, the selection or the flash changed since the last call (`RGE_Diamond_Map::draw`). */
+  /**
+   * Redraw when the world, the view, the selection or the flash changed since the last call (`RGE_Diamond_Map::draw`):
+   * the objects only when the world, the selection or the flash did, and on the canvas only the pixels that changed (a
+   * view move changes its frame's).
+   */
   update(now = performance.now()): void {
     const { world, view, units } = this.o;
     // `TRIBE_Diamond_Map_View::draw_objects`.
@@ -103,14 +115,37 @@ export class Minimap {
       this.flashOn = !this.flashOn;
       this.lastFlash = now;
     }
-    const key = `${world.turn}:${world.turnStep}:${view.camera.x}:${view.camera.y}:${this.flashOn}:${[...units.selected].join()}`;
-    if (key === this.drawnKey) return;
-    this.drawnKey = key;
-    this.exploreTiles();
-    this.pixels.set(this.terrain);
-    this.drawObjects();
+    const key = `${world.turn}:${world.turnStep}:${this.flashOn}:${[...units.selected].join()}`;
+    const framedAt = `${view.camera.x}:${view.camera.y}`;
+    if (key === this.drawnKey && framedAt === this.framedAt) return;
+    if (key !== this.drawnKey) {
+      this.drawnKey = key;
+      this.exploreTiles();
+      this.picture.set(this.terrain);
+      this.drawObjects();
+    }
+    this.framedAt = framedAt;
+    this.pixels.set(this.picture);
     this.drawViewRect();
-    this.g.putImageData(this.image, 0, 0);
+    this.repaint();
+  }
+
+  /** Puts the box of the pixels that differ from what the canvas shows on it (`putImageData`'s dirty rectangle). */
+  private repaint(): void {
+    const w = this.canvas.width;
+    let [x0, y0, x1, y1] = [w, this.canvas.height, -1, -1];
+    for (let i = 0; i < this.pixels.length; i++) {
+      if (this.pixels[i] === this.shown[i]) continue;
+      const x = i % w;
+      const y = (i - x) / w;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      y1 = y;
+    }
+    if (x1 < 0) return;
+    this.shown.set(this.pixels);
+    this.g.putImageData(this.image, 0, 0, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
   }
 
   /** What the player knows of tile (col, row) as drawn: the map view's, under the map's flags (REVEAL MAP, NO FOG). */
@@ -225,7 +260,7 @@ export class Minimap {
     const p = objectPoint(this.geometry, col, row);
     const rgba = this.rgba(this.index(colour));
     const set = (x: number, y: number) => {
-      if (x >= 0 && y >= 0 && x < this.canvas.width && y < this.canvas.height) this.pixels[y * this.canvas.width + x] = rgba;
+      if (x >= 0 && y >= 0 && x < this.canvas.width && y < this.canvas.height) this.picture[y * this.canvas.width + x] = rgba;
     };
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) if (size === 1 || dx === 0 || dy === 0) set(p.x + dx, p.y + dy);
