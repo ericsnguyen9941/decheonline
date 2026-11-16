@@ -6,6 +6,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 const URL = '/?debug=net&speed=20';
 const VILLAGER = 83;
 const TOWN_CENTER = 109;
+/** Gaia's ruins and relics: a lone Villager next to one takes it before the objects are read (`artifactIdle`). */
+const ARTIFACTS = [158, 159];
 const [TOOL_AGE, BRONZE_AGE, IRON_AGE] = [101, 102, 103];
 
 async function open(browser: Browser): Promise<Page> {
@@ -126,7 +128,7 @@ test('Nomad with High resources: one Villager and no Town Center each, 1000 food
   const games = await Promise.all([host, guest].map(setup));
   for (const game of games) {
     expect(game.map).toBe(games[0]!.map);
-    expect(game.objects.slice(1)).toEqual([[VILLAGER], [VILLAGER]]);
+    expect(game.objects.slice(1).map((types) => types.filter((t) => !ARTIFACTS.includes(t)))).toEqual([[VILLAGER], [VILLAGER]]);
     expect(game.techsDone[1]).not.toContain(TOOL_AGE);
     expect(game.explored[1]).toBeLessThan(game.tiles / 10);
   }

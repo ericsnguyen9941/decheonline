@@ -86,6 +86,8 @@ export interface NetDebug {
   cursor(): string;
   /** What `player` (default: this client's) knows of tile (col, row): 0x0F visible, 0x80 fogged, 0 unexplored. */
   tileVisibility(col: number, row: number, player?: number): number;
+  /** The state tile (col, row) is drawn in: the fog under REVEAL MAP and NO FOG (0x0F, 0x80, 0); null before the HUD is up. */
+  drawnTile(col: number, row: number): number | null;
   /** `player`'s stance towards `other` (0 ally, 1 neutral, 3 enemy; docs/spec/diplomacy.md §1) and its allied victory flag. */
   relation(player: number, other: number): number;
   alliedVictory(player: number): boolean;
@@ -342,7 +344,6 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     const dropped = new Set<number>();
     game.onDropped = (slot) => dropped.add(slot + 1);
     game.onNotResponding = () => hud?.notResponding();
-    game.onCommands = (_turn, batches) => hud?.commandsDue(batches);
     lockstep = game;
     // Before the first turn runs: the relay releases turns asynchronously.
     if (debug && resources !== undefined) {
@@ -415,6 +416,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       const view = await MapView.create(app, game.world.map, provider);
       if (lockstep !== game) return view.destroy();
       mapView = view;
+      // REVEAL MAP and NO FOG set the shared map's drawing flags (chat.md §7.2): every client draws them.
+      view.setMapFlags(() => game.world.cheats);
       const gameSounds = new GameSounds({ world: game.world, player, table: provider.soundTable(), audio });
       sounds = gameSounds;
       // An order acknowledges itself with the unit's sound as the player gives it (`command_make_*`); none in the game
@@ -613,6 +616,7 @@ function debugPanel(
       return canvas ? getComputedStyle(canvas).cursor : '';
     },
     tileVisibility: (col, row, p = player) => game.world.tileVisibility(p, col, row),
+    drawnTile: (col, row) => hud()?.drawnTile(col, row) ?? null,
     relation: (p, q) => game.world.relation(p, q),
     alliedVictory: (p) => game.world.diplomacy.alliedVictory[p] ?? false,
     minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,

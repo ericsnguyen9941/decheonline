@@ -7,6 +7,24 @@ import { TILE_TYPES, tileBoxHeight, tileCorners } from './elevation';
 
 export { TILE_BLACK, TILE_FOGGED, TILE_VISIBLE };
 
+/** The shared map's drawing flags (`RGE_Map::map_visible_flag`, `fog_flag`): the REVEAL MAP and NO FOG cheats' (chat.md §7.2). */
+export interface MapFlags {
+  /** `map_visible_flag`: every tile drawn as explored at least. */
+  readonly mapVisible: boolean;
+  /** `fog_flag`: false draws an explored tile as visible. */
+  readonly mapFog: boolean;
+}
+
+/**
+ * The state a tile is drawn in under the map's flags (src/view.cpp:1615-1619, :1947; src/diam_map.cpp:468, :719-731):
+ * with `map_visible_flag` an unexplored tile is fogged, without `fog_flag` a fogged tile is visible.
+ */
+export function drawnVisibility(state: number, flags: MapFlags): number {
+  if (flags.mapVisible && state === TILE_BLACK) state = TILE_FOGGED;
+  if (!flags.mapFog && state === TILE_FOGGED) state = TILE_VISIBLE;
+  return state;
+}
+
 /** A tile's drawn box: the 64x32 diamond plus its shared right and bottom edge pixel (a slope's box is 17 to 49 high). */
 export const FOG_W = 65;
 export const FOG_H = 33;

@@ -126,6 +126,9 @@ position`, a gain of `1 - position / 100`. Here the bottom stop is silent. The H
 Browsers start audio only after a user gesture. `SoundPlayer` makes the `AudioContext` on the first pointer-down or
 key-down. Sounds triggered before that are logged but not played.
 
+Taunts (`TTaunt`, docs/spec/chat.md §8): a chat line that reads as a number plays `sound/TauntNNN.wav` of the install
+(taunts 1-50, pack `sounds/taunt<n>.wav`, `PackManifest.taunts`), through `GameSounds.chatLine` (event `taunt`).
+
 ## 6. Not done
 
 - Terrain ambient sounds (`TRIBE_Screen_Game::handle_terrain_sound`, src/scr_game.cpp:3570): every 20 s, a

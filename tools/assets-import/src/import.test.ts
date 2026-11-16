@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { importAssets } from './import';
-import { slpImagePath, slpKey, soundPath, type PackManifest } from './manifest';
+import { slpImagePath, slpKey, soundPath, tauntPath, type PackManifest } from './manifest';
 import { SYNTHETIC, WHOLE_TILE, writeSyntheticInstall } from './synthetic';
 
 let root: string;
@@ -136,6 +136,11 @@ test('names a missing required file and leaves an existing pack alone', async ()
   await rm(join(broken, 'data', 'Terrain.drs'));
   await expect(importAssets({ installDir: broken, outDir: pack })).rejects.toThrow('data/Terrain.drs not found');
   expect((await stat(join(pack, 'manifest.json'))).size).toBeGreaterThan(0);
+});
+
+test('imports the loose taunt wavs of sound/, whatever their case', async () => {
+  expect(manifest.taunts).toEqual([1, 12]);
+  for (const n of manifest.taunts) expect((await readFile(join(pack, tauntPath(n)))).subarray(0, 4).toString()).toBe('RIFF');
 });
 
 test("imports sounds.drs's wavs (data2 overriding data) and interfac.drs's, the dat's sounds and each unit's and graphic's sound ids", async () => {

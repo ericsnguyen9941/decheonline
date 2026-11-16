@@ -15,7 +15,7 @@ export const GAME_DIALOG_INFO = 50006;
  * from language strings 110-133, `lfHeight = points * 96 / 72` pixels): `RGE_FONT_COPPERPLATE_12_BOLD`, `_21_BOLD`,
  * `RGE_FONT_STANDARD` (Arial 10 bold) and `RGE_FONT_STRIKEOUT` (the same, struck out).
  */
-export const FONT = { copper12: 'aoe-font-copper12', copper21: 'aoe-font-copper21', standard: 'aoe-font-standard', strikeout: 'aoe-font-strikeout' } as const;
+export const FONT = { copper12: 'aoe-font-copper12', copper21: 'aoe-font-copper21', standard: 'aoe-font-standard', strikeout: 'aoe-font-strikeout', arial10: 'aoe-font-arial10' } as const;
 
 /** A screen's look, its colours as CSS. */
 export interface PanelLook {

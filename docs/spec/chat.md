@@ -99,7 +99,7 @@ info file's background colour and its focus colours (Panel_ez.cpp:1139-1179).
 - `ExecuteIncoming` `'C'`: a client adds the message only when it is a
   recipient (or is in the setup screen).
 - `AddChatMsg`: the line is "Name: text" (`sprintf("%s: %s")`, the sender's
-  comm name, no player colour); taunt numbers are played from it (not ported).
+  comm name, no player colour); a taunt number plays its wav (§8).
   `CHAT_RECEIVED` then plays game sound 2 (chatrcvd, docs/spec/sounds.md) and
   `handleChatReceived` writes the line.
 - **Chat lines**: 8 panels of 620 x 20 from (4, 34) of the main view, 20
@@ -137,8 +137,7 @@ the settings and the ready buttons, with the same lengths and behaviour.
 
 ## 6. Not ported
 
-- Taunts (`TTaunt::PlayTauntStr` on a line that is a number).
-- The single-player cheats (§7.3), GAIA, and the cheats' feedback on screen.
+- The single-player cheats (§7.3) and GAIA.
 - Team games, which would make Allies differ. (The Diplomacy dialog changes this
   player's stance, which Allies and Enemies read: diplomacy.md §7.)
 - More than 2 players' rows (the code handles up to 8).
@@ -244,5 +243,37 @@ are debug and computer-player codes.
 Commands `cheat` (`{ code }`) and `quick-build` (`{ on }`), type ids 21 and 22;
 `World` option `cheating` from the lobby; `World.cheat` codes 0-23, 101, 103,
 220, 230, 231, which the chat can send (100, 102 and 200-209 are ignored);
-`World.mapVisible`, `mapFog`, `quickBuild`. The client tries the line
+`World.cheats` (`mapVisible`, `mapFog`, `quickBuild`). The client tries the line
 (`processCheatCode` in `apps/client`) before sending chat in both entries.
+Every client draws `mapVisible`/`mapFog` (hud.md "Fog of war": `MapView.setMapFlags`).
+
+### 7.5 Feedback
+
+The original shows none: a cheat line is neither sent nor written on the chat
+lines (§7.1), no message or sound confirms it, and a code that does nothing
+(cheating off: the line then goes out as chat; a Town Center busy training)
+says nothing either. What the player sees is the effect itself: the unit, the
+resources, the map. The client does the same (e2e `hud-rest.spec.ts`).
+
+## 8. Taunts (`TTaunt`, src/taunt.cpp; `TChat::AddChatMsg`, src/Chat.cpp:34-60)
+
+Every chat line added to the chat (this player's own, `Local` 1, and each one
+received) goes through `PlayTauntStr`. A line of this player's own that starts
+with "!MUTE" (any case, `_strnicmp`) turns taunts off for this player,
+"!NOMUTE" back on; the line is still sent as chat. Unless they are off, the
+taunt number is `atoi` of the line after an optional leading "!" (leading white
+space, a sign, digits: "12", "!12", " 7 hello"), 0 for none or above 999, and a
+non-zero number plays `"%sTaunt%.3d.wav"` from the taunt folder on the first of
+4 free channels. The line itself shows as usual ("Alice: 12").
+
+The 1.0a install keeps them as loose files: `sound/Taunt001.wav` to
+`Taunt050.wav` (mixed case on disk), 50 taunts; a number without a file plays
+nothing. Their texts are not in the language DLLs (`GetTauntText` returns a
+fixed empty string).
+
+Our port: `assets:import` copies them to `sounds/taunt<n>.wav` with the list in
+`PackManifest.taunts` (pack version 15); `GameSounds.chatLine` (called from
+`GameHud.receiveChat`) keeps the mute flag, reads the number (`tauntNumber`,
+`audio/sound-rules.ts`) and plays the wav (trigger event `taunt`, `wav` the
+taunt number). Not ported: the 4-channel cap (a taunt played again while it
+plays restarts, as the other wavs do).

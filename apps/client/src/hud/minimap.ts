@@ -29,8 +29,6 @@ const FALLBACK_PLAYERS = [0x0000ff, 0xff0000, 0xffff00, 0x8c4a21, 0xff8000, 0x00
 export interface MinimapUnits {
   readonly selected: ReadonlySet<number>;
   readonly doppelgangers: { readonly copies: ReadonlyMap<number, Doppelganger> };
-  /** Is the whole map shown without fog (the game is over)? */
-  readonly revealed: boolean;
   /** Order the selected own units to walk to map point (x, y); false when none is selected. */
   moveSelectedTo(x: number, y: number): boolean;
 }
@@ -115,9 +113,9 @@ export class Minimap {
     this.g.putImageData(this.image, 0, 0);
   }
 
-  /** What the player knows of tile (col, row), every tile visible once the map is revealed. */
+  /** What the player knows of tile (col, row) as drawn: the map view's, under the map's flags (REVEAL MAP, NO FOG). */
   private visibility(col: number, row: number): number {
-    return this.o.units.revealed ? TILE_VISIBLE : this.o.world.tileVisibility(this.o.player, col, row);
+    return this.o.view.fogState(col, row);
   }
 
   /** `draw_explored_tiles`: a tile is drawn the first time the player has it explored. */

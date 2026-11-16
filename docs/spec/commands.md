@@ -226,7 +226,8 @@ ids for the reference too.
 Port: `World.doCommandFormation`. Port-side guard as §1: objects not the
 sender's, and objects that cannot move (the original's `move_to` would give
 a building a failing walk in place of its action), are skipped as missing.
-The client's Shift+F2..F7 keys are not ported (C6).
+Client: Shift+F2..F7 in `hud/game-hud.ts` `commandFormation` (hud.md "F11
+clock and population, F5 timings, formations"; e2e `hud-rest.spec.ts`).
 
 ## 7. Boat commands
 

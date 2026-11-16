@@ -4,8 +4,9 @@
 // the tribute buttons and this player's stock while it has a Market, the Allied Victory check box and OK / Clear
 // Tributes / Cancel. Modal, centred, in the in-game dialogs' look (`dlg6_<culture>`).
 import {
-  giveAttribute,
   MARKET,
+  NOTIFY_DIPLOMACY_CHANGED,
+  NOTIFY_TRIBUTE_PAID,
   ObjectState,
   RELATION_ALLY,
   RELATION_ENEMY,
@@ -360,12 +361,6 @@ export class DiplomacyDialog {
   }
 }
 
-/** One sender's commands that run on a turn. */
-export interface DueBatch {
-  player: number;
-  commands: readonly Command[];
-}
-
 /** A notification's chat line and whether it plays tribute.wav. */
 export interface DiplomacyNotice {
   text: string;
@@ -373,31 +368,20 @@ export interface DiplomacyNotice {
 }
 
 /**
- * The notifications the commands about to run on a turn make for `me` (`TRIBE_Game::notification`,
- * src/tribegam.cpp:1857-1903): `GAME_NOTIFY_DIPLOMACY_CHANGED` when another player sets its stance towards `me`
- * (src/tcommand.cpp:373; no sound), `GAME_NOTIFY_TRIBUTE_PAID` when another player's tribute reaches `me`
- * (src/tcommand.cpp:482; tribute.wav), with the amount received (`(long) tribute_amount`). Read before the step runs
- * them: the commands are replayed in the sim's order (by player, then as issued) over a copy of the attributes, with the
- * sim's guards. Only stance, tribute and resign commands are replayed, so an earlier command of the same turn that
- * spends the sender's resource (a train, a building) is not counted in the amount.
+ * The notifications for `me` in the sim's log from entry `from` on (`TRIBE_Game::notification`,
+ * src/tribegam.cpp:1857-1903; `World.log`, victory.md §16): `GAME_NOTIFY_DIPLOMACY_CHANGED` when another player set its
+ * stance towards `me` (src/tcommand.cpp:373; no sound), `GAME_NOTIFY_TRIBUTE_PAID` when another player's tribute reached
+ * `me` (src/tcommand.cpp:482; tribute.wav), with the amount received (`(long) tribute_amount`) as the sim logged it.
  */
-export function diplomacyNotices(world: World, me: number, batches: readonly DueBatch[], provider: AssetProvider, names: readonly string[]): DiplomacyNotice[] {
-  if (world.gameOver) return [];
-  const status = [...world.victory.status];
-  const attributes = world.attributes.map((a) => [...a]);
+export function diplomacyNotices(world: World, me: number, from: number, provider: AssetProvider, names: readonly string[]): DiplomacyNotice[] {
   const notices: DiplomacyNotice[] = [];
-  const playing = (to: number, from: number) => to >= 1 && to < world.players && to !== from && status[to] === 0;
-  for (const { player, commands } of [...batches].sort((a, b) => a.player - b.player)) {
-    for (const c of commands) {
-      if (c.type === 'resign') status[player] = 2;
-      else if (c.type === 'relation' && playing(c.player, player) && c.player === me) {
-        notices.push({ text: sprintf(provider.string(MESSAGE_DIPLOMACY[c.relation]!) ?? '', names[player] ?? ''), tribute: false });
-      } else if (c.type === 'tribute' && playing(c.player, player)) {
-        const received = giveAttribute({ attributes, objectsOf: (p) => world.entities.ofPlayer(p) }, player, c.player, c.resource, c.amount);
-        if (received >= 0 && c.player === me) {
-          notices.push({ text: sprintf(provider.string(MESSAGE_TRIBUTE[c.resource]!) ?? '', names[player] ?? '', Math.trunc(received)), tribute: true });
-        }
-      }
+  for (const { type, args } of world.log.notifications.slice(from)) {
+    const [sender, to, value, amount] = args;
+    if (to !== me) continue;
+    if (type === NOTIFY_DIPLOMACY_CHANGED) {
+      notices.push({ text: sprintf(provider.string(MESSAGE_DIPLOMACY[value]!) ?? '', names[sender] ?? ''), tribute: false });
+    } else if (type === NOTIFY_TRIBUTE_PAID) {
+      notices.push({ text: sprintf(provider.string(MESSAGE_TRIBUTE[value]!) ?? '', names[sender] ?? '', amount), tribute: true });
     }
   }
   return notices;

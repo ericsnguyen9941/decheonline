@@ -15,6 +15,7 @@ import {
   researchSound,
   selectSound,
   spriteSounds,
+  tauntNumber,
   unitSound,
   UnitSound,
 } from './sound-rules';
@@ -35,7 +36,8 @@ export type SoundEvent =
   | 'sprite'
   | 'message'
   | 'game-over'
-  | 'cant-do';
+  | 'cant-do'
+  | 'taunt';
 
 /** One sound played (or that would have played before audio started), for tests (`window.__game.sounds()`). */
 export interface SoundTrigger {
@@ -44,7 +46,7 @@ export interface SoundTrigger {
   sound: number;
   /** `TRIBE_Game::sounds` index of a game sound; -1 for a dat sound. */
   game: number;
-  /** The wav resource picked; null when none was (no such wav in the pack, or the percents ran out). */
+  /** The wav resource picked (a taunt's number); null when none was (no such wav in the pack, or the percents ran out). */
   wav: number | null;
   /** The master, graphic or tech it is for; -1 for none. */
   source: number;
@@ -76,6 +78,8 @@ export class GameSounds {
   private alert: number;
   private depleted: number;
   private seenStep = -1;
+  /** `TTaunt::Mute`: "!MUTE" typed here. */
+  private tauntsMuted = false;
 
   constructor(private readonly o: GameSoundsOptions) {
     const { world, player } = o;
@@ -186,9 +190,10 @@ export class GameSounds {
       case 'stand-ground':
       case 'attack-ground':
       case 'unload':
-      case 'trade-attribute': {
-        // `command_attack_ground`, `command_make_unload` and `command_trade_attribute` play the first unit's command sound
-        // (src/tplayer.cpp:968, :1023, :947).
+      case 'trade-attribute':
+      case 'formation': {
+        // `command_attack_ground`, `command_make_unload`, `command_trade_attribute` and `command_formation` play the first
+        // unit's command sound (src/tplayer.cpp:968, :1023, :947; src/player.cpp:1873).
         const e = first(c.units);
         if (e) this.unit('command', e, UnitSound.Command);
         return;
@@ -210,6 +215,22 @@ export class GameSounds {
   /** A notification's game sound (`TRIBE_Game::notification`'s `play_sound(index)`). */
   message(index: number): void {
     this.game('message', index, -1);
+  }
+
+  /**
+   * A chat line shown (`TChat::AddChatMsg`'s `TTaunt::PlayTauntStr`, src/taunt.cpp): this player's own line (`local`)
+   * starting "!MUTE" turns taunts off and "!NOMUTE" back on; unless they are off, a line that reads as a number plays
+   * that taunt's wav, from its start.
+   */
+  chatLine(text: string, local: boolean): void {
+    if (local && /^!MUTE/i.test(text)) this.tauntsMuted = true;
+    if (local && /^!NOMUTE/i.test(text)) this.tauntsMuted = false;
+    if (this.tauntsMuted) return;
+    const n = tauntNumber(text);
+    if (n === 0) return;
+    const url = this.o.table?.tauntUrl(n) ?? null;
+    this.record({ event: 'taunt', sound: -1, game: -1, wav: url ? n : null, source: n });
+    if (url) this.o.audio.play(url);
   }
 
   /** The end of the game's won.wav or lost.wav (interface wav `id`), from its start. */

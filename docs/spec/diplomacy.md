@@ -284,16 +284,13 @@ attributes 46 and 53. The chat's Allies/Enemies targets read `isAlly`/`isEnemy`
 top strip's Diplomacy button in `hud/game-hud.ts`; test ids `diplomacy`,
 `diplomacy-<ally|neutral|enemy>-<p>`, `diplomacy-tribute-<resource>-<p>`,
 `diplomacy-stock-<resource>`, `diplomacy-allied-victory`, `diplomacy-ok` ...)
-and `diplomacyNotices` (unit tests `diplomacy.test.ts` in the client). The sim
-has no notification events, so the client reads the notifications off the
-commands themselves: `Lockstep.onCommands` hands each turn's batches over just
-before the step that runs them, and `diplomacyNotices` replays the stance,
-tribute and resign commands in the sim's order (by player, then as issued) with
-the sim's guards and `giveAttribute` over a copy of the attributes, for the
-amount received. Known gap: another command earlier in the same step that
-spends or refunds the sender's resource (a train, a building, a cancel) is not
-replayed, so with a stock that runs short the amount shown can differ from what
-the sim gave. e2e: `e2e/tests/diplomacy.spec.ts` (two players by invite code),
+and `diplomacyNotices` (unit tests `diplomacy.test.ts` in the client). The
+notifications come from the sim's log (`World.log`, victory.md §16): each frame
+`GameHud` reads the entries added since the last one, `GAME_NOTIFY_DIPLOMACY_CHANGED`
+(8) and `GAME_NOTIFY_TRIBUTE_PAID` (7, with the amount received as the sim gave
+it, after whatever else ran earlier in the step), and shows those addressed to
+this player. Entries from before the game screen came up are not told. e2e
+`e2e/tests/hud-rest.spec.ts` (a tribute larger than the stock), and: `e2e/tests/diplomacy.spec.ts` (two players by invite code),
 `e2e/real/real-diplomacy.spec.ts` (the real art and strings, screenshots
 `diplomacy-no-market.png`, `diplomacy-tribute.png`, `diplomacy-notices.png`).
 

@@ -99,3 +99,15 @@ export function hasSpriteSounds(table: SoundTable, graphic: number): boolean {
 export function researchSound(tech: number): number {
   return AGE_TECHS.has(tech) ? GameSound.AgeDone : GameSound.ResearchDone;
 }
+
+/**
+ * `TTaunt::GetTauntNo` (src/taunt.cpp): a chat line's taunt number, `atoi` of the text after an optional "!"; 0 (none)
+ * for a line that does not start with a number or for one above 999.
+ */
+export function tauntNumber(text: string): number {
+  // `atoi`: leading white space, a sign, digits.
+  const m = /^[ \t\n\v\f\r]*([+-]?)(\d+)/.exec(text.startsWith('!') ? text.slice(1) : text);
+  if (!m) return 0;
+  const value = Number(m[2]!.slice(0, 10)) * (m[1] === '-' ? -1 : 1);
+  return value > 999 ? 0 : value;
+}

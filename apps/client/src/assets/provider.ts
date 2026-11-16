@@ -122,6 +122,8 @@ export interface SoundTable {
   graphicSounds(graphicId: number): { sound: number; frameSounds: readonly (readonly (readonly [number, number])[])[] | null } | null;
   /** URL of wav resource `id`; null when the pack does not have it. */
   wavUrl(id: number): string | null;
+  /** URL of taunt `n`'s wav (`sound/TauntNNN.wav`); null when the pack does not have it. */
+  tauntUrl(n: number): string | null;
 }
 
 /**

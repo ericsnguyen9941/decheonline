@@ -26,17 +26,20 @@ import { BOTTOM_HEIGHT, cultureSlp, hudLayout, SLP, TOP_HEIGHT, type HudLayout, 
 import { Minimap, type MinimapUnits } from './minimap';
 import { AchievementsScreen } from './achievements';
 import { ChatEntry, STRING_CHAT } from './chat';
-import { DiplomacyDialog, diplomacyNotices, SOUND_TRIBUTE, type DueBatch } from './diplomacy';
+import { DiplomacyDialog, diplomacyNotices, SOUND_TRIBUTE } from './diplomacy';
 import { easyButton, FONT, GAME_DIALOG_INFO, lookOf } from './easy-panel';
 import { HeldDisplay } from './relics';
 import { ChatLines, formatName, GameOver, MESSAGE_NOT_RESPONDING, SOUND_CHAT, type GameOverSounds } from './game-over';
 import { MenuDialog, okPopup } from './menu';
 import { ScoreDisplay } from './score-display';
 import { OptionsDialog, type OptionsSounds } from './options';
+import { ClockOverlay, TimingsPanel } from './overlays';
 import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
 import { ageName, civilizationName, objectName, statRows, topButtonLabels } from './text';
 
+/** Shift with these sends formations 0-5 (`command_formation`). */
+const FORMATION_KEYS = ['F2', 'F3', 'F4', 'F5', 'F6', 'F7'];
 /** `STRING_ID_SCORE_BUTTON_SHORTCUT`: the score button's text. */
 const SCORE_BUTTON = 0x1023;
 /** `STRING_ID_PLAYER_DROPPED_NOTICE`. */
@@ -118,7 +121,7 @@ export interface GameHudOptions {
   /** The map view and its units, for the minimap; without them the minimap's frame stays empty. */
   map?: { view: MapView; units: MinimapUnits };
   /** The buttons' click and the sound volume the Menu button's settings change; without it, no click and no settings. */
-  sounds?: OptionsSounds & GameOverSounds;
+  sounds?: OptionsSounds & GameOverSounds & { chatLine(text: string, local: boolean): void };
   /** The multiplayer game around the screen: the menu's resign and quit, and the end of the game. */
   game: HudGame;
 }
@@ -205,6 +208,10 @@ export class GameHud {
   readonly gameOver: GameOver;
   /** All relics or all ruins held: the notifications and the countdown clocks. */
   readonly held: HeldDisplay;
+  /** F11's game clock and population. */
+  readonly clock: ClockOverlay;
+  /** F5's timings, in place of the resource counts. */
+  readonly timings: TimingsPanel;
   private readonly scoreButton: HTMLButtonElement;
   private achievements: AchievementsScreen | null = null;
   /** `player_quit`: the player resigned from the menu. */
@@ -218,11 +225,33 @@ export class GameHud {
     e.preventDefault();
     this.commandChat(true);
   };
+  /**
+   * `key_down_action`'s function keys (src/scr_game.cpp:1490-1519, :1798-1833): Shift+F2 .. Shift+F7 the formations 0-5
+   * while the game is on; without Ctrl, F5 the timings (not with Shift: Shift+F5 is a formation) and F11 the clock and
+   * population. F4 is the score display's.
+   */
+  private readonly onFunctionKey = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.repeat) return;
+    const formation = e.shiftKey && !e.altKey ? FORMATION_KEYS.indexOf(e.key) : -1;
+    if (formation >= 0) {
+      e.preventDefault();
+      this.commandFormation(formation);
+    } else if (e.key === 'F5' && !e.shiftKey) {
+      e.preventDefault();
+      this.timings.toggle();
+    } else if (e.key === 'F11') {
+      e.preventDefault();
+      this.clock.toggle();
+    }
+  };
   private layout: HudLayout | undefined;
   private shown: string | null = null;
+  /** `World.log` notifications already told; those from before the screen came up are not. */
+  private logRead: number;
 
   constructor(private readonly o: GameHudOptions) {
     this.culture = o.provider.culture(o.world.civs[o.player] ?? 0);
+    this.logRead = o.world.log.notifications.length;
     o.parent.append(this.root);
     this.bar = new ResourceBar(this.topFrame, o.app, o.world, o.player);
     this.message.hidden = true;
@@ -275,6 +304,8 @@ export class GameHud {
       sound: (index) => sounds?.message(index),
       message: (text) => this.chat.show(text),
     });
+    this.clock = new ClockOverlay(this.view, o.world, o.player, o.provider);
+    this.timings = new TimingsPanel(this.topFrame, o.world, this.bar.root);
     for (let p = 1; p < o.world.players; p++) this.chatGroup.add(p);
     this.chatEntry = new ChatEntry({
       parent: this.root,
@@ -304,6 +335,7 @@ export class GameHud {
       click,
     });
     window.addEventListener('keydown', this.onKey);
+    window.addEventListener('keydown', this.onFunctionKey);
     this.menu = new MenuDialog(this.root, o.provider, {
       playing: () => o.world.playerStatus(o.player) === 0 && !this.quit,
       quit: () => {
@@ -350,12 +382,18 @@ export class GameHud {
     return e ? objectName(this.o.provider, e.type, typeOf(this.o.world, e)) : null;
   }
 
+  /** The state tile (col, row) is drawn in (the map view's fog under the map's flags); null without a map view. */
+  drawnTile(col: number, row: number): number | null {
+    return this.o.map?.view.fogState(col, row) ?? null;
+  }
+
   destroy(): void {
     this.o.app.ticker.remove(this.tick);
     this.menu.close();
     this.chatEntry.close();
     this.diplomacy.close();
     window.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('keydown', this.onFunctionKey);
     this.chat.destroy();
     this.scores.destroy();
     window.removeEventListener('resize', this.onResize);
@@ -401,6 +439,7 @@ export class GameHud {
     l.buttons.forEach((r, i) => place(this.slots[i]!, r));
     place(this.minimap, l.minimap);
     place(this.scoreButton, l.scoreButton);
+    this.clock.place(l.width);
     this.shown = null;
     this.update();
   }
@@ -420,6 +459,16 @@ export class GameHud {
   }
 
   /**
+   * `RGE_Player::command_formation` (src/player.cpp:1866-1881): the selected objects to command, the first one's command
+   * sound (the issue's); nothing in the game over mode (`game_over`) or with nothing to command.
+   */
+  commandFormation(formation: number): void {
+    if (this.gameOver.over) return;
+    const units = this.o.selection.commandObjects(-1);
+    if (units.length > 0) this.o.issue({ type: 'formation', units, formation });
+  }
+
+  /**
    * `SendGroupChatMsg` (src/com_hand.cpp:1905-1990): nothing in the game over mode; else to every other player in the
    * chat group still in the game, and on this screen too when this player is in it.
    */
@@ -434,22 +483,29 @@ export class GameHud {
     if (to.length > 0) game.sendChat(text, to);
   }
 
-  /** A chat message from player `from` (this one's own included): "Name: text" on the chat lines with sound 2 (`AddChatMsg`, `handleChatReceived`). */
+  /**
+   * A chat message from player `from` (this one's own included): "Name: text" on the chat lines with sound 2, and its
+   * taunt (`AddChatMsg`, `handleChatReceived`).
+   */
   receiveChat(from: number, text: string): void {
     this.o.sounds?.message(SOUND_CHAT);
+    this.o.sounds?.chatLine(text, from === this.o.player);
     this.chat.show(`${this.o.game.names[from] ?? ''}: ${text}`);
   }
 
   /**
-   * The commands about to run on a turn: another player's stance towards this one and its tribute to this one on the
-   * chat lines (`display_system_message`), a tribute with tribute.wav (diplomacy.md §7).
+   * The sim's notifications since the last frame: another player's stance towards this one and its tribute to this one
+   * on the chat lines (`display_system_message`), a tribute with tribute.wav (diplomacy.md §7).
    */
-  commandsDue(batches: readonly DueBatch[]): void {
+  private readLog(): void {
     const { world, player, provider, game } = this.o;
-    for (const n of diplomacyNotices(world, player, batches, provider, game.names)) {
+    const count = world.log.notifications.length;
+    if (count === this.logRead) return;
+    for (const n of diplomacyNotices(world, player, this.logRead, provider, game.names)) {
       if (n.tribute) this.o.sounds?.message(SOUND_TRIBUTE);
       this.chat.show(n.text);
     }
+    this.logRead = count;
   }
 
   /** "Problem communicating with %s...": a turn is late (com_hand.cpp `COMM_PLAYER_NOT_RESPONDING`); names who is playing. */
@@ -530,8 +586,11 @@ export class GameHud {
   private update(): void {
     const { world, selection, player } = this.o;
     this.gameOver.update();
+    this.readLog();
     this.held.update();
     this.scores.update();
+    this.clock.update();
+    this.timings.update();
     this.minimapView?.update();
     this.age.textContent = ageName(this.o.provider, world.attributes[player]![ATTR_CURRENT_AGE]!);
     const primary = selection.primary;

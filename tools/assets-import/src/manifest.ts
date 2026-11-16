@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 14;
+export const PACK_VERSION = 15;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -225,10 +225,15 @@ export interface PackManifest {
   wavs: number[];
   /** Keyed by the info file's interfac.drs id: the screens and dialogs the client draws (pack version 11). */
   screens: Record<string, PackScreen>;
+  /** The taunt numbers the install has a `sound/TauntNNN.wav` for, at `tauntPath(n)` (`TTaunt::PlayTauntNo`; pack version 15). */
+  taunts: number[];
 }
 
 /** Pack-relative path of wav resource `id`. */
 export const soundPath = (id: number): string => `sounds/${id}.wav`;
+
+/** Pack-relative path of taunt `n`'s wav. */
+export const tauntPath = (n: number): string => `sounds/taunt${n}.wav`;
 
 export const slpKey = (source: SlpSource, id: number): string => `${source}/${id}`;
 

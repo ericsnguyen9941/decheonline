@@ -6,7 +6,7 @@ import type { AssetProvider, BorderLayout, SpriteFrame, TerrainLayout } from '..
 import { tileBorders, tileDraw, type TileBorders } from './borders';
 import { Camera, CameraControls } from './camera';
 import { ELEV_H, Ground, tileCorners, tilePicture } from './elevation';
-import { edgeNumber, FOG_W, fogHeight, fogPixels, PLAIN_EDGES, TILE_BLACK, TILE_VISIBLE } from './fog';
+import { drawnVisibility, edgeNumber, FOG_W, fogHeight, fogPixels, PLAIN_EDGES, TILE_BLACK, TILE_VISIBLE, type MapFlags } from './fog';
 import { mapPixelSize, tileOrigin, visibleRange, type Rect } from './iso';
 
 /** What the fog is drawn from: one player's knowledge of the tiles. */
@@ -16,6 +16,9 @@ export interface FogSource {
   /** Changes whenever `state` may have changed (each sim step). */
   version(): number;
 }
+
+/** A new map's flags: nothing revealed, fog on (src/map.cpp:97-98). */
+const NO_FLAGS: MapFlags = { mapVisible: false, mapFog: true };
 
 interface TerrainArt extends TerrainLayout {
   frames: SpriteFrame[];
@@ -56,6 +59,7 @@ export class MapView {
   };
   private drawnAt: { x: number; y: number } | null = null;
   private fog: FogSource | null = null;
+  private flags: () => MapFlags = () => NO_FLAGS;
   private fogDrawn: { version: number; parity: number } | null = null;
   /** Above every terrain tile, under every object (their `zIndex` starts at the tile count). */
   private readonly fogLayer = new Container();
@@ -150,9 +154,15 @@ export class MapView {
     this.refresh();
   }
 
-  /** The fog state drawn for tile (col, row): what `setFog`'s source says, `TILE_VISIBLE` without one. */
+  /** Draw the fog under the shared map's flags (REVEAL MAP, NO FOG) `flags` reads from now on. */
+  setMapFlags(flags: () => MapFlags): void {
+    this.flags = flags;
+    this.refresh();
+  }
+
+  /** The fog state drawn for tile (col, row): what `setFog`'s source says under the map's flags, `TILE_VISIBLE` without one. */
   fogState(col: number, row: number): number {
-    return this.fog ? this.fog.state(col, row) : TILE_VISIBLE;
+    return this.fog ? drawnVisibility(this.fog.state(col, row), this.flags()) : TILE_VISIBLE;
   }
 
   /** Move the camera so map pixel `(x, y)` is at the viewport centre. */
@@ -170,7 +180,9 @@ export class MapView {
   /** Make the sprites match the camera and the fog; no-op when neither has changed since the last call. */
   refresh(): void {
     const { x, y } = this.camera;
-    const version = this.fog?.version() ?? 0;
+    const flags = this.flags();
+    // The flags change on a sim step; the version tells them apart when the source's stays put (a revealed map's).
+    const version = (this.fog?.version() ?? 0) * 4 + (flags.mapVisible ? 1 : 0) + (flags.mapFog ? 0 : 2);
     const parity = (x + y) & 1;
     const fogChanged = this.fogDrawn?.version !== version || this.fogDrawn.parity !== parity;
     if (this.drawnAt?.x === x && this.drawnAt.y === y) {
@@ -264,12 +276,12 @@ export class MapView {
       for (const edges of this.edgeSprites.values()) for (const edge of edges) edge.visible = true;
       return;
     }
-    const visible = (c: number, r: number) => fog.state(c, r) === TILE_VISIBLE;
-    const explored = (c: number, r: number) => fog.state(c, r) !== TILE_BLACK;
+    const visible = (c: number, r: number) => this.fogState(c, r) === TILE_VISIBLE;
+    const explored = (c: number, r: number) => this.fogState(c, r) !== TILE_BLACK;
     for (const [index, sprite] of this.active) {
       const col = index % width;
       const row = (index - col) / width;
-      const state = fog.state(col, row);
+      const state = this.fogState(col, row);
       sprite.visible = state !== TILE_BLACK;
       for (const edge of this.edgeSprites.get(index) ?? []) edge.visible = sprite.visible;
       const texture = this.fogTexture(

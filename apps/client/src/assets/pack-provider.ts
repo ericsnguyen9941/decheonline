@@ -1,5 +1,5 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
-import { slpImagePath, slpKey, soundPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
+import { slpImagePath, slpKey, soundPath, tauntPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
 import type { AssetProvider, BorderLayout, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, TerrainLayout, TerrainRules, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
@@ -108,6 +108,7 @@ class PackProvider implements AssetProvider {
   soundTable(): SoundTable {
     const { manifest, baseUrl } = this;
     const wavs = new Set(manifest.wavs);
+    const taunts = new Set(manifest.taunts);
     return (this.sounds ??= {
       sound: (id) => manifest.sounds[id]?.items ?? null,
       unitSounds: (id) => manifest.unitSounds[id] ?? null,
@@ -116,6 +117,7 @@ class PackProvider implements AssetProvider {
         return g ? { sound: g.sound, frameSounds: g.frameSounds } : null;
       },
       wavUrl: (id) => (wavs.has(id) ? `${baseUrl}/${soundPath(id)}` : null),
+      tauntUrl: (n) => (taunts.has(n) ? `${baseUrl}/${tauntPath(n)}` : null),
     });
   }
 

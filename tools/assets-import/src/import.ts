@@ -10,6 +10,7 @@ import {
   slpImagePath,
   slpKey,
   soundPath,
+  tauntPath,
   type PackFrame,
   type PackManifest,
   type PackMinimap,
@@ -157,8 +158,19 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
   await mkdir(join(outDir, 'sounds'), { recursive: true });
   for (const [id, bytes] of wavs) await writeFile(join(outDir, soundPath(id)), bytes);
   log(`sounds: ${wavs.size} wav`);
+  // The taunts are loose files, `sound/TauntNNN.wav` in any case (`TTaunt::PlayTauntNo`'s "%sTaunt%.3d.wav").
+  const taunts: number[] = [];
+  const soundDir = await find(installDir, 'sound');
+  for (const name of soundDir ? await readdir(soundDir) : []) {
+    const m = /^taunt(\d{3})\.wav$/i.exec(name);
+    if (!m || Number(m[1]) === 0) continue;
+    taunts.push(Number(m[1]));
+    await copyFile(join(soundDir!, name), join(outDir, tauntPath(Number(m[1]))));
+  }
+  taunts.sort((a, b) => a - b);
+  log(`taunts: ${taunts.length} wav`);
 
-  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b), screens);
+  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b), screens, taunts);
   log(`strings: ${strings.size}`);
   await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
   return { manifest, slpCount: Object.keys(slps).length, imageCount, wavCount: wavs.size };
@@ -201,6 +213,7 @@ function buildManifest(
   tileEdges: PackTileEdges[] | null,
   wavs: number[],
   screens: Record<string, PackScreen>,
+  taunts: number[],
 ): PackManifest {
   const graphicSlp = (slp: number): string | null => {
     const key = slpKey('graphics', slp);
@@ -225,6 +238,7 @@ function buildManifest(
     unitSounds: {},
     wavs,
     screens,
+    taunts,
   };
   dat.sounds.forEach((s, id) => {
     manifest.sounds[id] = { items: s.items.map((i) => [i.resourceId, i.probability]) };

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { EDGE_NUMBER, edgeNumber, FOG_W, fogHeight, fogPixels, PLAIN_EDGES as PLAIN_BY_TYPE, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, tileSpans } from './fog';
+import { drawnVisibility, EDGE_NUMBER, edgeNumber, FOG_W, fogHeight, fogPixels, PLAIN_EDGES as PLAIN_BY_TYPE, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, tileSpans } from './fog';
 
 const PLAIN_EDGES = PLAIN_BY_TYPE[0]!;
 
@@ -68,4 +68,14 @@ test('a fogged slope tile is dotted over its own box height', () => {
   expect(tall).toHaveLength(FOG_W * 49);
   expect(tall[48 * FOG_W + 32]).toBe(0);
   expect(tall[47 * FOG_W + 32]).toBe(255);
+});
+
+test('REVEAL MAP draws an unexplored tile fogged, NO FOG a fogged tile visible, both every tile visible', () => {
+  const reveal = { mapVisible: true, mapFog: true };
+  const noFog = { mapVisible: false, mapFog: false };
+  const both = { mapVisible: true, mapFog: false };
+  expect([TILE_BLACK, TILE_FOGGED, TILE_VISIBLE].map((s) => drawnVisibility(s, { mapVisible: false, mapFog: true }))).toEqual([TILE_BLACK, TILE_FOGGED, TILE_VISIBLE]);
+  expect([TILE_BLACK, TILE_FOGGED, TILE_VISIBLE].map((s) => drawnVisibility(s, reveal))).toEqual([TILE_FOGGED, TILE_FOGGED, TILE_VISIBLE]);
+  expect([TILE_BLACK, TILE_FOGGED, TILE_VISIBLE].map((s) => drawnVisibility(s, noFog))).toEqual([TILE_BLACK, TILE_VISIBLE, TILE_VISIBLE]);
+  expect([TILE_BLACK, TILE_FOGGED, TILE_VISIBLE].map((s) => drawnVisibility(s, both))).toEqual([TILE_VISIBLE, TILE_VISIBLE, TILE_VISIBLE]);
 });

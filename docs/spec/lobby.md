@@ -80,7 +80,8 @@ population limit.", 3046) and `check_obj_cost` refuses a headroom cost the
 same way (`tplayer.cpp:1054-1059`); Houses past the limit still add headroom,
 which nothing can use. The House's object panel row shows `population /
 min(population + headroom, limit)` (`tpnl_obj.cpp:463-470`), as does the F11
-population overlay (`tpnl_pop.cpp:155-160`). The setup screen's summary ends
+population overlay (`tpnl_pop.cpp:155-160`; the client's `hud/overlays.ts`,
+hud.md "F11 clock and population, F5 timings, formations"). The setup screen's summary ends
 with "Population Limit: %d" (`scr_mps.cpp:2069`, `:2543`).
 
 ### 2.1 The start settings at game start

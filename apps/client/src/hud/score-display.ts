@@ -48,7 +48,7 @@ export class ScoreDisplay {
   private shown = false;
   private refreshedAt = -Infinity;
   private readonly onKey = (e: KeyboardEvent) => {
-    // Unmodified F4 (Shift+F4 is a formation, not ported).
+    // Unmodified F4 (Shift+F4 is a formation, `GameHud.commandFormation`).
     if (e.key !== 'F4' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
     e.preventDefault();
     this.toggle();

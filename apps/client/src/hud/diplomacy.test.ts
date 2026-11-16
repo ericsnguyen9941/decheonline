@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { MARKET, RELATION_ALLY, RELATION_NEUTRAL, startingObjects, World } from '@aoe/sim';
+import { MARKET, RELATION_ALLY, startingObjects, TOWN_CENTER, VILLAGER, World, type Command } from '@aoe/sim';
 import type { AssetProvider } from '../assets';
 import { diplomacyNotices } from './diplomacy';
 
@@ -7,7 +7,6 @@ import { diplomacyNotices } from './diplomacy';
 const STRINGS: Record<number, string> = {
   3009: '%s paid %d gold in tribute to you.',
   3016: '%s paid %d food in tribute to you.',
-  3025: '%s changed diplomatic stance with you to Neutral.',
   3026: '%s changed diplomatic stance with you to Ally.',
 };
 const provider = { string: (id: number) => STRINGS[id] ?? null } as AssetProvider;
@@ -19,41 +18,46 @@ function world(market: boolean): World {
   return w;
 }
 
-test('the receiver hears of a stance towards it and of a tribute with the amount received', () => {
+/** Player `player`'s commands, run until they have executed (2 turns later) and one more turn. */
+function order(w: World, player: number, commands: Command[]): void {
+  w.addBatch(w.turn, player, commands);
+  for (let i = 0; i < 3; i++) w.runTurn();
+}
+
+test('the receiver hears of a stance towards it and of a tribute with the amount the sim logged', () => {
   const w = world(true);
   w.attributes[1]![0] = 100;
-  const batches = [{ player: 1, commands: [{ type: 'relation' as const, player: 2, relation: RELATION_ALLY }, { type: 'tribute' as const, player: 2, resource: 0, amount: 500 }] }];
+  order(w, 1, [{ type: 'relation', player: 2, relation: RELATION_ALLY }, { type: 'tribute', player: 2, resource: 0, amount: 500 }]);
   // 100 food with a 25% fee: the whole stock goes, the fee's share (25) is lost, 75 reach the receiver (diplomacy.md §5).
-  expect(diplomacyNotices(w, 2, batches, provider, names)).toEqual([
+  expect(diplomacyNotices(w, 2, 0, provider, names)).toEqual([
     { text: 'Alice changed diplomatic stance with you to Ally.', tribute: false },
     { text: 'Alice paid 75 food in tribute to you.', tribute: true },
   ]);
-  // The sender hears of neither (`val2 == curr_player`).
-  expect(diplomacyNotices(w, 1, batches, provider, names)).toEqual([]);
-  // The replay leaves the world alone.
-  expect(w.attributes[1]![0]).toBe(100);
+  // The sender hears of neither (`val2 == curr_player`); entries already read are not told again.
+  expect(diplomacyNotices(w, 1, 0, provider, names)).toEqual([]);
+  expect(diplomacyNotices(w, 2, w.log.notifications.length, provider, names)).toEqual([]);
+});
+
+test('the amount is what was left when the tribute ran: a train paid earlier in the same turn is counted', () => {
+  const w = world(true);
+  w.attributes[1]![0] = 125;
+  const tc = [...w.entities.ofPlayer(1)].find((e) => e.type === TOWN_CENTER)!;
+  // The Villager (50 food) is paid first, then 100 food are offered of the 75 left: 75 go, 56 reach Bob (fee 25%).
+  order(w, 1, [{ type: 'queue', building: tc.id, unit: VILLAGER, count: 1 }, { type: 'tribute', player: 2, resource: 0, amount: 100 }]);
+  expect(diplomacyNotices(w, 2, 0, provider, names).map((n) => n.text)).toEqual(['Alice paid 56 food in tribute to you.']);
 });
 
 test('tributes run in order over the same stock, and none without a Market', () => {
   const w = world(true);
   w.attributes[1]![3] = 250;
-  const tribute = (amount: number) => ({ type: 'tribute' as const, player: 2, resource: 3, amount });
-  expect(diplomacyNotices(w, 2, [{ player: 1, commands: [tribute(100), tribute(100)] }], provider, names).map((n) => n.text)).toEqual([
+  const tribute = (amount: number): Command => ({ type: 'tribute', player: 2, resource: 3, amount });
+  order(w, 1, [tribute(100), tribute(100), tribute(100)]);
+  expect(diplomacyNotices(w, 2, 0, provider, names).map((n) => n.text)).toEqual([
     'Alice paid 100 gold in tribute to you.',
     'Alice paid 100 gold in tribute to you.',
+    'Alice paid 0 gold in tribute to you.',
   ]);
-  expect(diplomacyNotices(w, 2, [{ player: 1, commands: [tribute(100), tribute(100), tribute(100)] }], provider, names).at(-1)!.text).toBe('Alice paid 0 gold in tribute to you.');
-  expect(diplomacyNotices(world(false), 2, [{ player: 1, commands: [tribute(100)] }], provider, names)).toEqual([]);
-});
-
-test('the commands run by sender player: a resign earlier in the turn stops a later stance towards that player', () => {
-  const resign = { type: 'resign' as const };
-  const neutral = (player: number) => ({ type: 'relation' as const, player, relation: RELATION_NEUTRAL });
-  // Player 1's batch runs before player 2's resign: Bob still hears of it.
-  expect(diplomacyNotices(world(true), 2, [{ player: 2, commands: [resign] }, { player: 1, commands: [neutral(2)] }], provider, names).map((n) => n.text)).toEqual([
-    'Alice changed diplomatic stance with you to Neutral.',
-  ]);
-  // Three players: 1 resigns before 2's stance towards it runs.
-  const three = new World({ players: 4, units: startingObjects(4) });
-  expect(diplomacyNotices(three, 1, [{ player: 2, commands: [neutral(1)] }, { player: 1, commands: [resign] }], provider, names)).toEqual([]);
+  const none = world(false);
+  order(none, 1, [tribute(100)]);
+  expect(diplomacyNotices(none, 2, 0, provider, names)).toEqual([]);
 });

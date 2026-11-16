@@ -60,6 +60,7 @@ interface Window {
     drawnOwner(id: number): number | null;
     cursor(): string;
     tileVisibility(col: number, row: number, player?: number): number;
+    drawnTile(col: number, row: number): number | null;
     relation(player: number, other: number): number;
     alliedVictory(player: number): boolean;
     minimapPoint(col: number, row: number): { x: number; y: number } | null;

@@ -39,7 +39,8 @@ export const SYNTHETIC = {
    * language.dll's strings; languagex.dll replaces `overriddenString`. 4151-4170 are the hotkeys (`STRING_ID_HOTKEY_*`,
    * the real letters), 16132 the Villager's, 9004/9005/3013 the end of the game's (`STRING_ID_VICTORY_MESSAGE` ...), 1217 a late turn's,
    * 3016/3026 the tribute and stance notifications, 3028-3030/11302 the relics' and 3019/3020/3022/3058/11301 the
-   * Wonder's, 9851/9856/9863 the Diplomacy dialog's title, fee and Market texts.
+   * Wonder's, 9851/9856/9863 the Diplomacy dialog's title, fee and Market texts, 11050 F11's population prefix, 3009 the
+   * gold tribute's notification.
    */
   strings: {
     10231: 'Egyptian', 4119: 'Build', 5131: 'Man (old)', 4201: 'Stone Age', 4202: 'Tool Age',
@@ -54,6 +55,7 @@ export const SYNTHETIC = {
     11302: 'Artifacts: %d Years', 3058: 'You have started building a Wonder!', 3019: '%s started building a Wonder!',
     3020: 'You completed a Wonder. You will win if it stands for 2000 years!',
     3022: '%s completed a Wonder. You will lose if it stands for 2000 years!', 11301: 'Wonder: %d Years',
+    11050: 'pop: ', 3009: '%s paid %d gold in tribute to you.',
   } as Record<number, string>,
   overriddenString: [5131, 'Villager'],
   /** map.bmp: a 220x114 diamond like the real one (the widest line is row 57). */
@@ -63,6 +65,8 @@ export const SYNTHETIC = {
   /** sounds.drs wavs: data's, data2's (which also replaces `overriddenWav`), and interfac.drs's button click, won and lost. */
   wavs: { data: [5000, 5001], data2: [5001, 5002], interface: [50301, 50320, 50321] },
   overriddenWav: 5001,
+  /** The loose taunt wavs in `sound/`, file names in the install's mixed case. */
+  taunts: { 1: 'Taunt001.wav', 12: 'taunt012.wav' } as Record<number, string>,
   /**
    * The won achievements screen's info file (`scr7`, bina 50057): background SLP 50131 at 640 wide, palette 50505 (index c
    * is grey 255 - c), bevel colours 100-105.
@@ -186,6 +190,8 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'data2', 'Interfac.drs'), interfac2);
   await writeFile(join(dir, 'data', 'sounds.drs'), sounds);
   await writeFile(join(dir, 'data2', 'sounds.drs'), sounds2);
+  await mkdir(join(dir, 'sound'), { recursive: true });
+  for (const name of Object.values(SYNTHETIC.taunts)) await writeFile(join(dir, 'sound', name), buildWav());
   const none = Array.from({ length: EDGE_COUNT }, (): TileSpan[] => []);
   await writeFile(join(dir, 'data2', 'TileEdge.Dat'), buildTileEdgeFile([none.map(() => WHOLE_TILE), none]));
   await writeFile(join(dir, 'data2', 'BlkEdge.Dat'), buildTileEdgeFile([none.map((_, e) => (e === 1 ? [SYNTHETIC.blackSpan] : []))]));

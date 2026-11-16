@@ -3,7 +3,7 @@ import { BUILDER, HOUSE, LUMBERJACK, ObjectState, startingObjects, TECH_DONE, TE
 import type { SoundTable } from '../assets';
 import { GameSounds } from './game-sounds';
 import type { SoundPlayer } from './sound-player';
-import { GameSound, pickWav, researchSound, selectSound, spriteSounds, UnitSound } from './sound-rules';
+import { GameSound, pickWav, researchSound, selectSound, spriteSounds, tauntNumber, UnitSound } from './sound-rules';
 
 // `[selected, created, death, command, move, construction]` of these masters in data2/empires.dat
 // (npm run dat:dump -- unit <id>).
@@ -28,6 +28,7 @@ const table: SoundTable = {
   unitSounds: (id) => UNIT_SOUNDS[id] ?? null,
   graphicSounds: (id) => GRAPHIC_SOUNDS[id] ?? null,
   wavUrl: (id) => `/assets/sounds/${id}.wav`,
+  tauntUrl: (n) => (n >= 1 && n <= 50 ? `/assets/sounds/taunt${n}.wav` : null),
 };
 
 function game() {
@@ -178,4 +179,27 @@ describe('GameSounds', () => {
   test('every slot is read from its place in the master’s list', () => {
     expect(UnitSound).toEqual({ Selected: 0, Created: 1, Death: 2, Command: 3, Move: 4, Construction: 5 });
   });
+});
+
+test("a chat line's taunt number is atoi of it after an optional '!', none above 999", () => {
+  expect(['12', '!12', ' 7 hello', '+3', 'hi 12', '', '0', '1000', '999', '12345678901234'].map(tauntNumber)).toEqual([12, 12, 7, 3, 0, 0, 0, 0, 999, 0]);
+});
+
+test('a numeric chat line plays its taunt; "!MUTE" typed here stops them until "!NOMUTE"', () => {
+  const { sounds, played } = game();
+  sounds.chatLine('12', false);
+  expect(played.at(-1)).toEqual(['/assets/sounds/taunt12.wav', true]);
+  expect(last(sounds)).toEqual({ event: 'taunt', sound: -1, game: -1, wav: 12, source: 12 });
+  sounds.chatLine('77', false);
+  expect(last(sounds)).toMatchObject({ event: 'taunt', wav: null, source: 77 });
+  // Another player's "!MUTE" changes nothing here.
+  sounds.chatLine('!mute', false);
+  sounds.chatLine('3', false);
+  expect(played.at(-1)![0]).toBe('/assets/sounds/taunt3.wav');
+  sounds.chatLine('!MUTE', true);
+  sounds.chatLine('4', false);
+  expect(played.at(-1)![0]).toBe('/assets/sounds/taunt3.wav');
+  sounds.chatLine('!NOMUTE', true);
+  sounds.chatLine('!4', true);
+  expect(played.at(-1)![0]).toBe('/assets/sounds/taunt4.wav');
 });
