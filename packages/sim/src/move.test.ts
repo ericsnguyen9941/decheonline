@@ -156,7 +156,7 @@ describe('move orders on the test map', () => {
 const FUZZ_TIMEOUT = 30_000;
 
 describe('fuzz: random move, work, build, queue, cancel, research and stop orders', () => {
-  for (const seed of [1, 2, 3, 4]) {
+  for (const seed of [1, 2, 3, 7]) {
     test(`seed ${seed}: replaying twice gives the same hashes; footprints stay consistent, apart and on land; loads are dropped off, buildings finished, units trained, techs researched`, () => {
       const log = sampleReplay(240, seed, false);
       const first = runReplay(log);

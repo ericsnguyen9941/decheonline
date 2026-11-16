@@ -114,6 +114,20 @@ export function losDistanceTable(): number[][] {
   );
 }
 
+/** One `VISIBLE_RESOURCE_REC` (src/vis_unit.cpp:416-437): the object and its tile when the player explored it. */
+export interface ResourceRecord {
+  id: number;
+  x: number;
+  y: number;
+}
+
+/** `Visible_Resource_Manager(player, 5)` (src/tplayer.cpp:226): trees, forage, fish, stone, gold (`resource_group`). */
+export const RESOURCE_LISTS = 5;
+
+/** `g_visible_resource_diagonal_factor`, `g_visible_resource_diagonal_adjustment` (src/game_globals.cpp:402-403), doubles. */
+const DIAGONAL_FACTOR = 1.4;
+const DIAGONAL_ADJUSTMENT = -0.61;
+
 /** One `VISIBLE_UNIT_REC`: the object's owner and tile when the player started seeing it (never refreshed after). */
 export interface VisibleRecord {
   id: number;
@@ -134,6 +148,10 @@ export interface VisibilitySnapshot {
   /** Per player, `mutualVisibleMask` and `mutualExploredMask`. */
   mutualVisible: number[];
   mutualExplored: number[];
+  /** Per player, the tiles explored since its last update (`tile_list`), as row-major indices. */
+  newTiles: number[][];
+  /** `[player][resource group]` visible-resource records in list order. */
+  resources: ResourceRecord[][][];
 }
 
 /** The world's fog-of-war state. */
@@ -155,6 +173,10 @@ export class Visibility {
    */
   readonly mutualVisible: number[];
   readonly mutualExplored: number[];
+  /** Per player, `RGE_Player::tile_list`: tiles explored for the first time since the player's last update, in order. */
+  readonly newTiles: number[][];
+  /** Per player, `Visible_Resource_Manager::VR_List` (unit-ai.md §5.6): per resource group, the records in list order. */
+  readonly resources: ResourceRecord[][][];
 
   constructor(width: number, height: number, players: number) {
     this.width = width;
@@ -166,6 +188,8 @@ export class Visibility {
     this.records = Array.from({ length: players }, () => []);
     this.mutualVisible = Array.from({ length: players }, (_, p) => 1 << p);
     this.mutualExplored = Array.from({ length: players }, (_, p) => (1 << (p + EXPLORED_SHIFT)) >>> 0);
+    this.newTiles = Array.from({ length: players }, () => []);
+    this.resources = Array.from({ length: players }, () => Array.from({ length: RESOURCE_LISTS }, () => []));
   }
 
   /** Set `player`'s mutual masks (`update_mutual_allies`). */
@@ -229,6 +253,7 @@ export class Visibility {
       counts[i] = 0;
       this.explored[player]!++;
       this.unified[i]! |= exploredBit;
+      this.newTiles[player]!.push(i);
     }
   }
 
@@ -243,6 +268,7 @@ export class Visibility {
         revealed++;
         this.explored[player]!++;
         this.unified[i]! |= exploredBit;
+        this.newTiles[player]!.push(i);
         v = 1;
       }
       if (v === 1) this.unified[i]! |= visibleBit;
@@ -328,6 +354,60 @@ export class Visibility {
     return this.records[player]![group] ?? [];
   }
 
+  /**
+   * `Visible_Resource_Manager::Process_New_Tiles` then `tile_list.del_list` (src/vis_unit.cpp:385-414, src/world.cpp:1277):
+   * every object on each newly explored tile whose master has `track_as_resource` gets a record in its `resource_group`
+   * list. `onTile` lists a tile's such objects in the tile's list order (descending id) with their groups.
+   */
+  processNewTiles(player: number, onTile: (tile: number) => readonly (readonly [id: number, group: number])[] | undefined): void {
+    const tiles = this.newTiles[player]!;
+    const lists = this.resources[player]!;
+    for (const tile of tiles) {
+      for (const [id, group] of onTile(tile) ?? []) lists[group]?.push({ id, x: tile % this.width, y: Math.trunc(tile / this.width) });
+    }
+    tiles.length = 0;
+  }
+
+  /**
+   * `RGE_Static_Object::remove_visible_resource` (src/stat_obj.cpp:1866-1881): the record leaves the list of every player
+   * that has explored the object's tile (`Remove_Resource`: the last record takes its place).
+   */
+  removeResource(id: number, group: number, x: number, y: number): void {
+    if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
+    const cell = this.unified[y * this.width + x]!;
+    for (let p = 0; p < this.players; p++) {
+      if (((cell >>> (p + EXPLORED_SHIFT)) & 1) === 0) continue;
+      const list = this.resources[p]![group];
+      if (!list) continue;
+      const i = list.findIndex((r) => r.id === id);
+      if (i === -1) continue;
+      list[i] = list[list.length - 1]!;
+      list.pop();
+    }
+  }
+
+  /**
+   * `Visible_Resource_Manager::Get_Closest_Resource` (src/vis_unit.cpp:467-535): the first record of `player`'s `group`
+   * list with the smallest octile-like distance from tile (x, y) that is not in `exclude`, and that distance capped at
+   * 255; null when none.
+   */
+  closestResource(player: number, x: number, y: number, group: number, exclude: readonly number[]): { id: number; distance: number } | null {
+    const list = this.resources[player]?.[group];
+    if (!list || list.length === 0) return null;
+    let best = 9999;
+    let found: ResourceRecord | null = null;
+    for (const r of list) {
+      const xd = Math.abs(r.x - x);
+      const yd = Math.abs(r.y - y);
+      const distance = xd > yd ? xd - Math.trunc(DIAGONAL_ADJUSTMENT - yd * DIAGONAL_FACTOR) - yd : yd - Math.trunc(DIAGONAL_ADJUSTMENT - xd * DIAGONAL_FACTOR) - xd;
+      if (distance < best && !exclude.includes(r.id)) {
+        found = r;
+        best = distance;
+      }
+    }
+    return found ? { id: found.id, distance: Math.min(best, 0xff) } : null;
+  }
+
   hashInto(h: Hasher): void {
     h.u32(this.width).u32(this.height);
     for (const counts of this.counts) {
@@ -345,6 +425,16 @@ export class Visibility {
       }
     }
     for (let p = 0; p < this.players; p++) h.u32(this.mutualVisible[p]!).u32(this.mutualExplored[p]!);
+    for (const tiles of this.newTiles) {
+      h.u32(tiles.length);
+      for (const i of tiles) h.u32(i);
+    }
+    for (const lists of this.resources) {
+      for (const list of lists) {
+        h.u32(list.length);
+        for (const r of list) h.u32(r.id).u32(r.x).u32(r.y);
+      }
+    }
   }
 
   toJSON(): VisibilitySnapshot {
@@ -357,6 +447,8 @@ export class Visibility {
       records: this.records.map((lists) => Array.from(lists, (list) => (list ?? []).map((r) => ({ ...r })))),
       mutualVisible: [...this.mutualVisible],
       mutualExplored: [...this.mutualExplored],
+      newTiles: this.newTiles.map((t) => [...t]),
+      resources: this.resources.map((lists) => lists.map((list) => list.map((r) => ({ ...r })))),
     };
   }
 
@@ -367,6 +459,8 @@ export class Visibility {
     s.explored.forEach((n, p) => (v.explored[p] = n));
     s.records.forEach((lists, p) => lists.forEach((list, g) => (v.records[p]![g] = list.map((r) => ({ ...r })))));
     s.mutualVisible.forEach((m, p) => v.setMutual(p, m, s.mutualExplored[p]!));
+    s.newTiles.forEach((t, p) => v.newTiles[p]!.push(...t));
+    s.resources.forEach((lists, p) => lists.forEach((list, g) => (v.resources[p]![g] = list.map((r) => ({ ...r })))));
     return v;
   }
 }
@@ -427,6 +521,11 @@ export function unexploreObject(ctx: VisibilityContext, e: Entity, t: UnitType, 
  * removal takes the footprint away.
  */
 export function stateChanged(ctx: VisibilityContext, e: Entity, t: UnitType, next: number): void {
+  // `remove_visible_resource` (src/stat_obj.cpp:1934-1937): only from Dying or below straight to removal; otherwise the
+  // destructor takes the record away.
+  if (t.trackAsResource && e.state <= ObjectState.Dying && next >= ObjectState.PendingRemoval) {
+    ctx.visibility?.removeResource(e.id, t.resourceGroup, toInt(e.x), toInt(e.y));
+  }
   if (next >= ObjectState.Dying && e.state === ObjectState.Active) {
     unexploreObject(ctx, e, t, false);
     if (t.los > 0) exploreObject(ctx, e, t, true);

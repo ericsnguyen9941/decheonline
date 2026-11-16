@@ -76,8 +76,22 @@ const NOTIFY_KILLED = 0x209;
 export const NOTIFY_OWNER_CHANGED = 0x20b;
 const NOTIFY_STOPPED_WORKING = 0x2bb;
 
-/** `TribeCivilianUnitAIModule::convertToLOSResourceType` (src/taiuaimd.cpp:546): the groups with a resource type. */
-const LOS_RESOURCE_GROUPS = [7, 0x20, 8, 0x0f, 5, 0x1f, 0x21];
+/**
+ * `TribeCivilianUnitAIModule::convertToLOSResourceType` (src/taiuaimd.cpp:546): an object group's visible-resource list
+ * (forage 1, gold 4, stone 3, trees 0, the fish groups 2), -1 for any other group.
+ */
+const LOS_RESOURCE_TYPE = new Map([
+  [7, 1],
+  [0x20, 4],
+  [8, 3],
+  [0x0f, 0],
+  [5, 2],
+  [0x1f, 2],
+  [0x21, 2],
+]);
+
+/** `g_unit_ai_resource_los_adjustment` (src/game_globals.cpp:202). */
+const RESOURCE_LOS_ADJUSTMENT = f32(-5);
 
 /** `processIdle` / `processNotify` results. */
 const IDLE_NOTHING = 5;
@@ -1339,18 +1353,8 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
       playerNotify(ctx, e.owner, note.type, note.p1);
       return NOTE_DONE;
     case NOTIFY_TARGET_INVALID:
-      // A repair the owner could not pay for ends (`action_finished`, src/taiuaimd.cpp:852-863). Re-tasking hunters,
-      // gatherers and builders on this notify is not ported yet.
-      if (ai.action !== AI_ACTION_REPAIR) return NOTE_DONE;
-      removeCurrentTarget(ai);
-      stopObject(ctx, e, true);
-      playerNotify(ctx, e.owner, note.type, note.p1);
-      return NOTE_DONE;
     case NOTIFY_REQUEST_TASK:
-      // Of the re-task (src/taiuaimd.cpp:707-867) a builder's and a gatherer's whose action was made for a Farm are ported.
-      if (ai.action === AI_ACTION_BUILD) return builderRequest(ctx, e);
-      if (ai.action !== AI_ACTION_GATHER || note.p2 !== FARM) return NOTE_DONE;
-      return farmerRequest(ctx, e);
+      return civilianRetask(ctx, e, note);
     case NOTIFY_OWNER_CHANGED:
       // The class's `default` is the base path (src/taiuaimd.cpp:866); of the notes it can take only this one is ported there.
       return baseNotify(ctx, e, note);
@@ -1360,47 +1364,77 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
 }
 
 /**
- * A waiting builder's task request (src/taiuaimd.cpp:811-825, economy.md §4.8.3): the closest of its own unbuilt objects
- * in its search results of the group it was building (a wall's or a building's), else of the other of the two; when it
- * can path there it builds it. Otherwise, away from its last target (or with none), it walks back to that target's
- * point. A build it cannot start leaves it waiting.
+ * `closestResourceObject(resourceType)` (src/aiuaimod.cpp:1556-1590, unit-ai.md §5.6): the closest record of the owner's
+ * visible-resource list from the unit's tile; none when it lies farther than the unit's line of sight + 5. A record the
+ * unit cannot path to within 1 is excluded and the search runs again, at most 100 times; after the 100th the last
+ * excluded one is returned (the loop's literal end).
  */
-function builderRequest(ctx: GameContext, e: Entity): number {
-  const ai = e.ai!;
-  let id = closestObject(ctx, e, ai.targetType, ObjectState.Unbuilt, -1, 3);
-  if (id === -1) id = closestObject(ctx, e, ai.targetType === GROUP_WALL ? GROUP_BUILDING : GROUP_WALL, ObjectState.Unbuilt, -1, 3);
-  const next = id === -1 ? undefined : ctx.entities.get(id);
-  if (next && canPath(ctx, e, next, 1)) return aiTask(ctx, e, id, ACTION_BUILD, AI_ACTION_BUILD) ? NOTE_STOP : NOTE_DONE;
-  const target = ai.target === -1 ? undefined : ctx.entities.get(ai.target);
-  if (!target || distanceToObject(ctx, e, target) > 1) aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, 1, true);
-  return NOTE_DONE;
+function closestResourceObject(ctx: GameContext, e: Entity, resourceType: number): number {
+  const v = ctx.visibility;
+  if (!v) return -1;
+  const exclude: number[] = [];
+  let found: { id: number; distance: number } | null = null;
+  while (exclude.length < 100) {
+    found = v.closestResource(e.owner, toInt(e.x), toInt(e.y), resourceType, exclude);
+    if (!found) return -1;
+    if (found.distance > sub32(typeOf(ctx, e).los, RESOURCE_LOS_ADJUSTMENT)) return -1;
+    const o = ctx.entities.get(found.id);
+    if (o && canPath(ctx, e, o, 1)) break;
+    exclude.push(found.id);
+  }
+  return found!.id;
 }
 
 /**
- * A waiting Farmer's task request (src/taiuaimd.cpp:752-801, economy.md §4.7): with no target type, current or last, it
- * stops. Otherwise the closest active Farm among its search results, anyone's, is its next target (no check that
- * another Farmer works it, a decomp-marked bug); with none, a human player's Farmer steps 2.5 tiles off on both axes.
- * Resource groups (`convertToLOSResourceType`) go to `closestResourceObject`, which is not ported.
+ * The civilian's target-invalid and task-request notes (src/taiuaimd.cpp:707-863, economy.md §10): a hunter or gatherer
+ * takes the closest object of the group it worked (the current target's, else the last one's): from the visible-resource
+ * lists for resource groups, else the closest active Farm (a Farm's request) or object of the group in its search
+ * results; a waiting builder the closest own unbuilt object of the group it built, else of the other of building and
+ * wall. With no new target a human player's Farmer steps 2.5 tiles off on both axes and a builder away from its target
+ * walks back to the target's point. A request then waits; an invalid target ends (`action_finished`): the target goes,
+ * the unit stops and the owner hears it. The computer player's branches and the explore re-task are not ported.
  */
-function farmerRequest(ctx: GameContext, e: Entity): number {
+function civilianRetask(ctx: GameContext, e: Entity, note: Note): number {
   const ai = e.ai!;
-  const type = ai.targetType !== -1 ? ai.targetType : ai.lastTargetType;
-  if (type === -1) {
+  const giveUp = (): void => {
     removeCurrentTarget(ai);
     stopObject(ctx, e, true);
-    return NOTE_DONE;
+    playerNotify(ctx, e.owner, note.type, note.p1);
+  };
+  if (ai.action === AI_ACTION_HUNT || ai.action === AI_ACTION_GATHER) {
+    const hunt = ai.action === AI_ACTION_HUNT;
+    const type = ai.targetType !== -1 ? ai.targetType : ai.lastTargetType;
+    if (type === -1) {
+      giveUp();
+      return NOTE_DONE;
+    }
+    const farm = !hunt && note.p2 === FARM;
+    const resourceType = LOS_RESOURCE_TYPE.get(type) ?? -1;
+    let id: number;
+    if (resourceType !== -1) id = closestResourceObject(ctx, e, resourceType);
+    else if (farm) id = closestObject(ctx, e, type, ObjectState.Active, FARM);
+    else id = closestObject(ctx, e, type);
+    if (id !== -1) {
+      if (hunt ? aiTask(ctx, e, id, ACTION_HUNT, AI_ACTION_HUNT) : aiTask(ctx, e, id, ACTION_GATHER, AI_ACTION_GATHER)) return NOTE_STOP;
+      giveUp();
+    } else if (farm) {
+      const x = e.x > 5 ? sub32(e.x, 2.5) : add32(e.x, 2.5);
+      const y = e.y > 5 ? sub32(e.y, 2.5) : add32(e.y, 2.5);
+      evasiveMoveTo(ctx, e, x, y, e.z);
+    }
+  } else if (ai.action === AI_ACTION_BUILD) {
+    let id = closestObject(ctx, e, ai.targetType, ObjectState.Unbuilt, -1, 3);
+    if (id === -1) id = closestObject(ctx, e, ai.targetType === GROUP_WALL ? GROUP_BUILDING : GROUP_WALL, ObjectState.Unbuilt, -1, 3);
+    const next = id === -1 ? undefined : ctx.entities.get(id);
+    if (next && canPath(ctx, e, next, 1)) {
+      if (aiTask(ctx, e, id, ACTION_BUILD, AI_ACTION_BUILD)) return NOTE_STOP;
+    } else {
+      const target = ai.target === -1 ? undefined : ctx.entities.get(ai.target);
+      if (!target || distanceToObject(ctx, e, target) > 1) aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, 1, true);
+    }
   }
-  if (LOS_RESOURCE_GROUPS.includes(type)) return NOTE_DONE;
-  const id = closestObject(ctx, e, type, ObjectState.Active, FARM);
-  if (id !== -1) {
-    if (aiTask(ctx, e, id, ACTION_GATHER, AI_ACTION_GATHER)) return NOTE_STOP;
-    removeCurrentTarget(ai);
-    stopObject(ctx, e, true);
-    return NOTE_DONE;
-  }
-  const x = e.x > 5 ? sub32(e.x, 2.5) : add32(e.x, 2.5);
-  const y = e.y > 5 ? sub32(e.y, 2.5) : add32(e.y, 2.5);
-  evasiveMoveTo(ctx, e, x, y, e.z);
+  if (note.type === NOTIFY_REQUEST_TASK) return NOTE_DONE;
+  giveUp();
   return NOTE_DONE;
 }
 

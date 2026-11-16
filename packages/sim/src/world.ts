@@ -37,7 +37,7 @@ import { EntityStore, ObjectState, type Entity } from './entities';
 import { deleteActions, orderWork, workMoveTo } from './gather';
 import { Hasher } from './hash';
 import { defaultWonderTask, startWonder, WONDER } from './wonder';
-import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toUint, u32 } from './num';
+import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toInt, toUint, u32 } from './num';
 import { createTestMap, TileMap, type MapSnapshot } from './map';
 import { copyMasters, hasMaster, master, newMasters, typeOf } from './masters';
 import { initialFacing, newMover, orderMove, teleport } from './movement';
@@ -378,6 +378,8 @@ export class World {
   randomMapSeed = -1;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
   private mastersDigest: (number | undefined)[] = [];
+  /** `trackedOnTile`'s index and the store state it was built for; derived, never hashed or saved. */
+  private tracked: { key: string; tiles: Map<number, [number, number][]> } | null = null;
   private queue = new CommandQueue();
   private readonly rng = new CrtRand();
 
@@ -703,6 +705,7 @@ export class World {
    */
   private removeObject(e: Entity): void {
     const t = typeOf(this, e);
+    if (t.trackAsResource) this.visibility.removeResource(e.id, t.resourceGroup, toInt(e.x), toInt(e.y));
     countPopulation(this.attributes[e.owner]!, t, -1);
     this.pathing.unstamp(e, t);
     if (t.masterType >= 50) forgetSighting(this, e, t);
@@ -713,6 +716,29 @@ export class World {
     const i = list.indexOf(e.id);
     if (i !== -1) list.splice(i, 1);
     this.entities.remove(e.id);
+  }
+
+  /**
+   * Per tile index, the objects on it whose master has `track_as_resource`, by descending id (a tile's list order, as
+   * `areaAttack` takes it), with their `resource_group`. Such objects never move, so the index is rebuilt only when an
+   * object was created or removed since.
+   */
+  private trackedOnTile(): Map<number, [id: number, group: number][]> {
+    const key = `${this.entities.nextEntityId}/${this.entities.size}`;
+    if (this.tracked?.key === key) return this.tracked.tiles;
+    const tiles = new Map<number, [number, number][]>();
+    for (const e of this.entities.all()) {
+      // `test` probe objects are not game objects.
+      if (e.inside != null || !hasMaster(this, e.owner, e.type)) continue;
+      const t = typeOf(this, e);
+      if (!t.trackAsResource) continue;
+      const tile = toInt(e.y) * this.map.width + toInt(e.x);
+      const list = tiles.get(tile);
+      if (list) list.unshift([e.id, t.resourceGroup]);
+      else tiles.set(tile, [[e.id, t.resourceGroup]]);
+    }
+    this.tracked = { key, tiles };
+    return tiles;
   }
 
   /** Queue the commands `player` issued during `issueTurn`; they run on `issueTurn + COMMAND_DELAY_TURNS`. */
@@ -840,6 +866,11 @@ export class World {
     }
     // Then the player's victory points and conditions (`RGE_Player::update`, victory.md §4).
     updateConditions(this.victory, i, this.attributes, this.diplomacy);
+    // Last, the objects on the tiles it explored since its last update join its visible-resource lists (unit-ai.md §5.6).
+    if (this.visibility.newTiles[i]!.length > 0) {
+      const tracked = this.trackedOnTile();
+      this.visibility.processNewTiles(i, (tile) => tracked.get(tile));
+    }
     // `TRIBE_Player::update` ends by fencing its computer-player AI off the stream (src/tplayer.cpp:607-631): one
     // draw becomes the seed. Gaia's update (`TRIBE_Gaia::update`) has no fence.
     if (i > 0) rng.srand(rng.rand());
