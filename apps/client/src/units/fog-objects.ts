@@ -1,6 +1,6 @@
 // Which objects the map view and the minimap show under the fog, and the remembered copies (doppelgangers) of the
 // trees, mines and bushes a player last saw. docs/spec/hud.md "Fog of war".
-import { ObjectState, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, type World } from '@aoe/sim';
+import { ObjectState, TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, type Entity, type World } from '@aoe/sim';
 
 /**
  * How an object (or the parts of its graphic at one draw level) is drawn: not at all, as it is, with every other pixel
@@ -59,12 +59,14 @@ export interface Doppelganger {
 }
 
 interface Seen {
-  copy: Doppelganger;
+  /** The object; read after the store dropped it too, for where it last was. */
+  e: Entity;
+  /** Its master's `create_doppleganger_on_death`. */
+  flag: number;
+  /** Its state at the last update. */
   state: number;
   /** A dying tree's tile was visible at the last check (`RGE_Doppleganger_Creator`'s `Last_Map_Value` bit). */
   visible: boolean;
-  /** The last `update` that found the object. */
-  look: number;
 }
 
 /**
@@ -74,11 +76,21 @@ interface Seen {
  * being visible to a player while it is dying (`perform_doppleganger_checks`, src/dpl_obj.cpp:403); 1 (mines, bushes)
  * when it is removed (`remove_visible_resource`, src/stat_obj.cpp:1866). A copy goes once its tile is visible again
  * (`RGE_Doppleganger_Object::update`, src/dpl_obj.cpp:223). The original only makes them for players 1 and up.
+ *
+ * A step looks at an object only when its state changed, while it is dying (trees) and while it waits to be removed:
+ * the sim removes an object only after `PendingRemoval` and `ReadyToRemove` (objects.ts `staticUpdate`), so a removal
+ * always follows a state change.
  */
 export class Doppelgangers {
   readonly copies = new Map<number, Doppelganger>();
+  /** The objects with a flag, once they have a sprite. */
   private readonly seen = new Map<number, Seen>();
-  private look = 0;
+  /** Those looked at every update: dying trees and objects waiting to be removed. */
+  private readonly watched = new Set<Seen>();
+  /** Objects with a flag and no sprite yet. */
+  private readonly unshown = new Set<number>();
+  /** The first object id not looked at yet: ids are handed out in increasing order and never reused. */
+  private next = 1;
 
   constructor(
     private readonly player: number,
@@ -95,47 +107,54 @@ export class Doppelgangers {
   /** Follow the world after a sim step. */
   update(world: World): void {
     if (this.player < 1) return;
+    const { entities } = world;
     const tile = (x: number, y: number) => world.tileVisibility(this.player, Math.floor(x), Math.floor(y));
-    const keep = (s: Seen) => {
-      if (tile(s.copy.x, s.copy.y) === TILE_FOGGED) this.copies.set(s.copy.id, { ...s.copy });
+    const keep = (e: Entity) => {
+      if (tile(e.x, e.y) !== TILE_FOGGED) return;
+      this.copies.set(e.id, { id: e.id, type: e.type, owner: e.owner, x: e.x, y: e.y, z: e.z, graphic: e.sprite!.graphic, frame: e.sprite!.frame, facet: e.facet });
     };
-    const look = ++this.look;
-    for (const e of world.entities.all()) {
-      const flag = this.flagOf(e.type);
-      if (flag === 0 || !e.sprite) continue;
-      const visible = tile(e.x, e.y) === TILE_VISIBLE;
-      const now = this.seen.get(e.id);
-      if (!now) {
-        const copy: Doppelganger = { id: e.id, type: e.type, owner: e.owner, x: e.x, y: e.y, z: e.z, graphic: e.sprite.graphic, frame: e.sprite.frame, facet: e.facet };
-        this.seen.set(e.id, { copy, state: e.state, visible, look });
+    const end = entities.nextEntityId;
+    for (let id = this.next; id < end; id++) {
+      const e = entities.get(id);
+      if (e && this.flagOf(e.type) !== 0) this.unshown.add(id);
+    }
+    this.next = end;
+    const look: Seen[] = [];
+    for (const s of this.seen.values()) if (s.e.state !== s.state) look.push(s);
+    for (const s of this.watched) if (s.e.state === s.state) look.push(s);
+    for (const s of look) {
+      const { e, state } = s;
+      if (entities.get(e.id) !== e) {
+        this.seen.delete(e.id);
+        this.watched.delete(s);
+        // Removed between two looks: as at `remove_visible_resource`, from where it last was.
+        if (s.flag === 1 && state < ObjectState.PendingRemoval) keep(e);
         continue;
       }
-      // Updated in place, not copied: thousands of trees are looked at every step.
-      const state = now.state;
-      const wasVisible = now.visible;
-      const c = now.copy;
-      c.type = e.type;
-      c.owner = e.owner;
-      c.x = e.x;
-      c.y = e.y;
-      c.z = e.z;
-      c.graphic = e.sprite.graphic;
-      c.frame = e.sprite.frame;
-      c.facet = e.facet;
-      now.state = e.state;
-      now.visible = visible;
-      now.look = look;
-      if (flag === 2 && e.state >= ObjectState.Dying) {
-        if (state < ObjectState.Dying || (wasVisible && !visible)) keep(now);
+      const wasVisible = s.visible;
+      s.state = e.state;
+      s.visible = tile(e.x, e.y) === TILE_VISIBLE;
+      if (s.flag === 2 && e.state >= ObjectState.Dying) {
+        if (state < ObjectState.Dying || (wasVisible && !s.visible)) keep(e);
       }
-      if (flag === 1 && state < ObjectState.PendingRemoval && e.state >= ObjectState.PendingRemoval) keep(now);
+      if (s.flag === 1 && state < ObjectState.PendingRemoval && e.state >= ObjectState.PendingRemoval) keep(e);
+      this.watch(s);
     }
-    for (const [id, s] of this.seen) {
-      if (s.look === look) continue;
-      this.seen.delete(id);
-      // Removed between two looks: as at `remove_visible_resource`, from where it last was.
-      if (this.flagOf(s.copy.type) === 1 && s.state < ObjectState.PendingRemoval) keep(s);
+    for (const id of this.unshown) {
+      const e = entities.get(id);
+      if (e?.sprite) {
+        const s: Seen = { e, flag: this.flagOf(e.type), state: e.state, visible: tile(e.x, e.y) === TILE_VISIBLE };
+        this.seen.set(id, s);
+        this.watch(s);
+      }
+      if (!e || e.sprite) this.unshown.delete(id);
     }
     for (const [id, c] of this.copies) if (tile(c.x, c.y) === TILE_VISIBLE) this.copies.delete(id);
+  }
+
+  /** Look at `s` every update while it is a dying tree or waits to be removed. */
+  private watch(s: Seen): void {
+    if ((s.flag === 2 && s.state >= ObjectState.Dying) || s.state >= ObjectState.PendingRemoval) this.watched.add(s);
+    else this.watched.delete(s);
   }
 }

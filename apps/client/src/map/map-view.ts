@@ -15,6 +15,8 @@ export interface FogSource {
   state(col: number, row: number): number;
   /** Changes whenever `state` may have changed (each sim step). */
   version(): number;
+  /** Changes whenever a tile may have become explored (`state` no longer `TILE_BLACK`); `version` when absent. */
+  explored?(): string;
 }
 
 /** A new map's flags: nothing revealed, fog on (src/map.cpp:97-98). */
@@ -178,6 +180,12 @@ export class MapView {
   /** The fog state drawn for tile (col, row): what `setFog`'s source says under the map's flags, `TILE_VISIBLE` without one. */
   fogState(col: number, row: number): number {
     return this.fog ? drawnVisibility(this.fog.state(col, row), this.flags()) : TILE_VISIBLE;
+  }
+
+  /** Changes whenever a tile may have been drawn explored since: the source's `explored`, under the map's flags. */
+  exploredVersion(): string {
+    const fog = this.fog;
+    return `${this.flags().mapVisible}:${fog ? (fog.explored?.() ?? fog.version()) : 'all'}`;
   }
 
   /** Move the camera so map pixel `(x, y)` is at the viewport centre. */

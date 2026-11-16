@@ -63,6 +63,10 @@ export class Minimap {
   private readonly pixels: Uint32Array;
   /** What the canvas shows: only the pixels that differ from it are put on it again. */
   private readonly shown: Uint32Array;
+  /** The objects drawn into the picture: per dot its tile's column and row, size and colour, in draw order. */
+  private dots: number[] = [];
+  /** `MapView.exploredVersion` when the explored tiles were last looked for. */
+  private exploredAt = '';
   private scrolling = false;
   private drawnKey = '';
   private framedAt = '';
@@ -105,8 +109,8 @@ export class Minimap {
 
   /**
    * Redraw when the world, the view, the selection or the flash changed since the last call (`RGE_Diamond_Map::draw`):
-   * the objects only when the world, the selection or the flash did, and on the canvas only the pixels that changed (a
-   * view move changes its frame's).
+   * the picture only when a tile was explored or a dot moved, appeared, went or changed colour, and on the canvas only
+   * the pixels that changed (a view move changes its frame's).
    */
   update(now = performance.now()): void {
     const { world, view, units } = this.o;
@@ -118,12 +122,21 @@ export class Minimap {
     const key = `${world.turn}:${world.turnStep}:${this.flashOn}:${[...units.selected].join()}`;
     const framedAt = `${view.camera.x}:${view.camera.y}`;
     if (key === this.drawnKey && framedAt === this.framedAt) return;
+    let redrawn = false;
     if (key !== this.drawnKey) {
       this.drawnKey = key;
-      this.exploreTiles();
-      this.picture.set(this.terrain);
-      this.drawObjects();
+      const explored = view.exploredVersion();
+      const fresh = explored !== this.exploredAt && this.exploreTiles();
+      this.exploredAt = explored;
+      const dots = this.collectDots();
+      if (fresh || !sameDots(dots, this.dots)) {
+        this.dots = dots;
+        this.picture.set(this.terrain);
+        this.drawDots();
+        redrawn = true;
+      }
     }
+    if (!redrawn && framedAt === this.framedAt) return;
     this.framedAt = framedAt;
     this.pixels.set(this.picture);
     this.drawViewRect();
@@ -153,8 +166,8 @@ export class Minimap {
     return this.o.view.fogState(col, row);
   }
 
-  /** `draw_explored_tiles`: a tile is drawn the first time the player has it explored. */
-  private exploreTiles(): void {
+  /** `draw_explored_tiles`: a tile is drawn the first time the player has it explored; true when one was. */
+  private exploreTiles(): boolean {
     const { world } = this.o;
     const { width, height } = world.map;
     const fresh: number[] = [];
@@ -166,7 +179,7 @@ export class Minimap {
         fresh.push(i);
       }
     }
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) return false;
     // The `map_draw_level` 4 objects' colour by tile they are on or next to, the last object winning, as a scan of
     // every object per tile finds it (a random map has thousands of objects).
     const tileColours = new Map<number, number>();
@@ -180,6 +193,7 @@ export class Minimap {
       }
     }
     for (const i of fresh) this.drawTile(i % width, Math.trunc(i / width), tileColours.get(i));
+    return true;
   }
 
   /**
@@ -202,31 +216,48 @@ export class Minimap {
    * `draw_objects` (src/diam_map.cpp:634): Gaia's objects, then each player's doppelgangers and unselected objects in its
    * colour, then the selection in white, then the player's own objects under attack, flashing.
    */
-  private drawObjects(): void {
+  private collectDots(): number[] {
     const { world, player, units } = this.o;
-    const all = [...world.entities.all()].filter((e) => e.sprite);
-    for (const e of all) if (e.owner === 0) this.drawVisible(e, WHITE, WHITE);
+    const dots: number[] = [];
+    // One walk over the objects, skipping those no dot is drawn for (trees colour their tiles instead), in draw order.
+    const owned: Entity[][] = Array.from({ length: world.players }, () => []);
+    const flashing: Entity[] = [];
+    for (const e of world.entities.all()) {
+      if (!e.sprite || !this.dotted(e)) continue;
+      if (e.owner === 0) this.drawVisible(dots, e, WHITE, WHITE);
+      if (e.owner === player && e.ai?.underAttack) flashing.push(e);
+      else if (e.owner !== 0 && !units.selected.has(e.id)) owned[e.owner]?.push(e);
+    }
     for (let p = 1; p < world.players; p++) {
       const colour = this.playerColour(p);
-      if (p === player) for (const c of units.doppelgangers.copies.values()) this.drawCopy(c);
-      for (const e of all) {
-        if (e.owner !== p || units.selected.has(e.id) || (p === player && e.ai?.underAttack)) continue;
-        this.drawVisible(e, colour, colour);
-      }
+      if (p === player) for (const c of units.doppelgangers.copies.values()) this.drawCopy(dots, c);
+      for (const e of owned[p]!) this.drawVisible(dots, e, colour, colour);
     }
     for (const id of units.selected) {
       const e = world.entities.get(id);
-      if (e?.sprite) this.drawVisible(e, WHITE, WHITE);
+      if (e?.sprite) this.drawVisible(dots, e, WHITE, WHITE);
     }
     const flash = this.flashOn ? FLASH : WHITE;
-    for (const e of all) if (e.owner === player && e.ai?.underAttack) this.drawVisible(e, flash, flash, true);
+    for (const e of flashing) this.drawVisible(dots, e, flash, flash, true);
+    return dots;
+  }
+
+  /** Whether `e`'s `map_draw_level` draws a dot (1 to 3). */
+  private dotted(e: Entity): boolean {
+    const level = (this.art?.unitMinimap(e.type) ?? fallbackLevel(e))[0];
+    return level >= 1 && level <= 3;
+  }
+
+  private drawDots(): void {
+    const { dots } = this;
+    for (let i = 0; i < dots.length; i += 4) this.drawObject(dots[i]!, dots[i + 1]!, dots[i + 2]!, dots[i + 3] as 1 | 2);
   }
 
   /**
    * `draw_visible_object` (src/diam_map.cpp:702): on a visible tile, or on a fogged one when the master's `fog_flag` is
    * set; `map_draw_level` 1 a 3x3 square, 2 a plus, 3 a plus in the master's own `map_color`.
    */
-  private drawVisible(e: Entity, colour1: number, colour2: number, flashing = false): void {
+  private drawVisible(dots: number[], e: Entity, colour1: number, colour2: number, flashing = false): void {
     // A passenger is off the map, inside its transport.
     if (e.inside !== undefined && e.inside !== null) return;
     const { world } = this.o;
@@ -237,22 +268,22 @@ export class Minimap {
     if (visible !== TILE_VISIBLE && (visible !== TILE_FOGGED || typeOf(world, e).fogFlag === 0)) return;
     const [level, colour] = this.art?.unitMinimap(e.type) ?? fallbackLevel(e);
     if (level === 3 && !flashing) colour1 = colour;
-    this.drawLevel(col, row, level, colour1, colour2);
+    this.dotLevel(dots, col, row, level, colour1, colour2);
   }
 
   /** A doppelganger: only on a fogged tile, with the level and colour it copied (`RGE_Doppleganger_Object` setup). */
-  private drawCopy(c: Doppelganger): void {
+  private drawCopy(dots: number[], c: Doppelganger): void {
     const col = Math.floor(c.x);
     const row = Math.floor(c.y);
     if (this.visibility(col, row) !== TILE_FOGGED) return;
     const [level, colour] = this.art?.unitMinimap(c.type) ?? [0, 0];
     const own = level === 3 ? colour : c.owner > 0 ? this.playerColour(c.owner) : WHITE;
-    this.drawLevel(col, row, level, own, own);
+    this.dotLevel(dots, col, row, level, own, own);
   }
 
-  private drawLevel(col: number, row: number, level: number, colour1: number, colour2: number): void {
-    if (level === 1) this.drawObject(col, row, colour2, 1);
-    else if (level === 2 || level === 3) this.drawObject(col, row, colour1, 2);
+  private dotLevel(dots: number[], col: number, row: number, level: number, colour1: number, colour2: number): void {
+    if (level === 1) dots.push(col, row, colour2, 1);
+    else if (level === 2 || level === 3) dots.push(col, row, colour1, 2);
   }
 
   /** `draw_object` (src/diam_map.cpp:771): size 1 a 3x3 square, size 2 a plus, around the tile's picture point. */
@@ -353,6 +384,12 @@ export class Minimap {
   private rgba(rgb: number): number {
     return (0xff000000 | ((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff)) >>> 0;
   }
+}
+
+function sameDots(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /** Without a pack: units and buildings as their owner's dot, everything else not drawn. */

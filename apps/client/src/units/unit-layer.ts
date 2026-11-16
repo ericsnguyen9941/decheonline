@@ -331,6 +331,13 @@ export class UnitLayer {
     o.view.setFog({
       state: (col, row) => (this.revealed ? TILE_VISIBLE : o.world.tileVisibility(o.player, col, row)),
       version: () => (this.revealed ? -1 : stepOf(o.world)),
+      // A tile is explored only with one more in a player's count; the mask follows shared sight (diplomacy.md §3).
+      explored: () => {
+        const { visibility } = o.world;
+        let count = 0;
+        for (const n of visibility.explored) count += n;
+        return this.revealed ? 'revealed' : `${visibility.mutualExplored[o.player]}:${count}`;
+      },
     });
     // Objects start at the tile count (`t.sprite.zIndex`), the fog just under it (map-view.ts).
     this.outlines.zIndex = o.world.map.width * o.world.map.height - 0.25;

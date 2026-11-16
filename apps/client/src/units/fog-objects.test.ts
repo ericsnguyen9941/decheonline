@@ -31,14 +31,22 @@ const MINE = 66;
 function scene() {
   const entities = new Map<number, Entity>();
   const tiles = new Map<string, number>();
+  let next = 1;
   const world = {
-    entities: { all: () => entities.values() },
+    entities: { get: (id: number) => entities.get(id), get nextEntityId() { return next; } },
     tileVisibility: (_p: number, c: number, r: number) => tiles.get(`${c},${r}`) ?? TILE_VISIBLE,
   } as unknown as World;
-  const add = (id: number, type: number, x: number) =>
+  const add = (id: number, type: number, x: number) => {
     entities.set(id, { id, type, owner: 0, x, y: 2.5, z: 0, state: ObjectState.Active, sprite: { graphic: type, frame: 0 } } as unknown as Entity);
+    next = id + 1;
+  };
+  // As the sim removes an object: from `ReadyToRemove` (objects.ts `staticUpdate`).
+  const remove = (id: number) => {
+    entities.get(id)!.state = ObjectState.ReadyToRemove;
+    entities.delete(id);
+  };
   const dopples = new Doppelgangers(1, (type) => (type === TREE ? 2 : type === MINE ? 1 : 0));
-  return { entities, tiles, world, add, dopples };
+  return { entities, tiles, world, add, remove, dopples };
 }
 
 test('a tree cut down out of sight stays as it was; seeing its tile again forgets it', () => {
@@ -59,7 +67,7 @@ test('a tree cut down out of sight stays as it was; seeing its tile again forget
 });
 
 test('a dying tree whose tile goes out of sight is remembered; a mine is remembered when it is removed unseen', () => {
-  const { entities, tiles, world, add, dopples } = scene();
+  const { entities, tiles, world, add, remove, dopples } = scene();
   add(1, TREE, 3.5);
   add(2, MINE, 6.5);
   dopples.update(world);
@@ -71,14 +79,14 @@ test('a dying tree whose tile goes out of sight is remembered; a mine is remembe
   expect(dopples.copies.has(1)).toBe(true);
   tiles.set('6,2', TILE_FOGGED);
   dopples.update(world);
-  entities.delete(2);
+  remove(2);
   dopples.update(world);
   expect(dopples.copies.get(2)).toMatchObject({ type: MINE, x: 6.5 });
   // A tile the player never explored keeps nothing.
   add(3, MINE, 9.5);
   tiles.set('9,2', TILE_BLACK);
   dopples.update(world);
-  entities.delete(3);
+  remove(3);
   dopples.update(world);
   expect(dopples.copies.has(3)).toBe(false);
 });
