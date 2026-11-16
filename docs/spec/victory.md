@@ -779,3 +779,50 @@ Not ported, for want of objects or systems the sim does not have yet:
 Diplomacy and allied victory (teams of mutual allies with allied victory in
 §5, §9, §10 and `win_game_now`) are ported with the stances and tribute
 (attribute 53) in [diplomacy.md](diplomacy.md) §6.
+
+## 16. The game log: notifications and the population history
+
+**Notifications.** The rules tell the game screen what happened through
+`RGE_Base_Game::notification(type, p1, p2, p3, p4)` (`include/basegame.h:199-229`
+types; `TRIBE_Game::notification`, `src/tribegam.cpp:1800-`, turns them into
+system messages and sounds). They are the same on every peer: they come from
+command execution and the world update. The ones the sim logs:
+
+| type | raised by | p1, p2, p3, p4 |
+| --- | --- | --- |
+| 5 `PLAYER_RESIGNED` | `RGE_Player::do_resign`, once (`src/player.cpp:266-273`) | player, dropped (0 for the resign command) |
+| 6 `PLAYER_DEFEATED` | `set_game_status(2)` of a player that has not resigned (`src/player.cpp:255-264`) | player |
+| 7 `TRIBUTE_PAID` | `do_command_give_attribute` (`src/tcommand.cpp:481-483`) | sender, receiver, resource, `(long)` of the amount received (after the fee and the stock cap, §5 of diplomacy.md) |
+| 8 `DIPLOMACY_CHANGED` | the relation game command (`src/tcommand.cpp:371-374`) | player, other, new relation, 0 |
+
+The receiver's own `notify(..., 0x20A, resource, (long)requested)` is for the
+computer player and is not logged. Not logged yet: research, training,
+building and Wonder notices (types 0x64-0x6E), artifacts/ruins (0x72-0x75,
+the client derives them from §10's countdowns), conversion failures
+(0x76-0x7B), queue changes and needed attributes (0x7C, 0x7D), depletion
+(0x7E, counted in `World.depleted`).
+
+**Population history** (`TRIBE_History_Info`, `src/t_histry.cpp`), per
+player but Gaia; the achievements timeline (`tpnl_tml.cpp`) draws it:
+
+- An entry is one byte, the population attribute (11) as
+  `(unsigned char)(long)` (0 when negative). The first is added by
+  `TRIBE_World::new_game` after the start settings (`add_population_entry`,
+  `src/tworld.cpp:901`), so after the starting age's techs.
+- `TRIBE_Player::update`'s once-a-second loop (`update_time > 1.0`) counts
+  `update_history_count`; at 15 it subtracts 15 and adds an entry
+  (`src/tplayer.cpp:352-363`). So one entry every 15 game seconds, the
+  first ~15 s after the game starts.
+- Events: `do_tech` of Tool (101), Bronze (102) or Iron Age (103) adds event
+  0, 1 or 2 with `time` = the entry count and the world time, only when the
+  history has an entry (`src/tech.cpp:272-278`, `src/t_histry.cpp:109-118`):
+  a starting age adds none. (`get_history_event_num` returns a count nothing
+  increments, a dead field.)
+
+The brief asked for a "per-interval score history"; the original keeps no
+score history, only this population one, which the timeline graph draws.
+
+Port: `packages/sim/src/game-log.ts`, `World.log` (`notifications` with the
+step's world time, `history[p]` with `population`, `events` and the
+seconds `count`); hashed and in the snapshot (version 14). Tests
+`game-log.test.ts`.

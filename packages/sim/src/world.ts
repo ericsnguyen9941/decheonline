@@ -1,4 +1,4 @@
-import { build, cancelBuild, checkDestructables, checkPlacement, connectWall, giveBuiltStorages, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
+import { ATTR_POPULATION, build, cancelBuild, checkDestructables, checkPlacement, connectWall, giveBuiltStorages, isBuilding, addToQueue, payObjCost, removeFromQueue, setupBuilding } from './buildings';
 import { attackGround } from './combat';
 import {
   CommandQueue,
@@ -35,6 +35,7 @@ import {
 } from './diplomacy';
 import { EntityStore, ObjectState, type Entity } from './entities';
 import { deleteActions, orderWork, workMoveTo } from './gather';
+import { addPopulationEntry, copyGameLog, historySecond, historyTech, newGameLog, notify, NOTIFY_DIPLOMACY_CHANGED, NOTIFY_PLAYER_DEFEATED, NOTIFY_PLAYER_RESIGNED, NOTIFY_TRIBUTE_PAID, type GameLog } from './game-log';
 import { Hasher } from './hash';
 import { defaultWonderTask, startWonder, WONDER } from './wonder';
 import { add32, div32, f32, MS_TO_SECONDS, mul32, sqrt32, sub32, toInt, toUint, u32 } from './num';
@@ -62,6 +63,7 @@ import {
   perSecond,
   resign,
   scoreOf,
+  STATUS_LOST,
   STATUS_WON,
   updateConditions,
   type Score,
@@ -263,7 +265,7 @@ const BASES = [
 
 /** Plain JSON-safe copy of the whole simulation state, taken between turns. */
 export interface Snapshot {
-  version: 13;
+  version: 14;
   players: number;
   turn: number;
   granularity: number;
@@ -301,6 +303,7 @@ export interface Snapshot {
   visibility: VisibilitySnapshot;
   victory: VictoryState;
   diplomacy: DiplomacyState;
+  log: GameLog;
 }
 
 const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19 };
@@ -374,6 +377,8 @@ export class World {
   victory: VictoryState;
   /** Stances, allied victory and allied line of sight (docs/spec/diplomacy.md). */
   diplomacy: DiplomacyState;
+  /** The notifications raised so far and each player's population history (victory.md §16). The client's read API. */
+  log: GameLog;
   /** `save_random_map_seed`: the map seed a random map game drew, -1 otherwise. Not state: nothing reads it. */
   randomMapSeed = -1;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
@@ -400,6 +405,7 @@ export class World {
     this.pathing.iterations = options.pathingIterations ?? DEFAULT_PATHING_ITERATIONS;
     this.visibility = new Visibility(this.map.width, this.map.height, this.players);
     this.diplomacy = newDiplomacy(this.players);
+    this.log = newGameLog(this.players);
     // Player creation copies the civ's masters, draws its `fog_update` and runs its tech tree's first
     // `check_for_new_tech` (techs.md §3.7): the zero-time start techs complete, Gaia's too. The draw comes before the
     // setup seed below: `randomSeed` stands for the stream after player creation (visibility.md §6).
@@ -423,6 +429,8 @@ export class World {
     }
     for (let p = 1; p < this.players; p++) {
       for (const [attr, value] of NEW_GAME_ATTRIBUTES) this.attributes[p]![attr] = f32(attr === 32 ? (options.populationLimit ?? value) : value);
+      // `add_population_entry` (src/tworld.cpp:901): the history's first entry, after the start ages (victory.md §16).
+      addPopulationEntry(this.log, p, this.attributes[p]![ATTR_POPULATION]!);
     }
     // Reveal Map: `TRIBE_Game::create_game` explores the whole map for every human player once the world is made
     // (src/tribegam.cpp:3024-3033); the fog stays on.
@@ -692,6 +700,7 @@ export class World {
       mastersChanged: (player) => {
         this.mastersDigest[player] = undefined;
       },
+      techDone: (player, id) => historyTech(this.log, player, id, this.worldTime),
       alliedLosOn: (player) => {
         this.diplomacy.alliedLos[player] = true;
         updateMutualAllies(this.diplomacy, this.visibility);
@@ -817,6 +826,7 @@ export class World {
     this.worldTime = u32(oldTime + toUint(mul32(cycle, this.gameSpeed)));
     const delta = u32(this.worldTime - oldTime);
     if (delta !== 0) {
+      const status = [...this.victory.status];
       for (const queued of this.queue.take(this.turn)) this.execute(queued);
       this.deltaSeconds = mul32(delta, MS_TO_SECONDS);
       const ctx = this.gameContext();
@@ -830,6 +840,10 @@ export class World {
       this.playerTimeDelta[this.playerTurn] = 0;
       this.playerTurn = (this.playerTurn + 1) % this.players;
       checkGameState(this.victory, this.deltaSeconds, this.attributes, this.diplomacy);
+      // `set_game_status(2)` without a resignation raises `GAME_NOTIFY_PLAYER_DEFEATED` (src/player.cpp:262-264).
+      for (let p = 1; p < this.players; p++) {
+        if (status[p] !== STATUS_LOST && this.victory.status[p] === STATUS_LOST && !this.victory.resigned[p]) notify(this.log, this.worldTime, NOTIFY_PLAYER_DEFEATED, p);
+      }
     }
     this.randomSeed = rng.rand();
   }
@@ -846,6 +860,7 @@ export class World {
       this.playerUpdateTime[i] = add32(this.playerUpdateTime[i]!, this.deltaSeconds);
       while (this.playerUpdateTime[i]! > 1) {
         this.playerUpdateTime[i] = sub32(this.playerUpdateTime[i]!, 1);
+        historySecond(this.log, i, this.attributes[i]![ATTR_POPULATION]!);
         if (this.alertCooldown[i]! > 0) this.alertCooldown[i]!--;
         perSecond(this.victory, i, {
           attributes: this.attributes[i]!,
@@ -901,6 +916,8 @@ export class World {
       case 'stop':
         return this.doCommandStop(player, command);
       case 'resign':
+        // `do_resign` (src/player.cpp:266-273): the notice once, `dropped` 0 for the command.
+        if (!this.victory.resigned[player]) notify(this.log, this.worldTime, NOTIFY_PLAYER_RESIGNED, player, 0);
         return resign(this.victory, player);
       case 'repair':
         return this.doCommandRepair(player, command);
@@ -1255,6 +1272,7 @@ export class World {
     const to = command.player;
     if (to < 1 || to >= this.players || to === player || this.victory.status[to] !== 0) return;
     this.diplomacy.relations[player]![to] = command.relation;
+    notify(this.log, this.worldTime, NOTIFY_DIPLOMACY_CHANGED, player, to, command.relation, 0);
     updateMutualAllies(this.diplomacy, this.visibility);
   }
 
@@ -1270,7 +1288,9 @@ export class World {
   private doCommandTribute(player: number, command: TributeCommand): void {
     const to = command.player;
     if (to < 1 || to >= this.players || to === player || this.victory.status[to] !== 0) return;
-    giveAttribute({ attributes: this.attributes, objectsOf: (p) => this.entities.ofPlayer(p) }, player, to, command.resource, command.amount);
+    const given = giveAttribute({ attributes: this.attributes, objectsOf: (p) => this.entities.ofPlayer(p) }, player, to, command.resource, command.amount);
+    // `GAME_NOTIFY_TRIBUTE_PAID` with `(long)` of what `to` received (src/tcommand.cpp:481-483).
+    if (given >= 0) notify(this.log, this.worldTime, NOTIFY_TRIBUTE_PAID, player, to, command.resource, Math.trunc(given));
   }
 
   /** `player`'s stance towards `other` (0 ally, 1 neutral, 3 enemy; diplomacy.md §1). For the client's dialogs. */
@@ -1325,6 +1345,7 @@ export class World {
     this.visibility.hashInto(h);
     hashValue(h, this.victory);
     hashValue(h, this.diplomacy);
+    hashValue(h, this.log);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -1348,7 +1369,7 @@ export class World {
 
   snapshot(): Snapshot {
     return {
-      version: 13,
+      version: 14,
       players: this.players,
       turn: this.turn,
       granularity: this.granularity,
@@ -1378,11 +1399,12 @@ export class World {
       visibility: this.visibility.toJSON(),
       victory: copyVictory(this.victory),
       diplomacy: copyDiplomacy(this.diplomacy),
+      log: copyGameLog(this.log),
     };
   }
 
   static restore(s: Snapshot): World {
-    if (s.version !== 13) throw new Error(`unsupported snapshot version ${String(s.version)}`);
+    if (s.version !== 14) throw new Error(`unsupported snapshot version ${String(s.version)}`);
     const w = new World({
       players: s.players,
       randomSeed: s.randomSeed,
@@ -1415,6 +1437,7 @@ export class World {
     w.visibility = Visibility.fromJSON(s.visibility);
     w.victory = copyVictory(s.victory);
     w.diplomacy = copyDiplomacy(s.diplomacy);
+    w.log = copyGameLog(s.log);
     return w;
   }
 }

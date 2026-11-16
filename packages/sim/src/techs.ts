@@ -50,6 +50,8 @@ export interface TechContext extends TechPlayers, VisibilityContext {
   objectsOf(owner: number): Entity[];
   /** `TRIBE_Building_Object::connect` (economy.md §4.8.2): an upgraded wall joins its neighbours again. */
   connectWall?(e: Entity): void;
+  /** `do_tech` completed tech `id` (the history's age events, victory.md §16). */
+  techDone?(player: number, id: number): void;
   /** Told before an effect changes the player's masters (the world caches their hash). */
   mastersChanged?(player: number): void;
   /**
@@ -112,6 +114,7 @@ export function doTech(ctx: TechContext, player: number, id: number): boolean {
   const effect = TECHS[id]!.effect;
   if (effect >= 0) doEffect(ctx, player, effect);
   checkForNewTech(ctx, player);
+  ctx.techDone?.(player, id);
   return true;
 }
 
