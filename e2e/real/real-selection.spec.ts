@@ -97,14 +97,17 @@ test('the top strip shows the age and buttons in the original strings; a wood ca
   // to it until the fog shows it.
   const enemy = (await host.evaluate(() => window.__game!.objects())).find((o) => o.owner === 2 && o.type === VILLAGER)!;
   await host.evaluate(([ids, x, y]) => window.__game!.issueMove(ids, x, y), [rest.map((u) => u.id), enemy.x, enemy.y] as const);
-  await host.waitForFunction((id) => window.__game!.objectScreenPos(id) !== null, enemy.id);
+  await host.waitForFunction(
+    ([x, y]) => window.__game!.tileVisibility(x!, y!) === 0x0f,
+    [Math.floor(enemy.x), Math.floor(enemy.y)] as const,
+  );
   await host.evaluate((id) => {
     const p = window.__game!.unitScreenPos(id)!;
     const camera = window.__map!.camera();
     window.__map!.setCamera(camera.x + p.x - innerWidth / 2, camera.y + p.y - innerHeight / 2);
   }, enemy.id);
-  await host.evaluate(() => new Promise(requestAnimationFrame));
-  const enemyAt = (await host.evaluate((id) => window.__game!.objectScreenPos(id), enemy.id))!;
+  // Only objects near the view are drawn: it is once the view is on it.
+  const enemyAt = (await (await host.waitForFunction((id) => window.__game!.objectScreenPos(id), enemy.id)).jsonValue())!;
   await host.mouse.move(box.x + enemyAt.x, box.y + enemyAt.y);
   await expect(host.getByTestId('hud-message')).toHaveText('Click to attack this unit.');
 
