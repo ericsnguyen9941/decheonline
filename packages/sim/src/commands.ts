@@ -167,6 +167,16 @@ export interface TradeAttributeCommand {
   attribute: number;
 }
 
+/**
+ * Formation (`RGE_Command::do_command_formation`, command 6, src/Command.cpp:492, commands.md §6): the listed units of
+ * the sender line up on the one nearest the map origin in formation `formation` (0-5, Shift+F2..F7).
+ */
+export interface FormationCommand {
+  type: 'formation';
+  units: number[];
+  formation: number;
+}
+
 /** Resign (`RGE_Command::do_command_resign`, victory.md §4): the sender loses. */
 export interface ResignCommand {
   type: 'resign';
@@ -220,6 +230,7 @@ export type Command =
   | AttackGroundCommand
   | UnloadCommand
   | TradeAttributeCommand
+  | FormationCommand
   | RelationCommand
   | AlliedVictoryCommand
   | TributeCommand;
@@ -342,6 +353,13 @@ export function parseCommand(v: unknown): Command | null {
       if (attribute !== 0 && attribute !== 1 && attribute !== 2) return null;
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'trade-attribute', units: [...(units as number[])], attribute };
+    }
+    case 'formation': {
+      const { units, formation } = o;
+      // `RGE_Player::command_formation` sends only formations 0-5 (src/player.cpp:1869).
+      if (!Number.isInteger(formation) || (formation as number) < 0 || (formation as number) > 5) return null;
+      if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
+      return { type: 'formation', units: [...(units as number[])], formation: formation as number };
     }
     case 'relation': {
       const { player, relation } = o;

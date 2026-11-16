@@ -716,12 +716,12 @@ export function startMoveTo(
 }
 
 /** Give `e` a new move order to (x, y): `move_to` replaces the current action (movement.md §5). */
-export function orderMove(ctx: SpriteContext, e: Entity, x: number, y: number): void {
+export function orderMove(ctx: SpriteContext, e: Entity, x: number, y: number, z = 0): void {
   const m = e.mover;
   if (!m) return;
   // The old action's destructor clears user waypoints and stops the unit.
   endAction(m);
-  startMoveTo(e, null, x, y, 0, MOVE_RANGE, null, false, ctx);
+  startMoveTo(e, null, x, y, z, MOVE_RANGE, null, false, ctx);
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   type BuildWallCommand,
   type CancelCommand,
   type Command,
+  type FormationCommand,
   type MoveCommand,
   type QueueCommand,
   type QueuedCommand,
@@ -310,7 +311,7 @@ export interface Snapshot {
   log: GameLog;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19, formation: 20 };
 
 /** `command_flag += 1` (src/act_obj.cpp:107, :135, :143): a player's command reached the unit; a byte. */
 function countCommand(e: Entity): void {
@@ -934,6 +935,8 @@ export class World {
         return this.doCommandUnload(player, command);
       case 'trade-attribute':
         return this.doCommandTradeAttribute(player, command);
+      case 'formation':
+        return this.doCommandFormation(player, command);
       case 'relation':
         return this.doCommandRelation(player, command);
       case 'allied-victory':
@@ -1019,6 +1022,89 @@ export class World {
         countCommand(e);
       }
       setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, -1, tx, ty, 0);
+    });
+  }
+
+  /**
+   * `RGE_Command::do_command_formation` (src/Command.cpp:492-578, commands.md §12): with two units or more listed, the
+   * one nearest the map origin stays and the others, in list order, walk to points stepped off from it. Every unit
+   * joins the others' pathing group and waits to move. Listed units missing, not the sender's or not mobile are skipped
+   * (port: the original lines up any object listed).
+   */
+  private doCommandFormation(player: number, command: FormationCommand): void {
+    const ids = command.units;
+    if (ids.length <= 1) return;
+    const units = ids.map((id) => {
+      const e = this.entities.get(id);
+      return e?.mover && e.owner === player ? e : undefined;
+    });
+    let reference: Entity | undefined;
+    let distance = 0;
+    for (const e of units) {
+      if (!e) continue;
+      const d = sqrt32(add32(mul32(e.x, e.x), mul32(e.y, e.y)));
+      if (!reference || d < distance) {
+        reference = e;
+        distance = d;
+      }
+    }
+    if (!reference) return;
+    const f = command.formation;
+    // The steps along x (`adjustedYLocation`) and y (`tempX`), and which side the wedges' next unit takes.
+    let stepX = f === 2 || f === 3 ? f32(2) : f === 0 ? f32(1) : f32(1.5);
+    let stepY = stepX;
+    let alternate = false;
+    units.forEach((e, index) => {
+      if (!e) return;
+      const m = e.mover!;
+      m.group = ids.filter((_, other) => other !== index);
+      m.waitingToMove = true;
+      if (e === reference) return;
+      let x = reference.x;
+      let y = reference.y;
+      switch (f) {
+        case 0:
+          x = add32(x, stepX);
+          stepX = add32(stepX, 1);
+          y = add32(y, stepY);
+          stepY = add32(stepY, 1);
+          break;
+        case 1:
+          x = add32(x, stepX);
+          stepX = add32(stepX, f32(1.5));
+          y = sub32(y, stepY);
+          stepY = add32(stepY, f32(1.5));
+          break;
+        case 2:
+          x = add32(x, stepX);
+          stepX = add32(stepX, 2);
+          break;
+        case 3:
+          y = add32(y, stepY);
+          stepY = add32(stepY, 2);
+          break;
+        case 4:
+        case 5:
+          x = f === 4 ? add32(x, stepX) : sub32(x, stepX);
+          if (!alternate) {
+            y = sub32(y, stepY);
+            alternate = true;
+          } else {
+            y = add32(y, stepY);
+            stepY = add32(stepY, f32(1.5));
+            stepX = add32(stepX, f32(1.5));
+            alternate = false;
+          }
+          break;
+      }
+      // `move_to(0, x, y, 1.0f)` (src/act_obj.cpp:110-136): no clamp to the map, z 1.
+      const one = f32(1);
+      if (!workMoveTo(this.gameContext(), e, x, y)) {
+        e.attack = null;
+        orderMove(this.gameContext(), e, x, y, one);
+        countCommand(e);
+      }
+      setAiState(e, AI_ORDER_MOVE, AI_ACTION_MOVE, -1, -1, x, y, one);
     });
   }
 
@@ -1365,6 +1451,11 @@ export class World {
         h.f64(q.command.x).f64(q.command.y);
       }
       if (q.command.type === 'work') h.u32(q.command.target);
+      if (q.command.type === 'formation') {
+        h.u32(q.command.units.length);
+        for (const id of q.command.units) h.u32(id);
+        h.u32(q.command.formation);
+      }
       if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute' || q.command.type === 'trade-attribute') {
         hashValue(h, q.command);
       }

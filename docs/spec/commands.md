@@ -1,4 +1,4 @@
-# Unit commands: stop, stand ground, repair, attack ground (and the ones not ported)
+# Unit commands: stop, stand ground, repair, attack ground, formations (and the ones not ported)
 
 Source: aoe1-decomp @ `6d6d8b1` (see `README.md` for the version caveat and
 reference format). The repair action itself is support-actions.md §6; the
@@ -15,6 +15,7 @@ here); e2e: `e2e/tests/unit-commands.spec.ts`.
 | repair | `TRIBE_Command_Repair`, `command_repair` (`src/tcommand.cpp:73`, `do_command_repair` `:500`) | `{ type: 'repair', units, target }` | 11 |
 | stand ground | a group AI order, `command_group_ai_order(..., UNIT_AI_ORDER_STAND_GROUND, -1, -1, -1, -1, -1, 1.0, 1, 0, 100)` (`src/player.cpp:1883`) | `{ type: 'stand-ground', units }` | 12 |
 | attack ground | `TRIBE_Command_Attack_Ground`, `command_attack_ground` (`src/tcommand.cpp:852`, `do_command_attack_ground` `:442`) | `{ type: 'attack-ground', units, x, y }` | 17 |
+| formation | `RGE_Command_Formation` (command 6, `unitNum`, `formationID`, the ids), `command_formation` (`src/Command.cpp:1156`, `do_command_formation` `:492`) | `{ type: 'formation', units, formation }` | 20 |
 
 Every command is checked by `parseCommand` (ids positive integers, 1 to 255
 units). Port-side guard (economy.md §5.5): objects of another player than
@@ -181,7 +182,53 @@ as `combatAttack` does. The receiver does not check `unit_level`, as the
 original. The client's button and click mode: hud.md "Command buttons"
 (there is no mode cursor in the original). Tests: `packages/sim/src/siege.test.ts` "commands.md §5".
 
-## 6. Not ported
+## 6. Formations (`RGE_Command::do_command_formation`, `src/Command.cpp:492-578`)
+
+**Sending.** Shift+F2 .. Shift+F7 on the game screen, while the game is on
+and commands are allowed, send formations 0 .. 5
+(`TRIBE_Screen_Game::handle_key_down`, `src/scr_game.cpp:1490-1519`);
+`RGE_Player::command_formation` takes the player's selected objects
+(`get_selected_objects_to_command(-1, ...)`), plays the first one's command
+sound and sends them; it sends nothing for an id outside 0-5
+(`src/player.cpp:1866-1881`). No button or string names them.
+
+**Execution**, only when 2 or more ids are listed:
+
+1. The reference is the listed object nearest the map origin:
+   `(float)sqrt(x·x + y·y)` least, the first listed on a tie.
+2. Steps: `sx` (along x) and `sy` (along y) start at 1 (formation 0), 2
+   (2, 3) or 1.5 (1, 4, 5); a flag `alternate` starts clear.
+3. For each listed object in list order: it leaves its pathing group, waits
+   to move (`setWaitingToMove(1)`) and joins every other listed id's group.
+   The reference stays where it is. Every other object walks
+   (`move_to(0, x, y, 1.0)`, the same entry as a move order's, act_obj.cpp
+   110-136: a gather or build action takes the walk itself; the unit AI's
+   order becomes move with that point) to (x, y) from the reference's (rx,
+   ry), the steps changing after each:
+
+| formation | x | y | then |
+| --- | --- | --- | --- |
+| 0 (diagonal) | rx + sx | ry + sy | sx += 1, sy += 1 |
+| 1 (other diagonal) | rx + sx | ry − sy | sx += 1.5, sy += 1.5 |
+| 2 (line along x) | rx + sx | ry | sx += 2 |
+| 3 (line along y) | rx | ry + sy | sy += 2 |
+| 4 (wedge, +x) | rx + sx | ry − sy, then on the next ry + sy | after each pair sx += 1.5, sy += 1.5 |
+| 5 (wedge, −x) | rx − sx | as 4 | as 4 |
+
+The points are not clamped to the map (a move order's are). Worked example
+(`formation.test.ts`): reference (10.5, 10.5), four others; formation 4
+sends them to (12, 9), (12, 12), (13.5, 7.5), (13.5, 13.5).
+
+Quirk: when the first listed id is missing, the distance compared against
+is uninitialised and a missing reference would crash; the port skips missing
+ids for the reference too.
+
+Port: `World.doCommandFormation`. Port-side guard as §1: objects not the
+sender's, and objects that cannot move (the original's `move_to` would give
+a building a failing walk in place of its action), are skipped as missing.
+The client's Shift+F2..F7 keys are not ported (C6).
+
+## 7. Not ported
 
 | command | original | why |
 | --- | --- | --- |
