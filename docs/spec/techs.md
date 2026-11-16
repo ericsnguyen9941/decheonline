@@ -464,12 +464,12 @@ The tech and effect code itself calls `rand()` **nowhere** (no `rand`/
    command is accepted.
 2. Type 3 upgrade of an **active** object: up to two `check_damage_sprites`
    calls (§4.5 steps 2 and 4). Each one that newly selects a damage sprite
-   with flag 1 (randomly placed overlay) draws **three** `rand()`: the new overlay sprite's start frame
-   (flag-4 sprite, `sprites.md` §4), then x and y
-   (`src/stat_obj.cpp:1286`, `:1293`; `sprites.md` §6). `check_damage_sprites`
+   with flag 1 (randomly placed overlay) draws **three** `rand()`: x and y
+   (`src/stat_obj.cpp:1286`, `:1293`), then the new overlay sprite's start
+   frame in `add_sprite` (flag-4 sprite, `sprites.md` §4, §6). `check_damage_sprites`
    is **L**. Buildings, every boat and heroes 236/297/377 have damage
-   sprites (`sprites.md` §6); a damaged House upgraded by Tool Age can draw. `combat.md` does not cover
-   `check_damage_sprites` yet (follow-up).
+   sprites (`sprites.md` §6); a damaged House upgraded by Tool Age can draw.
+   Port: `techs.ts` `copyObject`, `damage.ts` (`sprites.md` §6).
 3. Instance `modify` (codes 0/1) does not call `check_damage_sprites`
    (`src/stat_obj.cpp:1724-1776`), so hp effects draw nothing even if the
    damage ratio changes.
@@ -692,7 +692,7 @@ masters. Test: `research.test.ts` "techs.md §7.5 vector R2".
   completions; zero-time techs complete inside it.
 - **RNG:** the tech path itself draws nothing; keep the one draw per
   command (core) and the damage-sprite draws in upgrades of active
-  buildings (§5; `check_damage_sprites` still needs its own spec).
+  buildings (§5; `check_damage_sprites`: `sprites.md` §6).
 - **Golden tests:** use §7 numbers as unit vectors (research step counts,
   cost/refund, armour packing, hp scaling); confirm §3.7 and the
   damage-sprite draws with a retail recording.

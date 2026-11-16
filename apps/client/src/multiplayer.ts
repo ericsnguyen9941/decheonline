@@ -83,6 +83,8 @@ export interface NetDebug {
   markers(): { x: number; y: number; frame: number; shown: boolean }[];
   /** The player whose colour object `id` is drawn in now; null when it is not drawn. */
   drawnOwner(id: number): number | null;
+  /** The damage sprites (fire) drawn over object `id` now, by graphic, with pack art (docs/spec/sprites.md §6). */
+  drawnOverlays(id: number): number[];
   /** The game canvas's CSS cursor now (a `url(...)` of the original's art, or a browser cursor). */
   cursor(): string;
   /** What `player` (default: this client's) knows of tile (col, row): 0x0F visible, 0x80 fogged, 0 unexplored. */
@@ -192,6 +194,8 @@ export interface DebugObject {
   cargo: number[];
   /** Action type of the object's work action (gather, build, enter 3, trade 111, ...), or -1 without one. */
   work: number;
+  /** The damage sprites in its sprite list (`Entity.overlays`), by graphic. */
+  overlays: number[];
 }
 
 export interface DebugUnit {
@@ -625,6 +629,7 @@ function debugPanel(
           inside: e.inside ?? null,
           cargo: [...(e.cargo ?? [])],
           work: e.work?.type ?? -1,
+          overlays: (e.overlays ?? []).map((o) => o.graphic),
         })),
     issueWork: (units, target, x, y) => game.issue({ type: 'work', units, target, x, y }),
     objectScreenPos: (id) => layer()?.objectCentre(id) ?? null,
@@ -657,6 +662,7 @@ function debugPanel(
     commandMode: () => layer()?.commandMode ?? null,
     markers: () => layer()?.markers ?? [],
     drawnOwner: (id) => layer()?.drawnOwner(id) ?? null,
+    drawnOverlays: (id) => layer()?.drawnOverlays(id) ?? [],
     cursor: () => {
       const canvas = document.querySelector<HTMLCanvasElement>('[data-testid=game-canvas]');
       return canvas ? getComputedStyle(canvas).cursor : '';

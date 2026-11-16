@@ -164,6 +164,8 @@ export interface UnitType {
   dying: SpriteInfo | null;
   /** Object spawned when this one is removed (`spawn_death_obj`), -1 none. */
   deadUnitId: number;
+  /** `damage_sprites`, in dat order: what `check_damage_sprites` shows past each damage percent (stat_obj.ts). */
+  damageSprites: readonly DamageSprite[];
   /** Storage slots with a type. */
   storages: readonly Storage[];
   /** `attribute_max_amount`: carry limit, and the clamp on a resource object. */
@@ -196,6 +198,13 @@ export interface UnitType {
   enabled: boolean;
   creatable: CreatableInfo | null;
   building: BuildingInfo | null;
+}
+
+/** `RGE_Damage_Sprite_Info`: past `percent` damage, `flag` 0 overlays `sprite`, 1 overlays it at a random point, 2 makes it the object's sprite. */
+export interface DamageSprite {
+  sprite: SpriteInfo | null;
+  percent: number;
+  flag: number;
 }
 
 /** `TRIBE_Master_Combat_Object` creation fields (economy.md §2.1). */
@@ -320,6 +329,7 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     walking: sprite(r.walking),
     dying: sprite(r.dying),
     deadUnitId: r.deadUnitId,
+    damageSprites: r.damage.map(([s, percent, flag]) => ({ sprite: sprite(s), percent, flag })),
     storages: r.storages.map(storage),
     resourceCapacity: r.resourceCapacity,
     resourceDecay: r.resourceDecay,
@@ -417,7 +427,8 @@ export function copyUnitType(t: UnitType): UnitType {
 const SPRITES = new Map<number, SpriteInfo>();
 for (const t of CIV_TYPES.flatMap((types) => Object.values(types))) {
   const tasks = t.action?.tasks.flatMap((k) => [k.moving, k.proceeding, k.working, k.carrying]) ?? [];
-  const sprites = [t.standing, t.walking, t.dying, t.combat?.attackSprite ?? null, t.building?.construction ?? null, ...tasks];
+  const damage = t.damageSprites.map((d) => d.sprite);
+  const sprites = [t.standing, t.walking, t.dying, t.combat?.attackSprite ?? null, t.building?.construction ?? null, ...tasks, ...damage];
   for (const s of sprites) if (s) SPRITES.set(s.graphic, s);
 }
 

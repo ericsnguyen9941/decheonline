@@ -72,6 +72,9 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
     walking: u.movement ? sprite(rules, u.movement.walkingGraphic) : null,
     dying: sprite(rules, u.dyingGraphic),
     deadUnitId: u.deadUnitId,
+    // The game reads the entry's second field as two bytes into `damage_percent` and `flag`, then its third, one byte,
+    // over `flag` (src/m_s_obj.cpp:239-241): the percent is the low byte.
+    damage: u.damageGraphics.map((g) => [sprite(rules, g.graphicId), g.damagePercent & 0xff, g.applyMode]),
     storages: storages(u.resourceStorages),
     resourceCapacity: u.resourceCapacity,
     resourceDecay: f(u.resourceDecay),

@@ -123,6 +123,8 @@ interface Track {
   /** The frame drawn and its graphic's `draw_level`, for picking. */
   frame: SpriteFrame | null;
   layer: number;
+  /** The object's damage sprites drawn over it (`Entity.overlays`), by graphic, with when each first showed. */
+  overlays: Map<number, { sprite: Sprite; start: number }>;
 }
 
 /**
@@ -507,6 +509,7 @@ export class UnitLayer {
       t.sprite.destroy();
       t.shadow?.destroy();
       t.under?.destroy();
+      for (const o of t.overlays.values()) o.sprite.destroy();
     }
     for (const s of this.copySprites.values()) s.destroy();
     for (const s of this.copyUnder.values()) s.destroy();
@@ -572,7 +575,7 @@ export class UnitLayer {
       }
       let t = this.tracks.get(e.id);
       if (!t) {
-        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, under: null, frame: null, layer: DEFAULT_LAYER };
+        t = { sprite: new Sprite(), fromX: e.x, fromY: e.y, toX: e.x, toY: e.y, start: now, duration: 0, graphic: -1, animStart: now, startFrame: 0, lastFrame: -1, pack: false, shadow: null, under: null, frame: null, layer: DEFAULT_LAYER, overlays: new Map() };
         view.layer.addChild(t.sprite);
         this.tracks.set(e.id, t);
       } else if (newStep) {
@@ -615,6 +618,7 @@ export class UnitLayer {
       const under = underFog === 'hidden' ? null : this.loadArt(graphic, e.owner, 'terrain');
       if (t.shadow) t.shadow.visible = false;
       if (t.under) t.under.visible = false;
+      for (const o of t.overlays.values()) o.sprite.visible = false;
       t.sprite.visible = art !== null;
       const drawn = art ?? under;
       if (!drawn) {
@@ -653,6 +657,7 @@ export class UnitLayer {
       t.layer = info?.layer ?? DEFAULT_LAYER;
       // Above every terrain tile; nearer the bottom of the screen draws later. Draw levels 0-5 go under the fog overlay.
       t.sprite.zIndex = fog === 'terrain' ? this.terrainZ(layer, pos.y) : world.map.width * world.map.height + Math.round(pos.y);
+      this.drawOverlays(t, e, pos.x, pos.y - lift, fog === 'fogged', now, parent);
       // `RGE_Active_Animated_Sprite::draw`: a frame change plays the sprite's sounds when it is drawn, and not fogged.
       const sounds = this.o.sounds;
       const unfogged = fog === 'plain' || (fog === 'terrain' && tile === TILE_VISIBLE);
@@ -673,6 +678,7 @@ export class UnitLayer {
       t.sprite.destroy();
       t.shadow?.destroy();
       t.under?.destroy();
+      for (const o of t.overlays.values()) o.sprite.destroy();
       this.tracks.delete(id);
       this.deselect(id);
       this.groups.delete(id);
@@ -682,6 +688,40 @@ export class UnitLayer {
     }
     this.drawHighlight();
     this.drawGhost();
+  }
+
+  /**
+   * The object's damage sprites (`Entity.overlays`, sprites.md §6) over its own sprite, in the order the sim added them:
+   * each at the object's point (an animated active sprite ignores its offset), animated from its start frame. The fire
+   * sound they carry is not played.
+   */
+  private drawOverlays(t: Track, e: Entity, x: number, y: number, fogged: boolean, now: number, parent: Container): void {
+    const list = e.overlays ?? [];
+    for (const [graphic, o] of t.overlays) {
+      if (list.some((overlay) => overlay.graphic === graphic)) continue;
+      o.sprite.destroy();
+      t.overlays.delete(graphic);
+    }
+    list.forEach((overlay, i) => {
+      let o = t.overlays.get(overlay.graphic);
+      if (!o) t.overlays.set(overlay.graphic, (o = { sprite: new Sprite(), start: now }));
+      const art = this.loadArt(overlay.graphic, e.owner);
+      if (!art) return;
+      if (o.sprite.parent !== parent) parent.addChild(o.sprite);
+      const info = art.info;
+      const step = info && info.frameCount > 1 && info.frameDuration > 0 ? overlay.frame + Math.floor((now - o.start) / 1000 / info.frameDuration) : 0;
+      const pick = info ? facingFrame(0, step % info.frameCount, info.angleCount, info.frameCount, info.mirroringMode) : { index: 0, flipped: false };
+      this.place(o.sprite, art.frames[pick.index] ?? art.frames[0]!, pick.flipped, x, y, fogged);
+      o.sprite.zIndex = t.sprite.zIndex + (i + 1) / 1000;
+      o.sprite.visible = true;
+    });
+  }
+
+  /** The damage sprites drawn over object `id` now, with pack art (for the tests). */
+  drawnOverlays(id: number): number[] {
+    const t = this.tracks.get(id);
+    if (!t?.sprite.visible) return [];
+    return [...t.overlays].filter(([graphic, o]) => o.sprite.visible && this.art.get(`${graphic}:${this.drawnOwners.get(id) || 1}:all`)?.pack).map(([graphic]) => graphic);
   }
 
   /** Does `sprite` show in the main view, between the HUD's top strip and bottom panel? */

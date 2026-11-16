@@ -44,6 +44,8 @@ export interface SimUnitRecord {
   walking: SimSprite | null;
   dying: SimSprite | null;
   deadUnitId: number;
+  /** `damage_sprites`: `[sprite, damage_percent, flag]` in dat order (`RGE_Damage_Sprite_Info`). */
+  damage: [SimSprite | null, number, number][];
   storages: SimStorage[];
   resourceCapacity: number;
   resourceDecay: number;

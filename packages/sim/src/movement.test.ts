@@ -30,6 +30,7 @@ const UNIT: UnitType = {
   blastDefense: 0,
   dying: null,
   deadUnitId: -1,
+  damageSprites: [],
   storages: [],
   resourceCapacity: 0,
   resourceDecay: 0,

@@ -9,6 +9,7 @@ import { copyUnitType, EFFECTS, TECHS, type EffectCommand, type UnitType } from 
 import { add32, div32, f32, i16, mul32, sub32, toInt, u8 } from './num';
 import type { PlayerMasters } from './masters';
 import type { CrtRand } from './rng';
+import { checkDamageSprites } from './damage';
 import { newSprite } from './sprites';
 import { ATTR_ALLIED_LOS } from './diplomacy';
 import { exploreObject, unexploreObject, type VisibilityContext } from './visibility';
@@ -449,8 +450,8 @@ function copyObj(ctx: TechContext, player: number, dest: number, source: number)
 /**
  * The object side of an upgrade, layer by layer as the original calls them (building, combat, moving, static): a
  * sprite that is the old master's construction, fight, walking, standing or dying sprite becomes the source's.
- * `check_damage_sprites` is not ported (the sim has no damage sprites). The static layer re-explores an active object
- * with the source's line of sight (src/stat_obj.cpp:1808-1812).
+ * The static layer re-explores an active object with the source's line of sight and checks its damage sprites twice
+ * (src/stat_obj.cpp:1808-1834, damage.ts).
  */
 function copyObject(ctx: TechContext, e: Entity, old: UnitType, src: UnitType): void {
   const shows = (s: { graphic: number } | null | undefined) => !!s && e.sprite?.graphic === s.graphic;
@@ -464,9 +465,13 @@ function copyObject(ctx: TechContext, e: Entity, old: UnitType, src: UnitType): 
     unexploreObject(ctx, e, old, false);
     exploreObject(ctx, e, old, false, toInt(src.los));
   }
+  // `check_damage_sprites` at full hit points under the old master, then at the kept ratio under the source.
   const ratio = div32(e.hp, old.hitPoints);
+  e.hp = f32(old.hitPoints);
+  if (e.state === ObjectState.Active) checkDamageSprites(ctx, e, old);
   const next = shows(old.standing) ? src.standing : shows(old.dying) ? src.dying : null;
   e.hp = mul32(src.hitPoints, ratio);
+  if (e.state === ObjectState.Active) checkDamageSprites(ctx, e, src);
   if (next) newSprite(ctx, e, next);
   // `TRIBE_Building_Object::copy_obj` ends with `connect` when the (old) master joins (src/t_b_obj.cpp:763-765).
   if (old.building?.connect) ctx.connectWall?.(e);

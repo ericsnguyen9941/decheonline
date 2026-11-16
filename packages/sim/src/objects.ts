@@ -7,6 +7,7 @@
 import { defaultBirdTask, startBird, updateBird } from './bird';
 import { emptyQueue, giveBuiltStorages, isBuilding, updateConstruction, updateQueue } from './buildings';
 import { updateAttack, updateMissile } from './combat';
+import { checkDamageSprites } from './damage';
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
 import { deleteActions, updateWork } from './gather';
@@ -169,6 +170,8 @@ function staticUpdate(ctx: GameContext, e: Entity, t: UnitType): boolean {
   }
   switch (e.state) {
     case ObjectState.Active:
+      checkDamageSprites(ctx, e, t);
+    // falls through
     case ObjectState.Unbuilt:
       if (e.hp < 1) {
         setObjectState(ctx, e, ObjectState.Dying);

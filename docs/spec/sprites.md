@@ -317,6 +317,35 @@ Thresholds are strict: an overlay at 50 shows only when damage is ≥ 51 %
 of max hp (example 6). Healing or repair runs the same logic backwards
 and only removes (no draw when `want = −1`).
 
+The dat's entry is `graphic` (i16), two bytes and one byte; the game reads
+the two into `damage_percent` and `flag` and the third over `flag`
+(`src/m_s_obj.cpp:239-241`), so the percent is the low byte of the dat
+reader's `damagePercent` (281 = 0x119 reads 25) and the flag its
+`applyMode`.
+
+Drawing. The list draws in order, so an overlay (0x5A) comes over the main
+sprite (0x3C), and stays through the death animation: at 100 % damage
+step 3 leaves both indexes at −1, nothing is removed, and `new_sprite`
+swaps only the main sprite (`RGE_Static_Object::draw`, `src/stat_obj.cpp:495`).
+An animated active sprite draws at the object's point and **ignores its
+offset** (`RGE_Active_Animated_Sprite::draw`, `src/asprite.cpp:232-242`;
+only the still `RGE_Active_Sprite::draw`, `:48-53`, adds it), so flag 1's
+random point is drawn for its RNG only: every flag-0/1 overlay in the dat is
+animated. The "Damage 1x1/5x5" graphics (805-807, 811-813) are draw lists of
+the flame graphics 324-329 and 131-133 at their own offsets; the overlays
+carry sound 72 (fire), played on their frame changes like any sprite's.
+
+Port: `packages/sim/src/damage.ts` `checkDamageSprites`, called by
+`objects.ts` `staticUpdate` and `techs.ts` `copyObject`; the masters'
+`damageSprites` come from the dat (`sim-tables.ts`, `unit-data.ts`
+`damage`). An object's overlays are `Entity.overlays` (graphic, `count`,
+the start frame from the add's `rand()`) and `Entity.damagePercent`, both
+hashed and in the snapshot; an overlay's own frame advance is not kept in the
+sim (nothing reads it). The client draws them in `units/unit-layer.ts` over
+the object's sprite from the start frame by wall-clock time. Not ported: the
+fire sound 72 of the overlays. Tests `damage.test.ts`, real art
+`e2e/real/real-burning.spec.ts`.
+
 ## 7. Death animation length
 
 `RGE_Static_Object::update` sets `DYING` and `new_sprite(death_sprite)` in

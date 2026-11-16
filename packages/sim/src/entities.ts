@@ -22,6 +22,13 @@ export const ObjectState = {
   ReadyToRemove: 8,
 } as const;
 
+/** A damage sprite in an object's sprite list: its graphic, `count` more adds than removes, and its start frame. */
+export interface Overlay {
+  graphic: number;
+  count: number;
+  frame: number;
+}
+
 /** Simulation object. Float fields hold float32 values (`f32`); ids and integers are 32-bit. */
 export interface Entity {
   readonly id: number;
@@ -42,6 +49,10 @@ export interface Entity {
   stamped: boolean;
   /** Main sprite and its animation state; null before setup shows one. */
   sprite: ActiveSprite | null;
+  /** `curr_damage_percent`, the damage `check_damage_sprites` last saw (damage.ts); absent while 0. */
+  damagePercent?: number;
+  /** The sprite list's damage sprites over the main one (damage.ts), in the order they were added; absent when none. */
+  overlays?: Overlay[];
   /** Movement state of a moving unit; absent for other objects. */
   mover?: Mover;
   /** Combat objects: reload timer (`attack_timer`). */
@@ -171,6 +182,7 @@ function copyEntity(e: Entity): Entity {
   if (e.wonder) copy.wonder = { ...e.wonder };
   if (e.bird) copy.bird = { ...e.bird };
   if (e.cargo) copy.cargo = [...e.cargo];
+  if (e.overlays) copy.overlays = e.overlays.map((o) => ({ ...o }));
   if (e.ownMaster) copy.ownMaster = copyUnitType(e.ownMaster);
   if (e.ai) {
     copy.ai = {

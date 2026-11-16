@@ -30,7 +30,7 @@ interface Window {
     shownObjects(): number;
     resources(player?: number): { food: number; wood: number; gold: number; stone: number };
     resourcesAt(turn: number, player: number): { food: number; wood: number; gold: number; stone: number } | undefined;
-    objects(): { id: number; owner: number; type: number; x: number; y: number; state: number; heldType: number; heldAmount: number; hp: number; graphic: number; frame: number; inside: number | null; cargo: number[]; work: number }[];
+    objects(): { id: number; owner: number; type: number; x: number; y: number; state: number; heldType: number; heldAmount: number; hp: number; graphic: number; frame: number; inside: number | null; cargo: number[]; work: number; overlays: number[] }[];
     issueWork(units: number[], target: number, x: number, y: number): void;
     objectScreenPos(id: number): { x: number; y: number } | null;
     population(player?: number): { count: number; headroom: number; limit: number };
@@ -58,6 +58,7 @@ interface Window {
     commandMode(): string | null;
     markers(): { x: number; y: number; frame: number; shown: boolean }[];
     drawnOwner(id: number): number | null;
+    drawnOverlays(id: number): number[];
     cursor(): string;
     tileVisibility(col: number, row: number, player?: number): number;
     drawnTile(col: number, row: number): number | null;
