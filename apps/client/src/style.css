@@ -572,6 +572,10 @@ dialog h2 {
 .aoe-font-arial10 {
   font: 13px Arial, Helvetica, sans-serif;
 }
+/* `RGE_FONT_ARIAL_9_BOLD`: the achievements timeline's body font (hud/timeline.ts). */
+.aoe-font-arial9b {
+  font: bold 12px Arial, Helvetica, sans-serif;
+}
 /* A modal dialog's cover: the game under it takes no clicks (`panel_system.modalPanel()`). */
 .aoe-modal {
   position: absolute;

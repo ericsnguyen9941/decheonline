@@ -69,6 +69,7 @@ interface Window {
     sounds(): { event: string; sound: number; game: number; wav: number | null; source: number; file?: string }[];
     audioLevels(): { running: boolean; sound: number; music: number };
     music(): { playing: string | null; on: boolean; volume: number; tracks: number };
+    history(player?: number): { population: number[]; events: { time: number; event: number }[] };
     gameResult(): { endCondition: number; winners: number[]; status: number[] } | null;
     score(player?: number): { total: number; military: number; economy: number; religion: number; technology: number; survival: number; wonder: number };
     dropLink(holdMs: number): void;

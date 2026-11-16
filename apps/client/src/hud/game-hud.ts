@@ -621,6 +621,12 @@ export class GameHud {
         this.achievements = null;
         if (end) this.o.game.leave();
       },
+      // The X's Yes quits the program in the original; here it leaves the game, as Quit Game then Close would.
+      onQuit: () => {
+        this.achievements = null;
+        if (!end) this.o.game.disconnect();
+        this.o.game.leave();
+      },
     });
   }
 

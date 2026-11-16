@@ -108,6 +108,8 @@ export interface NetDebug {
   /** The music file playing (null when none), whether the music is on, its volume slider position and track count. */
   music(): DebugMusic;
   /** How the game ended and who won (`World.gameResult`); null while it goes on. */
+  /** `World.log.history[p]`: the population entries and the ages reached (the achievements timeline). */
+  history(player?: number): { population: number[]; events: { time: number; event: number }[] };
   gameResult(): GameResult | null;
   /** Victory points of `player` (default: this client's) by achievements group (`World.score`). */
   score(player?: number): Score;
@@ -682,6 +684,10 @@ function debugPanel(
     audioLevels: () => audio.levels(),
     music: () => audio.music(),
     gameResult: () => game.world.gameResult(),
+    history: (p = player) => {
+      const h = game.world.log.history[p]!;
+      return { population: [...h.population], events: h.events.map((e) => ({ time: e.time, event: e.event })) };
+    },
     score: (p = player) => game.world.score(p),
     dropLink: (ms) => link.drop?.(ms),
     issue: (command) => game.issue(command),

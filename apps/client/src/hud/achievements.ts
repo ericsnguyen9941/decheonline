@@ -2,13 +2,16 @@
 // click on one of the first four columns, that group's details. Laid out for 640 x 480 and stretched to the screen
 // size (`set_ideal_size`), on the background for that size; fonts keep their size. At the end of the game it has the
 // won (`scr7`) or the other (`scr8`) look and Close leaves the game; from the menu it has the in-game look (`scr10`) and
-// Close goes back to the game. The timeline needs a history of the game the sim does not keep: its button is disabled.
+// Close goes back to the game. Timeline shows the population history (mode 6, hud/timeline.ts); the X at the top right
+// asks to quit and leaves the game.
 import type { World } from '@aoe/sim';
 import type { AssetProvider } from '../assets';
 import { easyButton, FONT, lookOf, placed, textColours, type PanelLook } from './easy-panel';
 import { paintFrame } from './frame-image';
 import { hudLayout } from './layout';
-import { Modal } from './menu';
+import { CONFIRM_QUIT, confirmPopup, Modal } from './menu';
+import { civilizationName } from './text';
+import { TIMELINE_STRINGS, TimelinePanel } from './timeline';
 
 /** `scr7`, `scr8`, `scr10` (`BINARY_RESOURCE_ID_ACHIEVEMENTS_*_LAYOUT`). */
 const LAYOUT_WON = 50057;
@@ -55,6 +58,8 @@ const S = {
   mostTechnologies: 0x26d1,
   allArtifactsRuins: 0x26dc,
   yes: 4003,
+  /** `STRING_ID_BUTTON_CLOSE`: the X. */
+  x: 0x3ea,
 } as const;
 
 /** `PLAYER_ATTRIBUTE_TOTAL_UNITS_OWNED`, `_POPULATION`: losses are units ever owned less those alive. */
@@ -84,6 +89,14 @@ const CHOICES: [number, number, number, number][] = [
   [388, 111, 121, 289],
 ];
 
+/** `set_mode`'s timeline mode. */
+const MODE_TIMELINE = 6;
+/** `create_timeline(this, ..., 10, 85, 620, 330, 11, 9, 640, 480)` (scr_ach.cpp:124). */
+const TIMELINE_RECT = [10, 85, 620, 330] as const;
+/** The X: `PositionRightTop`, 4 from the top and the right, 17 x 17 at any size (scr_ach.cpp:130-134). */
+const X_MARGIN = 4;
+const X_SIZE = 17;
+
 /** The names' and statistics' colour by colour table (scr_ach.cpp:171-200), a Windows COLORREF (0x00BBGGRR). */
 const COLOURS = [0xc40000, 0xc8, 0xeaea, 0x215a8c, 0x80ff, 0x8000, 0x808080, 0x808040];
 
@@ -102,6 +115,8 @@ export interface AchievementsOptions {
   click(): void;
   /** Close: leave the game at the end, else back to it. */
   onClose(): void;
+  /** The X's quit confirmed (`rge_base_game->close()`): leave the game. */
+  onQuit(): void;
 }
 
 interface Mode {
@@ -119,6 +134,10 @@ export class AchievementsScreen {
   private readonly titles: HTMLDivElement[];
   private readonly stats: HTMLDivElement[][];
   private readonly buttons: { summary: HTMLButtonElement[]; detail: HTMLButtonElement[] };
+  private readonly names: HTMLElement[] = [];
+  private readonly timeline: TimelinePanel;
+  /** The X's yes/no popup while it is open. */
+  private confirm: Modal | null = null;
   private mode = 0;
 
   constructor(private readonly o: AchievementsOptions) {
@@ -130,7 +149,12 @@ export class AchievementsScreen {
     const h = (size * 3) / 4;
     this.scale = { x: w / 640, y: h / 480 };
     this.look = lookOf(provider, id, size);
-    this.modal = new Modal(o.parent, w, h, 'achievements', () => (this.mode === 0 ? this.close() : this.setMode(0)));
+    this.modal = new Modal(o.parent, w, h, 'achievements', () => {
+      // The X's popup takes Esc (its No).
+      if (this.confirm?.cover.isConnected) return;
+      if (this.mode === 0) this.close();
+      else this.setMode(0);
+    });
     this.modal.cover.style.background = '#000';
     const panel = this.modal.panel;
     panel.style.backgroundColor = this.look.backgroundColour;
@@ -161,6 +185,7 @@ export class AchievementsScreen {
       const name = text([22, y, 150, 29], FONT.standard, 'left', o.names[p] ?? '', colour);
       name.style.alignItems = 'center';
       name.dataset.testid = `achievements-name-${p}`;
+      this.names.push(name);
       if (world.playerStatus(p) === 1) {
         // The win mark at the name's x less 20 (`draw`), at its own pixels.
         const decal = provider.interfaceFrame(won ? DECAL_WON : DECAL_OTHER, 0);
@@ -168,6 +193,7 @@ export class AchievementsScreen {
           const mark = placed(panel, 'div', 'aoe-text', 22 * this.scale.x - 20 - decal.hotspotX, y * this.scale.y - decal.hotspotY, decal.w, decal.h);
           mark.dataset.testid = `achievements-winner-${p}`;
           paintFrame(mark, decal);
+          this.names.push(mark);
         }
       }
       this.stats.push(
@@ -186,9 +212,29 @@ export class AchievementsScreen {
       return b;
     };
     this.buttons = {
-      summary: [button([100, 441, 200, 30], S.timeline, 'achievements-timeline', null), button([340, 441, 200, 30], S.close, 'achievements-close', () => this.close())],
+      summary: [button([100, 441, 200, 30], S.timeline, 'achievements-timeline', () => this.setMode(MODE_TIMELINE)), button([340, 441, 200, 30], S.close, 'achievements-close', () => this.close())],
       detail: [button([200, 441, 240, 30], S.back, 'achievements-back', () => this.setMode(0))],
     };
+    // The timeline, made with the screen (`init_timeline` counts the entries then), shown in mode 6.
+    const [tx, ty, tw, th] = TIMELINE_RECT;
+    const history = world.log.history.slice(1, world.players);
+    this.timeline = new TimelinePanel(
+      panel,
+      Math.trunc((w * tx) / 640),
+      Math.trunc((h * ty) / 480),
+      {
+        width: Math.trunc((w * tw) / 640),
+        height: Math.trunc((h * th) / 480),
+        history,
+        colours: history.map((_, i) => colorref(COLOURS[i] ?? 0xffffff)),
+        names: history.map((_, i) => `${o.names[i + 1] ?? ''} - ${civilizationName(provider, world.civs[i + 1] ?? 0)}`),
+        strings: { population: string(TIMELINE_STRINGS.population), time: string(TIMELINE_STRINGS.time), ages: [string(TIMELINE_STRINGS.ages[0]), string(TIMELINE_STRINGS.ages[1]), string(TIMELINE_STRINGS.ages[2])] },
+      },
+      this.look.bevels,
+    );
+    // The X (`STRING_ID_BUTTON_CLOSE`, font -1: Arial 10 normal alt; no sound) in every mode.
+    const x = easyButton(panel, this.look, { x: w - X_MARGIN - X_SIZE, y: X_MARGIN, w: X_SIZE, h: X_SIZE }, string(S.x), FONT.arial10, () => this.askQuit());
+    x.dataset.testid = 'achievements-x';
     panel.addEventListener('pointerdown', (e) => {
       if (this.mode !== 0 || e.button !== 0) return;
       const r = panel.getBoundingClientRect();
@@ -207,13 +253,32 @@ export class AchievementsScreen {
     this.o.onClose();
   }
 
-  /** `set_mode`: the summary (0) or a group's details (1-4). */
+  /** The X (`action` of `close_button`, `wnd_proc`'s WM_CLOSE): "Are you sure you want to quit this game?"; Yes quits. */
+  private askQuit(): void {
+    if (this.confirm?.cover.isConnected) return;
+    this.confirm = confirmPopup(
+      this.o.parent,
+      this.o.provider,
+      CONFIRM_QUIT,
+      () => {
+        this.modal.close();
+        this.o.onQuit();
+      },
+      this.o.click,
+    );
+  }
+
+  /** `set_mode`: the summary (0), a group's details (1-4) or the timeline (6). */
   setMode(mode: number): void {
     this.mode = mode;
-    const m = this.modes()[mode]!;
+    const timeline = mode === MODE_TIMELINE;
+    const m = timeline ? { summary: S.timeline, titles: [], values: () => [] } : this.modes()[mode]!;
     const string = (id: number) => this.o.provider.string(id) ?? '';
     this.summary.textContent = string(m.summary);
     this.instruction.hidden = mode !== 0;
+    // Mode 6 hides the names (`size` 0); `draw` puts the winner marks only on modes below 5.
+    for (const el of this.names) el.hidden = timeline;
+    this.timeline.el.hidden = !timeline;
     this.titles.forEach((el, i) => {
       el.hidden = i >= m.titles.length;
       el.textContent = i < m.titles.length ? string(m.titles[i]!) : '';

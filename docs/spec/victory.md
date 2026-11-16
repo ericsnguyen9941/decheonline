@@ -826,3 +826,93 @@ Port: `packages/sim/src/game-log.ts`, `World.log` (`notifications` with the
 step's world time, `history[p]` with `population`, `events` and the
 seconds `count`); hashed and in the snapshot (version 14). Tests
 `game-log.test.ts`.
+
+## 17. The achievements timeline and the close X
+
+**Timeline** (mode 6 of `TribeAchievementsScreen::set_mode`,
+`src/scr_ach.cpp:659-664`; the Timeline button, `STRING_ID_ACHIEVEMENTS_TIMELINE`
+0x26D8, `action` `:774-789`): the title reads "Timeline", the names,
+statistics, column titles, instruction and winner marks go (`size` 0;
+`draw` puts the marks only below mode 5), the clock stays, Back (or Esc)
+returns to the summary. The panel is `Time_Line_Panel` (`src/tpnl_tml.cpp`),
+made with the screen (`scr_ach.cpp:124-128`) at (10, 85, 620, 330) of 640 x 480
+scaled to the screen (`create_timeline`, integer `parent * v / ideal`), axis
+font 11 (Arial 10 bold), body font 9 (Arial 9 bold), bevel type 3
+(`DrawBevel2` of the screen's bevel colours 6, 5, 2, 1, `:285-337`). Its
+special-events art `timeline.slp` only draws for events 4-8, which nothing
+adds. Every coordinate below is relative to the panel; `a` / `b` are the axis
+and body fonts' `font_hgt`, `aw` / `bw` their `font_wid`
+(`tmAveCharWidth`, `tmHeight + tmExternalLeading`, `src/basegame.cpp:1939`).
+
+- `init_timeline` (`:339-389`), at creation: `N` = the most entries any
+  player has (§16), `usable = width - 49`; no entries: `N = 1` and only the
+  axes draw. `bar = (float)usable / N`; when below 1: `bar = 1`,
+  `page = usable`, `drop = 1`, `to_drop = N - usable`,
+  `drop_rate = (float)usable / to_drop`; else `page = N`.
+  `Xlen = (long)(page * bar) + 4`, `Ylen = height - 4a - 26`,
+  `X_start = 27`, `Y_start = 2a + 15`, `Ymax = Ylen - 3`, `Xmax = Xlen - 2`.
+  Label rate `page < 12 ? 1 : (long)((page - 1) * (1/12.f))`; at
+  `page` 12 that is 0 and only entry 0 is labelled.
+- `draw` (`:615-628`): black fill (`set_back_color(1, black)` in `setup`),
+  border, axis, timeline, special events, names.
+- Axis (`:630-687`): white `FillRect`s (inclusive) x 25..24+Xlen at
+  y 2a+12+Ylen..2a+13+Ylen and 2a+13..2a+14; x 25..26 and 23+Xlen..24+Xlen
+  at y 2a+13..2a+13+Ylen. "World Population" (0x2C57) at (8, 5); "Time
+  (Hr:Min)" (0x2C56) at x `X_start - len*aw/2 + Xlen/2`, y `height - a - 5`;
+  white, axis font.
+- Timeline (`:928-1155`), entry by entry while fewer than `page` are shown:
+  `total` = the players' entries summed (float); a total of 0 (this entry's,
+  or the next one's when the entry is not `page - 1`) stops the drawing. With
+  `drop`, an entry where no player has an event is skipped while the sample
+  counter has reached `(long)(dropped * drop_rate) + (1 - dropped) *
+  (long)drop_rate - slice_counter` and fewer than `to_drop` were skipped.
+  A shown entry first adds a label event (entry 0 and then every label rate),
+  then its column of `thickness` pixels: `(long)(next * bar)` against
+  `(long)bar * next` with a running error (so 142.75 gives 142, 143, 143,
+  143). Each pixel line stacks the players from `Y_start` in order: segment
+  `(long)(pop / total * Ymax)`, at least 1 for a population of 1 or more;
+  when `bar != 1` it eases towards the next entry's segment by
+  `x / bar`, carrying the float remainder (above 1.0 adds a pixel); the last
+  player takes `Ymax` less the others. Drawn in the player's colour (the
+  achievements' `color_table->id` table: 0xC40000, 0xC8, 0xEAEA, 0x215A8C,
+  0x80FF, 0x8000, 0x808080, 0x808040 as COLORREF, the palette's nearest).
+  On a column's first line a player with an event at that entry records it
+  (`get_history_event` finds the newest at that entry) with its band's y and
+  length.
+- Special events (`:689-800`), the list newest first: an age (events 0-2)
+  draws a black line over the band, then the texts: the age's name (0x106A
+  Tool, 0x106B Bronze, 0x106C Iron) in black, body font, at `x + 2`, or
+  `X_start + Xmax - len*bw - 3` (Bronze: `- 8`) when it would pass the right
+  edge; y for Tool and Iron `y + segment - b - 2`, moved to `Y_start + 2` when
+  at or above the top and `Y_start + Ymax - b - 3` when at or below the
+  bottom; the Bronze Age's (`calculate_icon_location` case 1) is at
+  `Y_start + 2` unless its band's top is within `b + 2` of the bottom. A
+  label event writes the total (`%ld`) at y `a + 8` and the entry's time
+  `slice * 15` s as `%1ld:%02ld` hours:minutes at y `height - 2a - 7`, both
+  at `x ± 2 - (len >> 1) * aw` (+2 for entry 0, -2 else), white, body font.
+- Names (`:874-926`): when entry 0's total is not 0, "name - civilization"
+  (`get_string2(RGE_STRING_TYPE_CIVILIZATION, master_player_id)`) in black,
+  body font, at x `X_start + 3`, y `band_top + segment/2 - b/2` of entry 0's
+  unclamped segments.
+
+**Close X** (`scr_ach.cpp:130-134`): a text button "X"
+(`STRING_ID_BUTTON_CLOSE` 0x3EA), font -1 = `RGE_FONT_ARIAL_10_NORMAL_ALT`
+(`TEasy_Panel::create_button`, `src/Panel_ez.cpp:826-870`), no sound,
+`PositionRightTop` 4 from the top and right, 17 x 17 unscaled, in every
+mode. Its action is `rge_base_game->close()` (`:798-800`), a WM_CLOSE that
+`wnd_proc` (`:840-857`) turns into `popupYesNoDialog(0xC1D "Are you sure you
+want to quit this game?", 450 x 100)` the first time; Yes closes again,
+which quits the program; No clears `confirmed_close`.
+
+Port (`apps/client/src/hud/timeline.ts`, `hud/achievements.ts`): the layout
+above as `timelineDrawing` (rects and texts, float steps through
+`Math.fround`), painted on a canvas with the texts as elements over it;
+tests `hud/timeline.test.ts`, e2e `achievements-timeline.spec.ts`.
+Differences: the font metrics are fixed at axis 6 x 16 and body 6 x 15 (GDI's
+for Arial 10 / 9 bold at 96 dpi, not measured); the colours are the exact
+COLORREFs, not the screen palette's nearest; the history is the one the
+screen was opened with (as the original's `N`), drawn once. The X's Yes
+leaves the game (Quit Game first when the game is still on) instead of
+quitting the program. Its popup uses the in-game dialogs' look (50006); the
+achievements screens' popup info is `dlg7` 50010 (`scr7`), `dlg8` 50011
+(`scr8`), `dlg10` 50013 (`scr10`), which the pack does not import.
