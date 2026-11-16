@@ -466,13 +466,13 @@ dialog h2 {
   top: 0;
   image-rendering: pixelated;
 }
-/* The Menu button's settings: the original Game Settings dialog's sound volume slider, OK and Cancel. */
+/* The Menu button's settings: the original Game Settings dialog's game speed radio buttons, sound volume slider, OK and Cancel. */
 .hud-options {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 240px;
+  width: 360px;
   padding: 10px 16px 14px;
   border: 2px solid var(--stone-dark);
   border-color: var(--stone-light) var(--stone-dark) var(--stone-dark) var(--stone-light);
@@ -488,6 +488,21 @@ dialog h2 {
   font-size: 20px;
   font-weight: bold;
   margin-bottom: 8px;
+}
+.hud-options-parts {
+  display: flex;
+  justify-content: space-around;
+}
+.hud-options-speed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+.hud-options-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .hud-options-volume {
   display: grid;

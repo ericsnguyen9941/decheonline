@@ -313,7 +313,7 @@ export interface Snapshot {
   cheats: CheatState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19, formation: 20, cheat: 21, 'quick-build': 22 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19, formation: 20, cheat: 21, 'quick-build': 22, 'game-speed': 23 };
 
 /** `command_flag += 1` (src/act_obj.cpp:107, :135, :143): a player's command reached the unit; a byte. */
 function countCommand(e: Entity): void {
@@ -949,6 +949,10 @@ export class World {
         // `do_command_game` case 4: not gated (chat.md §7.2).
         this.cheats.quickBuild = command.on;
         return;
+      case 'game-speed':
+        // `do_command_game` case 1 (src/tcommand.cpp:377): from the next step on, each step adds `cycle * game_speed`.
+        this.gameSpeed = f32(command.speed);
+        return;
       case 'relation':
         return this.doCommandRelation(player, command);
       case 'allied-victory':
@@ -1469,7 +1473,7 @@ export class World {
         for (const id of q.command.units) h.u32(id);
         h.u32(q.command.formation);
       }
-      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute' || q.command.type === 'trade-attribute' || q.command.type === 'cheat' || q.command.type === 'quick-build') {
+      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute' || q.command.type === 'trade-attribute' || q.command.type === 'cheat' || q.command.type === 'quick-build' || q.command.type === 'game-speed') {
         hashValue(h, q.command);
       }
     }

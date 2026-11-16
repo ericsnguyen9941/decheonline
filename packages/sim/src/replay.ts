@@ -167,6 +167,8 @@ export function sampleLobbyReplay(turns = 60, seed = 20261116): ReplayLog {
     { turn: 9, player: 2, commands: [{ type: 'cheat', code: 220 }, { type: 'cheat', code: 230 }] },
     { turn: 12, player: 1, commands: units?.type === 'move' ? [{ type: 'formation', units: units.units, formation: 4 }] : [] },
     { turn: 20, player: 1, commands: [{ type: 'quick-build', on: false }, { type: 'cheat', code: 8 }] },
+    { turn: 24, player: 2, commands: [{ type: 'game-speed', speed: 1.5 }] },
+    { turn: 36, player: 1, commands: [{ type: 'game-speed', speed: 2 }] },
   ];
   const batches = [...log.batches];
   for (const { turn, player, commands } of extra) {

@@ -60,6 +60,11 @@ const browserTimers: Timers = {
  */
 export class Lockstep {
   readonly world: World;
+  /**
+   * Base time run so far: the sum of the steps' `G`, the ms the loop paces to the wall clock. Game time adds `G` times
+   * the game speed per step (lobby.md §8).
+   */
+  baseTime = 0;
   /** State hash after each executed turn, by turn number. */
   readonly hashes = new Map<number, number>();
   /** Called after each executed turn. */
@@ -211,6 +216,7 @@ export class Lockstep {
         this.boundaryAt = this.now();
       }
       world.runStep();
+      if (!world.gameOver) this.baseTime += world.granularity;
       if (world.turnStep === 0) {
         this.endTurn(world.turn - 1);
         // The next boundary comes on the following pass of the game loop: a frame after the last step was due.

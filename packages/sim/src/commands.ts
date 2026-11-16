@@ -187,6 +187,18 @@ export interface QuickBuildCommand {
   on: boolean;
 }
 
+/** The speeds a player may pick: the + and - keys' ladder and the Game Settings dialog's radio buttons (lobby.md §8). */
+export const GAME_SPEEDS = [1, 1.5, 2] as const;
+
+/**
+ * Game speed (`TRIBE_Command::command_game_speed`, game command 1, src/tcommand.cpp:773; lobby.md §8): any player sets
+ * the world's `game_speed` for everybody (src/tcommand.cpp:377).
+ */
+export interface GameSpeedCommand {
+  type: 'game-speed';
+  speed: number;
+}
+
 export interface FormationCommand {
   type: 'formation';
   units: number[];
@@ -249,6 +261,7 @@ export type Command =
   | FormationCommand
   | CheatCommand
   | QuickBuildCommand
+  | GameSpeedCommand
   | RelationCommand
   | AlliedVictoryCommand
   | TributeCommand;
@@ -388,6 +401,12 @@ export function parseCommand(v: unknown): Command | null {
     case 'quick-build':
       if (typeof o.on !== 'boolean') return null;
       return { type: 'quick-build', on: o.on };
+    case 'game-speed': {
+      // A multiplayer game offers only the ladder; 4, 8 and 16 are single-player developer mode (src/scr_game.cpp:3912).
+      const { speed } = o;
+      if (!GAME_SPEEDS.includes(speed as 1)) return null;
+      return { type: 'game-speed', speed: speed as number };
+    }
     case 'relation': {
       const { player, relation } = o;
       // The Diplomacy dialog sends only ally, neutral or enemy (src/dlg_dip.cpp:443-450).

@@ -5,6 +5,7 @@ import {
   ATTR_POPULATION,
   ATTR_POPULATION_LIMIT,
   FARM,
+  GAME_SPEEDS,
   HOUSE,
   ObjectState,
   processCheatCode,
@@ -40,6 +41,8 @@ import { ageName, civilizationName, objectName, statRows, topButtonLabels } from
 
 /** Shift with these sends formations 0-5 (`command_formation`). */
 const FORMATION_KEYS = ['F2', 'F3', 'F4', 'F5', 'F6', 'F7'];
+/** `STRING_ID_GAME_SPEED_CHANGED` (include/resource_ids.h:141): "Game speed changed." */
+const STRING_GAME_SPEED_CHANGED = 3059;
 /** `STRING_ID_SCORE_BUTTON_SHORTCUT`: the score button's text. */
 const SCORE_BUTTON = 0x1023;
 /** `STRING_ID_PLAYER_DROPPED_NOTICE`. */
@@ -219,6 +222,16 @@ export class GameHud {
   private readonly bar: ResourceBar;
   private readonly tick: (ticker: Ticker) => void;
   private readonly onResize = () => this.applyLayout();
+  /** `last_game_speed_change`: when + or - last went through. */
+  private lastSpeedChange = -Infinity;
+  /** `char_action` (src/scr_game.cpp:1859-1872): + or = speeds the game up, - slows it down. */
+  private readonly onSpeedKey = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === '+' || e.key === '=') this.commandGameSpeed(true);
+    else if (e.key === '-') this.commandGameSpeed(false);
+  };
   /** Enter opens the chat bar (`key_down_action`'s `VK_RETURN`, src/scr_game.cpp:1838; not with Ctrl or Alt). */
   private readonly onKey = (e: KeyboardEvent) => {
     if (e.key !== 'Enter' || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
@@ -276,7 +289,8 @@ export class GameHud {
     });
     const sounds = o.sounds;
     const click = () => sounds?.button();
-    this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds) : null;
+    const speed = { current: () => o.world.gameSpeed, disabled: () => this.gameOver.over, change: (s: number) => this.changeGameSpeed(s) };
+    this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds, speed) : null;
     this.chat = new ChatLines(this.view);
     this.scores = new ScoreDisplay(this.view, o.world, o.game.names);
     this.gameOver = new GameOver({
@@ -336,6 +350,7 @@ export class GameHud {
     });
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('keydown', this.onFunctionKey);
+    window.addEventListener('keydown', this.onSpeedKey);
     this.menu = new MenuDialog(this.root, o.provider, {
       playing: () => o.world.playerStatus(o.player) === 0 && !this.quit,
       quit: () => {
@@ -394,6 +409,7 @@ export class GameHud {
     this.diplomacy.close();
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('keydown', this.onFunctionKey);
+    window.removeEventListener('keydown', this.onSpeedKey);
     this.chat.destroy();
     this.scores.destroy();
     window.removeEventListener('resize', this.onResize);
@@ -466,6 +482,37 @@ export class GameHud {
     if (this.gameOver.over) return;
     const units = this.o.selection.commandObjects(-1);
     if (units.length > 0) this.o.issue({ type: 'formation', units, formation });
+  }
+
+  /**
+   * `command_game_speed` (src/scr_game.cpp:3892-3950; the same in 1.0a): a multiplayer game takes one change a second;
+   * nothing in the game over mode; one step along 1, 1.5, 2, and nothing from a speed off that ladder.
+   */
+  commandGameSpeed(increase: boolean): void {
+    const now = performance.now();
+    if (now - this.lastSpeedChange < 1000) return;
+    this.lastSpeedChange = now;
+    if (this.gameOver.over) return;
+    const speeds: readonly number[] = GAME_SPEEDS;
+    const i = speeds.indexOf(this.o.world.gameSpeed);
+    const next = i < 0 ? undefined : speeds[increase ? i + 1 : i - 1];
+    if (next !== undefined) this.changeGameSpeed(next);
+  }
+
+  /**
+   * "Game speed changed." to every player, this one included (`SendChatMsgAll`), then the game speed command, which
+   * changes `game_speed` on every peer at the turn it runs (lobby.md §8).
+   */
+  changeGameSpeed(speed: number): void {
+    const { player, game, world } = this.o;
+    // Without the pack's strings there is no line to send (the relay takes no empty chat).
+    const text = this.o.provider.string(STRING_GAME_SPEED_CHANGED);
+    if (text) {
+      this.receiveChat(player, text);
+      const others = Array.from({ length: world.players - 1 }, (_, i) => i + 1).filter((p) => p !== player && !game.dropped(p));
+      if (others.length > 0) game.sendChat(text, others);
+    }
+    this.o.issue({ type: 'game-speed', speed });
   }
 
   /**

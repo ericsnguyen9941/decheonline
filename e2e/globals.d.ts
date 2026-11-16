@@ -70,6 +70,7 @@ interface Window {
     dropLink(holdMs: number): void;
     issue(command: { type: string; [field: string]: unknown }): void;
     gameTime(): number;
+    baseTime(): number;
     desync(): { turn: number; hashes: number[] } | null;
   };
 }

@@ -105,6 +105,8 @@ export interface NetDebug {
   issue(command: Command): void;
   /** Sim clock, ms of game time (`World.worldTime`). */
   gameTime(): number;
+  /** Ms of base time the turn loop has run (`Lockstep.baseTime`): game time advances it times the game speed. */
+  baseTime(): number;
   /** The relay's report that the two games' hashes differ at `turn`; null while they agree. `hashes` is by slot. */
   desync(): { turn: number; hashes: number[] } | null;
 }
@@ -626,6 +628,7 @@ function debugPanel(
     dropLink: (ms) => link.drop?.(ms),
     issue: (command) => game.issue(command),
     gameTime: () => game.world.worldTime,
+    baseTime: () => game.baseTime,
     desync: () => desync,
   };
   return panel;

@@ -304,3 +304,46 @@ Difficulty (computer players), colours, teams and more than 2 players.
 | help: Starting Age, Resources, Reveal Map, Full Tech Tree | 30257, 30258, 30260, 30263 |
 | "Path Finding", "Fixed Positions", "Enable Cheating" (labels); Path Finding lines "Default", "Medium", "High" | 9741, 9729, 9723; 9742, 9743, 9744 |
 | summary: "Fixed Positions: %s", "Enable Cheating: %s", "Path Finding: %s" | 9705, 9659, 9713 |
+
+## 8. Game speed (in the game, not on the setup screen)
+
+The multiplayer setup screen has no speed setting: a multiplayer game starts
+at 1.0 (`RGE_Game_World` `new_game`, `src/world.cpp:1056-1061`; the
+registry's "Game Speed" applies to single player only) and any player
+changes it during the game, for everybody. Checked in the 1.0a exe too
+(`Empiresx.exe` 0x486200 the keys, 0x4312a8 the dialog: same ladder, the
+same 1000 ms check, the same chat line and command).
+
+- **Keys** (`TRIBE_Screen_Game::char_action`, `src/scr_game.cpp:1859-1872`):
+  `+` or `=` one step faster, `-` one step slower, along 1.0, 1.5, 2.0
+  (`command_game_speed`, `src/scr_game.cpp:3892-3950`; 4, 8 and 16 only in
+  single player developer mode). A multiplayer game takes one key change per
+  1000 ms (`last_game_speed_change`); nothing in the game over mode
+  (`ProgModeGameOver`: this player resigned or lost, or the game ended); a
+  speed off the ladder makes both keys do nothing.
+- **Menu, Game Settings** (`TRIBE_Dialog_Config`, `src/dlg_conf.cpp:60-105`,
+  :453-475): "Speed" (9439) with radio buttons "Normal" (9432), "Fast"
+  (9433), "Very Fast" (9434) for 1.0, 1.5, 2.0, the current one checked,
+  all disabled in the game over mode. OK sends the chosen speed when it
+  differs from the speed the dialog opened at.
+- Either way, a multiplayer game first sends "Game speed changed." (3059)
+  as chat to every player, this one included (`SendChatMsgAll`), so it
+  shows as "Name: Game speed changed.", then the game command
+  `TRIBE_GAME_COMMAND_ID_GAME_SPEED` (`command_game_speed`,
+  `src/tcommand.cpp:773`). Every peer runs it in the command's turn
+  (`do_command_game`, `src/tcommand.cpp:376-377`) and sets
+  `world->game_speed`; from the next step on each step adds
+  `trunc(G * game_speed)` ms of game time (`src/world.cpp:1258-1265`,
+  core.md §1.3). The wall-clock pacing of steps (turn-timing.md §2) does
+  not change: game time runs 1.5 or 2 times as fast against the clock,
+  and so does everything timed in game time (movement, gathering,
+  training, the F11 clock).
+
+Port: command `game-speed` (`packages/sim/src/commands.ts`, `GAME_SPEEDS`;
+the codec takes only 1, 1.5 and 2) sets `World.gameSpeed` (hashed, in the
+snapshot); the client's `+`/`=`/`-` and the Game Settings radio buttons
+(`hud/game-hud.ts` `commandGameSpeed`, `hud/options.ts`); the F11 clock
+shows it (hud.md). Without the pack's strings no chat line is sent (the
+relay takes no empty chat). Tests: `game-speed.test.ts`; the lobby sample
+replay of the determinism e2e changes to 1.5 and 2; e2e `game-speed.spec.ts`
+measures game seconds per real second on two clients.

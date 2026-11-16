@@ -94,7 +94,9 @@ In order:
   (`src/scr_game.cpp:3946`), executed in turn order by
   `TRIBE_Command::do_command` → `world->set_game_speed`
   (`src/tcommand.cpp:376-377`), so all peers switch on the same turn. Single
-  player also sets it directly (`src/scr_game.cpp:3947-3948`).
+  player also sets it directly (`src/scr_game.cpp:3947-3948`). A
+  multiplayer game starts at 1.0 (`src/world.cpp:1056-1061`); who changes
+  it and how: lobby.md §8 (ported).
 - Per-object code uses `world_time_delta` (ms) or
   `world_time_delta_seconds` (float s). Example: `TRIBE_Player::update`
   accumulates the float seconds and logs population history every 15 s
