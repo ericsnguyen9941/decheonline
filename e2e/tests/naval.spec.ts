@@ -226,8 +226,7 @@ test('Dock ghost on shore, boarding, Unload on the far shore and trading, on two
   for (const p of both) await p.waitForFunction((g) => window.__game!.resources(1).gold > g, gold);
 
   // Both games agree on the hash of a turn both have run, and no page threw.
-  // Clients keep a checksum for every 4th turn only (turn-timing.md §9.1).
-  const turn = Math.ceil((Math.max(...(await Promise.all(both.map((p) => p.evaluate(() => window.__game!.turn()))))) + 2) / 4) * 4;
+  const turn = Math.max(...(await Promise.all(both.map((p) => p.evaluate(() => window.__game!.turn()))))) + 2;
   for (const p of both) await p.waitForFunction((t) => window.__game!.turn() > t, turn);
   const [a, b] = await Promise.all(both.map((p) => p.evaluate((t) => window.__game!.hash(t), turn)));
   expect(a).toBe(b);

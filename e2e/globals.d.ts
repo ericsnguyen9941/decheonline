@@ -14,6 +14,7 @@ interface Window {
   __game?: {
     issueTest(x: number, y: number): void;
     turn(): number;
+    /** Checksum of the last sync-check turn (every 4th) at or before `turn`. */
     hash(turn: number): number | undefined;
     applied(): { type: string }[][];
     entityOwners(): number[];

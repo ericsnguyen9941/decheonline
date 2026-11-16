@@ -104,7 +104,7 @@ test('Stop halts a walking Villager; Repair (R, then a click on the building) re
 
   // Both clients agree on the hash of a turn both have run.
   const turns = await Promise.all([host, guest].map((p) => p.evaluate(() => window.__game!.turn())));
-  const turn = Math.ceil((Math.max(...turns) + 2) / 4) * 4; // a checksum is kept for every 4th turn only
+  const turn = Math.max(...turns) + 2;
   for (const page of [host, guest]) await page.waitForFunction((t) => window.__game!.turn() > t, turn);
   const [a, b] = await Promise.all([host, guest].map((p) => p.evaluate((t) => window.__game!.hash(t), turn)));
   expect(a).toBeDefined();

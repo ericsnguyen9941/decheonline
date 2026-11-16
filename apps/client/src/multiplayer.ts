@@ -4,7 +4,7 @@ import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
 import { MusicPlayer } from './audio/music-player';
 import { SoundPlayer } from './audio/sound-player';
-import { Lockstep, showEndDialog } from './lockstep';
+import { Lockstep, SYNC_INTERVAL_TURNS, showEndDialog } from './lockstep';
 import { FrameClock } from './lockstep/frame-clock';
 import { LobbyView, Session } from './lobby';
 import { exposeMapDebug, MapView } from './map';
@@ -21,6 +21,7 @@ export interface NetDebug {
   issueTest(x: number, y: number): void;
   /** Next turn to execute (== turns executed so far). */
   turn(): number;
+  /** The checksum of the last sync-check turn (every 4th, `SYNC_INTERVAL_TURNS`) at or before `turn`; undefined before it ran. */
   hash(turn: number): number | undefined;
   /** Commands applied so far, from each slot. */
   applied(): { type: string }[][];
@@ -578,7 +579,7 @@ function debugPanel(
   window.__game = {
     issueTest: issue,
     turn: () => game.turn,
-    hash: (turn) => game.hashes.get(turn),
+    hash: (turn) => game.hashes.get(turn - (turn % SYNC_INTERVAL_TURNS)),
     applied: () => game.applied,
     entityOwners: () => [...game.world.entities.all()].filter((e) => !e.sprite).map((e) => e.owner),
     player: () => player,
