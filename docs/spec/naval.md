@@ -433,7 +433,17 @@ sight and records, and its actions; `objects.ts` copies the boat's state into
 it, `world.ts` `removeObject` exits it), the Transport action as the default
 task, the drop (`drop_held_objects`, `find_drop_location`), the attack's
 inside check (`combat.ts`), the `unload` command (`commands.ts`, `world.ts`
-`doCommandUnload`, `unit-ai.ts` `orderUnload`/AI order 0x2D1), the transport
+`doCommandUnload`, `unit-ai.ts` `orderUnload`/AI order 0x2D1), the unit AI's
+ENTER (0x2CD, `enterObject`: `getTask` then a new Enter action, any task
+type) and TRANSPORT (0x2CA, `transportObject`: the top Transport action's
+`work(none, x, y)`, else a taskless one's `work(boat, x, y)`) orders in
+`processOrder` (`src/aiuaimod.cpp:2666-2672`, `src/com_obj.cpp:767-819`), so a
+queued order that a hit re-issues runs again; `bestUnitToAttack` skipping an
+object aboard (`inside_obj`, `src/aiuaimod.cpp:1248`, `:1357`; its current
+target is not checked there, `:1285-1300`, so an attacker whose only target
+boarded picks it again and its attack ends `TARGET_INVALID` at each update,
+as in the original), a targetless work on open water taken by the current
+action's `move_to` (support-actions.md §7.5), the transport
 ship AI (`transportShipNotify`), and the water maps in the lobby (lobby.md
 §6). Tests `transport.test.ts`; replay `sampleTransportReplay` (in the
 determinism e2e). Trade (`support-actions.md` §7.7, `trade.ts`): the Trade
@@ -444,8 +454,7 @@ determinism e2e).
 
 Not ported: the slope check (placement return 3, no Dock needs it),
 computer-player branches (the Enter constructor's
-computer branch, unload without the stop), the unit AI's ENTER/TRANSPORT
-orders in `processOrder` (a re-issued Enter order is dropped), the passengers'
+computer branch, unload without the stop), the passengers'
 own actions' pending-removal target clearing while inside. The client (C5)
 does not yet hide passengers (`Entity.inside`), send `unload`, or show cargo;
 nor show the trade buttons or send `trade-attribute`.

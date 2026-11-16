@@ -35,7 +35,7 @@ function gap(a: Entity, b: Entity): number {
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 }
 
-describe('unit-ai.md §4.6: DEFEND and FOLLOW (processMisc, src/aiuaimod.cpp:3477-3690; a computer player’s orders)', () => {
+describe('unit-ai.md §4.7: DEFEND and FOLLOW (processMisc, src/aiuaimod.cpp:3477-3690; a computer player’s orders)', () => {
   test('FOLLOW: the Clubman records the target, walks after it once it moved more than a tile, and the order ends when it dies', () => {
     const w = world([
       { owner: 1, type: CLUBMAN, x: 10.5, y: 10.5 },

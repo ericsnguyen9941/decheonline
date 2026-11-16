@@ -866,7 +866,7 @@ export class World {
     }
     // Then the player's victory points and conditions (`RGE_Player::update`, victory.md §4).
     updateConditions(this.victory, i, this.attributes, this.diplomacy);
-    // Last, the objects on the tiles it explored since its last update join its visible-resource lists (unit-ai.md §5.6).
+    // Last, the objects on the tiles it explored since its last update join its visible-resource lists (unit-ai.md §3.4).
     if (this.visibility.newTiles[i]!.length > 0) {
       const tracked = this.trackedOnTile();
       this.visibility.processNewTiles(i, (tile) => tracked.get(tile));

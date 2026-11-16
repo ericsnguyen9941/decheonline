@@ -482,7 +482,12 @@ has no goods for the first seconds and at most 100 after 100 s.
   so it takes `work(dock)` (§7.1): another player's Dock is the target
   (state 4), an own Dock the home Dock (state 8). A Dock of another id
   (Dock_2 133 only ever exists as an upgrade of 45's master) is not matched.
-- A move order is the action's `move_to` (state 11).
+- A move order is the action's `move_to` (state 11). So is a right click
+  with no target and no terrain task (open water): `work2` finds no task and
+  calls `move_to` (`src/act_obj.cpp:111-138`), which the current action
+  takes first (`action_move_to`); only without one does a plain move replace
+  the actions. The same holds for a Transport, a gatherer (gather state 15)
+  or a builder (port: `gather.ts` `startTask`).
 - `TRIBE_Combat_Object::trade(id, unconditional)` (`src/t_c_obj.cpp:638-662`,
   M): a Trade action already on that target is kept unless unconditional;
   a Trade action takes `work(target)`; else `getTask` and a new Trade action

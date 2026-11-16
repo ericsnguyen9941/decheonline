@@ -20,7 +20,7 @@ function world(units: StartUnit[]): World {
   return new World({ players: 2, units });
 }
 
-describe('unit-ai.md §5.6: the visible-resource lists', () => {
+describe('unit-ai.md §3.4: the visible-resource lists', () => {
   test('Get_Closest_Resource: xd + yd - trunc(-0.61 - 1.4 × the smaller) from the unit’s tile, first record on ties, excluded ids skipped, capped at 255', () => {
     const v = new Visibility(300, 300, 2);
     const gold = v.resources[1]![4]!;

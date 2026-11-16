@@ -203,8 +203,10 @@ says `accepted_logic`). Steps in order:
     removed, so the order that slid into its place is skipped this update
     (inferred from the code shape; not observed).
 11. `processMisc` (`:563`; base `:3477`, M): for human units only the
-    DEFEND and FOLLOW order upkeep do anything (re-approach the guarded
-    object/position, or attack the guarded object's closest attacker).
+    DEFEND and FOLLOW order upkeep do anything (§4.7). The civilian's
+    override does nothing, the priest's only for a computer player, the
+    artifact's runs its idle check (`src/taiuaimd.cpp:875`, `:1176`,
+    `:2145`).
 12. **Idle timer** (`:565-574`): if `idleTimer > adjustedIdleTimeout`:
     reset `idleTimer` to 0 and, only when there is no AI action **and** no
     current target, call `processIdle(1)`. Else, if there is an action or a
@@ -376,6 +378,52 @@ action ATTACK and the current target with the target's position at that
 moment. The idle path never sets an order, so auto-attacks have
 `currentOrder = -1`.
 
+### 3.4 Visible-resource lists (`Visible_Resource_Manager`, `src/vis_unit.cpp:281-535`, M)
+
+Each player (`TRIBE_Player`, `src/tplayer.cpp:226`) keeps 5 lists of
+`VISIBLE_RESOURCE_REC {object_id, distance, zone, pos_x, pos_y}`, one per
+master `resource_group` (dat `resourceGatherGroup`: 0 trees, 1 forage,
+2 fish, 3 stone, 4 gold; only masters with `track_as_resource`, dat
+`enableAutoGather`, are listed).
+
+- **Adding.** Every tile a player explores for the first time (an
+  unexplored tile whose viewer count wraps to 0 in `explore_terrain`, or
+  `explore_all`) goes on the player's `tile_list`
+  (`src/visible.cpp:344`, `:468`, `:662`). At the end of
+  `RGE_Player::update`, after its objects and victory conditions,
+  `Process_New_Tiles` (`src/player.cpp:887`, `src/vis_unit.cpp:385-414`)
+  walks the list in order and, for each object on the tile (the tile's
+  object list, newest first), appends a record when its master tracks it:
+  position = the object's truncated world position, as bytes. The world
+  then empties the list (`src/world.cpp:1278`). An object placed later on
+  an already explored tile is never added.
+- **Removing.** `remove_visible_resource` (`src/stat_obj.cpp:1866-1881`),
+  called by the destructor and by `set_object_state` going from DYING or
+  below straight to PENDING_REMOVAL or beyond (`:1934-1937`): for every
+  player whose explored bit is set on the object's tile, `Remove_Resource`
+  swaps the last record into its slot.
+- **`Get_Closest_Resource(x, y, zone, list, exclude)`** (`:467-535`): the
+  zone argument is unused. For each record, `xd`, `yd` = the absolute tile
+  differences; distance = `xd − (int)(−0.61 − yd × 1.4) − yd` when
+  `xd > yd`, else the same with the axes swapped (doubles,
+  `g_visible_resource_diagonal_adjustment`/`_factor`,
+  `src/game_globals.cpp:402-403`); a record replaces the best only when
+  strictly closer and not in `exclude`; the result's distance is capped at
+  255.
+- **`closestResourceObject(list)`** (`src/aiuaimod.cpp:1556-1590`): from the
+  unit's tile; none when the closest lies farther than `los − (−5)` tiles
+  (`g_unit_ai_resource_los_adjustment`); a record the unit cannot path to
+  within 1 is excluded and the search repeats, at most 100 times (after the
+  100th the last excluded record is returned, the loop's literal end).
+
+The civilian's re-task (economy.md §10) is its only user in a human game.
+
+**Port**: `visibility.ts` (`Visibility.newTiles`, `resources`,
+`processNewTiles`, `removeResource`, `closestResource`; hashed and in the
+snapshot), `world.ts` (`updatePlayer`, `removeObject`, `trackedOnTile`: a
+tile's objects taken by descending id, as `areaAttack` does), `unit-ai.ts`
+`closestResourceObject`; tests `retask.test.ts`.
+
 ## 4. Reaction to being attacked
 
 ### 4.1 How the event arrives
@@ -506,7 +554,47 @@ target −1 at that point. So a flight draws 0, 4, 8, ..., 20 numbers,
 
 The civilian class overrides REQUEST_TASK/TARGET_INVALID for hunt, gather
 (including idle-farm handling), build and explore re-tasking
-(`src/taiuaimd.cpp:707-867`, L); that belongs with the economy spec.
+(`src/taiuaimd.cpp:707-867`, L); that belongs with the economy spec (§10).
+
+### 4.7 DEFEND and FOLLOW (`processMisc`, `src/aiuaimod.cpp:3477-3690`, M)
+
+Only a computer player gives these orders in 1.0a (no command or button
+makes them for a human: the Villager's `work_hotkey` is 0 and FOLLOW comes
+only from the tactical AI, `src/taitacmd.cpp`). The unit AI runs them for any
+unit that has them. `processOrder` starts them (`:2626-2666`):
+`defendObject(target, range)` / `defendPosition(x, y, range)` when the
+target is −1 / `followObject(target, range)` (`:2240-2297`) set the action
+(DEFEND 0x259, FOLLOW 0x264), the target with its position (a position
+keeps the unit's own z), `defendTargetValue` (−1 for a position) and the
+desired distance; they need the object to exist.
+
+`processMisc` reads the order in force (the current order, else the
+current action + 100):
+
+- **DEFEND.** A defended object that is gone, or past ACTIVE and not
+  Gaia's, ends the order: `defendTargetValue = −1`, the target removed,
+  `stopObject(1)`, no order. A recorded x of −1 takes the object's
+  position. Unless the action is ATTACK, or MOVE with the object's top
+  action aimed at the defended object, the target point takes the object's
+  position and, when the unit is farther than the desired distance + 1
+  (`distance_to_object`, or `distance_to_position` for a point), it walks
+  there with `moveTo(object, range)` (a fresh move with the run sprite)
+  or `moveTo(x, y, z, range)` if it can path within that range; within
+  it, an object with a unit AI makes the unit attack that object's
+  closest attacker, else `processIdle(0)`. While defending an object with
+  a unit AI, `search` looks from that object with its line of sight and its
+  owner's records (§3.2).
+- **FOLLOW.** A followed object gone or past ACTIVE ends the order the
+  same way. Once it stands more than 1 from the recorded point on an axis
+  (`g_unit_ai_coordinate_lower/upper_bound` ±1.0), the point takes its
+  position and the unit walks to it when farther than the desired
+  distance.
+- The ATTACK case (retargeting to a better unit) is the computer
+  player's.
+
+**Port**: `unit-ai.ts` `processMisc`, `defendObject`, `defendPosition`,
+`followObject`, the DEFEND branch of `search`; the sim table has no run
+sprite, so the walk uses the move sprite. Tests `guard.test.ts`.
 
 ## 5. Animals (Gaia)
 

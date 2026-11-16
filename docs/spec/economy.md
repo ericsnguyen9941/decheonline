@@ -396,7 +396,7 @@ beside it) are ported, naval.md §3.1. Not ported: slope (3; no type in the tabl
 
 Port: `packages/sim/src/make.ts` (the make action), `build.ts` (the builder's
 hand-over), `gather.ts` (the Farmer's task requests), `unit-ai.ts`
-(`farmerRequest`); vectors and flows in `farms.test.ts`; e2e
+(`civilianRetask`); vectors and flows in `farms.test.ts`; e2e
 `e2e/tests/farm.spec.ts`.
 
 **Requirement.** The Farm (master 50) is disabled in every civ's table. The
@@ -489,15 +489,15 @@ constructor, `src/act_gath.cpp:38`). The civilian unit AI
 (`src/taiuaimd.cpp:752-801`, L), when its current action is GATHER: target type
 = `currentTargetTypeValue` (the object group set with the target: 3 for a
 Farm), else `lastTargetTypeValue`; −1 → remove target, stop. A resource group
-(`convertToLOSResourceType`) goes to `closestResourceObject` (not ported). With
+(`convertToLOSResourceType`) goes to `closestResourceObject` (§10). With
 p2 = 50: `closestObject(type, any relation, ACTIVE, 50)` over the search
 results; found → `gatherObject(id, 1)` (the gather action retargets; no check
 that another Farmer works it, decomp-marked bug); not found and a human
 player → `evasiveMoveTo(x ∓ 2.5, y ∓ 2.5)` (minus when the coordinate is above
 5, else plus; float), the gather action takes the walk (state 15) and the
 Farmer ends idle (state 2) as a Farmer. Computer players' Farmers stop
-instead. The same notification for other gather and hunt targets reaches the
-unit AI but its re-task is not ported.
+instead. The same notification for other gather and hunt targets takes the
+re-task of §10.
 
 **Gaia and ownership.** Farms are never Gaia's: they are built by a player.
 The gather update ends (state 1, `TARGET_INVALID`) on a target owned by
@@ -656,7 +656,7 @@ Ported: §4.8.1 (`World.doCommandBuildWall` / `placeLineOfWalls`, command
 `build-wall` with byte tiles), §4.8.2 (`buildings.ts` `connectWall`,
 `wallNeighbours`; on completion and in `techs.ts` `copyObject` through
 `TechContext.connectWall`), §4.8.3 (`build.ts` state 3 notify,
-`unit-ai.ts` `builderRequest`). `check_flat` is not checked (slope, §4.6),
+`unit-ai.ts` `civilianRetask`). `check_flat` is not checked (slope, §4.6),
 as for any building. The client's drag line and `draw_wall_outline`
 (`src/tvw_main.cpp:21`, `:204`, `:276`) are ported (docs/spec/hud.md, the
 wall bullets under the placement ghost; `apps/client/src/units/placement.ts`
@@ -979,11 +979,22 @@ Kept as behaviour (the target is the original game):
 - **Animal wander (action 6).** Specified in `unit-ai.md` §5.5 and ported
   (`bird.ts`): the second default task the sim starts after the make action
   (21, the Farm's, §4.7).
-- **Task requests of gatherers.** A waiting gather or hunt action notifies its
-  unit AI `REQUEST_TASK` (§4.7); of the civilian AI's answer only the Farm
-  branch and the builder's (§4.8.3) are ported. Other gatherers stay waiting where the original looks for
-  the closest resource of the group (`closestResourceObject`) or object of the
-  type.
+- **Task requests of gatherers (ported, `unit-ai.ts` `civilianRetask`).** A
+  waiting gather or hunt action notifies its unit AI `REQUEST_TASK` (§4.7); a
+  `TARGET_INVALID` for the current action takes the same path
+  (`src/taiuaimd.cpp:707-863`). HUNT or GATHER: the target group is the
+  current target's, else the last one's (−1: remove the target, stop, tell
+  the owner). A resource group (`convertToLOSResourceType`: forage 7 → list
+  1, gold 32 → 4, stone 8 → 3, trees 15 → 0, fish 5/31/33 → 2) is looked up
+  with `closestResourceObject` (unit-ai.md §3.4), a Farm's request with
+  `closestObject(group, any, ACTIVE, 50)`, anything else with
+  `closestObject(group, any, any)` over the search results. Found →
+  `huntObject`/`gatherObject(id, 1)`; failing that, the unit stops. Not found:
+  a human player's Farmer steps off (§4.7), any other waits where it is. BUILD:
+  the builder's next foundation (§4.8.3). EXPLORE is not ported (no explore
+  action). Then a request ends; an invalid target ends the work
+  (`action_finished`): remove the target, stop, tell the owner. Computer
+  players' branches are not ported. Tests `retask.test.ts`.
 - **Farm depleted location.** `add_notification_loc` (the last-event spot)
   is not ported; farmdie.wav is (sounds.md §5).
 - The `fog_update` `rand()` at player creation and placement visibility are

@@ -175,7 +175,7 @@ export class Visibility {
   readonly mutualExplored: number[];
   /** Per player, `RGE_Player::tile_list`: tiles explored for the first time since the player's last update, in order. */
   readonly newTiles: number[][];
-  /** Per player, `Visible_Resource_Manager::VR_List` (unit-ai.md §5.6): per resource group, the records in list order. */
+  /** Per player, `Visible_Resource_Manager::VR_List` (unit-ai.md §3.4): per resource group, the records in list order. */
   readonly resources: ResourceRecord[][][];
 
   constructor(width: number, height: number, players: number) {

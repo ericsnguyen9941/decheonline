@@ -1380,7 +1380,7 @@ function civilianNotify(ctx: GameContext, e: Entity, note: Note): number {
 }
 
 /**
- * `closestResourceObject(resourceType)` (src/aiuaimod.cpp:1556-1590, unit-ai.md §5.6): the closest record of the owner's
+ * `closestResourceObject(resourceType)` (src/aiuaimod.cpp:1556-1590, unit-ai.md §3.4): the closest record of the owner's
  * visible-resource list from the unit's tile; none when it lies farther than the unit's line of sight + 5. A record the
  * unit cannot path to within 1 is excluded and the search runs again, at most 100 times; after the 100th the last
  * excluded one is returned (the loop's literal end).
@@ -1687,7 +1687,7 @@ function endGuard(ctx: GameContext, e: Entity): void {
 }
 
 /**
- * The base `processMisc` (src/aiuaimod.cpp:3477-3690, unit-ai.md §4.6) for the order in force (the current order, else
+ * The base `processMisc` (src/aiuaimod.cpp:3477-3690, unit-ai.md §4.7) for the order in force (the current order, else
  * the current action + 100). The ATTACK case is the computer player's and is not ported. DEFEND: a defended object that
  * is gone, or below active and not Gaia's, ends the order; unless attacking, or walking to the defended object, the unit
  * walks back when farther than the desired distance + 1 and it can path there; within it, it attacks the defended
