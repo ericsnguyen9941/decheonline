@@ -45,14 +45,15 @@ function commands(v: unknown): Command[] | null {
 /** A setting the lobby offers (`isLobbySettings`); unknown fields are dropped. */
 function settings(v: unknown): GameSettings | null {
   if (!isObj(v) || !isObj(v['victory'])) return null;
-  const { deathMatch, mapType, mapSize, startingAge, resources, revealMap, fullTechTree, populationLimit } = v;
+  const { deathMatch, mapType, mapSize, startingAge, resources, revealMap, fullTechTree, populationLimit, pathFinding, fixedPositions, cheating } = v;
   const { type, amount } = v['victory'];
   if (typeof mapType !== 'number' || typeof mapSize !== 'number' || typeof type !== 'number' || typeof populationLimit !== 'number') return null;
-  if (typeof startingAge !== 'number' || typeof resources !== 'number') return null;
+  if (typeof startingAge !== 'number' || typeof resources !== 'number' || typeof pathFinding !== 'number') return null;
   if (typeof deathMatch !== 'boolean' || typeof revealMap !== 'boolean' || typeof fullTechTree !== 'boolean') return null;
+  if (typeof fixedPositions !== 'boolean' || typeof cheating !== 'boolean') return null;
   if (amount !== undefined && typeof amount !== 'number') return null;
   const victory = amount === undefined ? { type } : { type, amount };
-  const s: GameSettings = { deathMatch, mapType, mapSize, victory, startingAge, resources, revealMap, fullTechTree, populationLimit };
+  const s: GameSettings = { deathMatch, mapType, mapSize, victory, startingAge, resources, revealMap, fullTechTree, populationLimit, pathFinding, fixedPositions, cheating };
   return isLobbySettings(s) ? s : null;
 }
 

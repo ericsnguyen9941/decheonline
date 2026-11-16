@@ -6,21 +6,26 @@ import {
   isLobbySettings,
   LOBBY_MAP_SIZES,
   LOBBY_MAP_TYPES,
+  LOBBY_PATH_FINDING,
   LOBBY_POPULATION_LIMITS,
   LOBBY_RESOURCES,
   LOBBY_STARTING_AGES,
   lobbyWorldOptions,
+  PATH_FINDING_DEFAULT,
+  PATH_FINDING_HIGH,
+  PATH_FINDING_MEDIUM,
   resolveCivs,
   type GameSettings,
 } from './game-settings';
-import { MAP_ALL_WATER, MAP_HILLY } from './rmm-controller';
+import { MAP_ALL_WATER, MAP_HILLY, MAP_MOSTLY_LAND, MAP_SMALL, RmmController } from './rmm-controller';
+import { rmmFixture } from './rmm-testing';
 import { runReplay, sampleLobbyReplay } from './replay';
 import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT } from './buildings';
 import { ObjectState } from './entities';
 import { CrtRand } from './rng';
-import { BOWMAN, HOUSE, TOWN_CENTER, VILLAGER } from './units';
+import { BOWMAN, HOUSE, SMALL_WALL, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SCORE, VICTORY_SPECIAL, VICTORY_STANDARD, VICTORY_TIME_LIMIT } from './victory';
-import { AGE_BRONZE, AGE_DEFAULT, AGE_TOOL, ATTR_FOOD, DEFAULT_RANDOM_MAP, RESOURCES_DEFAULT, RESOURCES_HIGH, RESOURCES_LOW, startingObjects, World } from './world';
+import { AGE_BRONZE, AGE_DEFAULT, AGE_TOOL, ATTR_FOOD, DEFAULT_RANDOM_MAP, RESOURCES_DEFAULT, RESOURCES_HIGH, RESOURCES_LOW, startingObjects, World, type StartUnit } from './world';
 
 describe('lobby settings (docs/spec/lobby.md)', () => {
   test('the defaults are the multiplayer screen\'s: Random Map, Large, Mostly Land, Standard, Default age and resources, population limit 50', () => {
@@ -34,8 +39,58 @@ describe('lobby settings (docs/spec/lobby.md)', () => {
       revealMap: false,
       fullTechTree: false,
       populationLimit: 50,
+      pathFinding: PATH_FINDING_DEFAULT,
+      fixedPositions: true,
+      cheating: false,
     });
     expect(isLobbySettings(DEFAULT_GAME_SETTINGS)).toBe(true);
+  });
+
+  test('Path Finding: Default, Medium, High are offered; the world searches 2500, 5000, 7500 iterations (lobby.md §2.2)', () => {
+    expect(LOBBY_PATH_FINDING).toEqual([0, 1, 2]);
+    expect(isLobbySettings({ ...DEFAULT_GAME_SETTINGS, pathFinding: 3 })).toBe(false);
+    const budgets = [PATH_FINDING_DEFAULT, PATH_FINDING_MEDIUM, PATH_FINDING_HIGH].map(
+      (pathFinding) => new World(lobbyWorldOptions(5, { ...DEFAULT_GAME_SETTINGS, pathFinding }, [1, 1])).pathing.iterations,
+    );
+    expect(budgets).toEqual([2500, 5000, 7500]);
+  });
+
+  test('Path Finding changes the game: a Villager in a walled cup finds the way out to a point 4 tiles past the wall with Medium and High, not Default', () => {
+    // The cup: a wall at x 12 from y 1 to 46 and walls along y 1 and y 46 from x 2; open to the west.
+    const units: StartUnit[] = [{ owner: 1, type: VILLAGER, x: 10.5, y: 24.5 }];
+    for (let y = 1; y < 47; y++) units.push({ owner: 1, type: SMALL_WALL, x: 12.5, y: y + 0.5 });
+    for (let x = 2; x < 12; x++) units.push({ owner: 1, type: SMALL_WALL, x: x + 0.5, y: 1.5 }, { owner: 1, type: SMALL_WALL, x: x + 0.5, y: 46.5 });
+    const turnOut = (pathFinding: number) => {
+      const options = lobbyWorldOptions(5, { ...DEFAULT_GAME_SETTINGS, pathFinding }, [1], true);
+      const w = new World({ ...options, units, victory: { type: VICTORY_SPECIAL } });
+      w.addBatch(w.turn, 1, [{ type: 'move', units: [1], x: 14.5, y: 24.5 }]);
+      const v = w.entities.get(1)!;
+      for (let turn = 0; turn < 80; turn++) {
+        w.runTurn();
+        if (v.x > 12.6) return turn;
+      }
+      return -1;
+    };
+    expect([turnOut(PATH_FINDING_DEFAULT), turnOut(PATH_FINDING_MEDIUM), turnOut(PATH_FINDING_HIGH)]).toEqual([-1, 42, 42]);
+  });
+
+  test("Fixed Positions: the generator's fixed_position; with 2 players and no allies each land keeps its centre either way", () => {
+    const off = lobbyWorldOptions(99, { ...DEFAULT_GAME_SETTINGS, fixedPositions: false }, [1, 1]);
+    expect(off.fixedPositions).toBe(false);
+    expect(lobbyWorldOptions(99, DEFAULT_GAME_SETTINGS, [1, 1]).fixedPositions).toBe(true);
+    expect(new World(off).hash()).toBe(new World(lobbyWorldOptions(99, DEFAULT_GAME_SETTINGS, [1, 1])).hash());
+    // Where it matters (random-maps.md §4 step 5): four lands, players 1 and 3 allied. Fixed, the team takes the two
+    // nearest centres; otherwise each player keeps the land drawn for it.
+    const lands = (fixedPositions: boolean) => {
+      const { m } = rmmFixture(MAP_SMALL, MAP_SMALL, 41);
+      const c = new RmmController(m, { type: MAP_MOSTLY_LAND, players: 4, fixedPositions, nomad: false, allied: (a, b) => (a === 1 && b === 3) || (a === 3 && b === 1) });
+      c.init();
+      return c.lands.slice(0, c.landNum).map((l) => [l.x, l.y]);
+    };
+    const fixed = lands(true);
+    const random = lands(false);
+    expect(fixed).not.toEqual(random);
+    expect([...fixed].sort()).toEqual([...random].sort());
   });
 
   test('all nine map types are offered, in the drop-down order', () => {

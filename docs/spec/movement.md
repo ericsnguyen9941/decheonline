@@ -644,8 +644,8 @@ iteration expands the node with total **8**, not 7.
   agreement needs exact values). Path-cost `sqrt` only ever sees `dx²+dy²`
   of small integers and can be a table.
 - The pathing cap and wait counters are game state; serialize them.
-- `Path Finding` (budget 2500/5000/7500) must be a room setting shared by
-  both peers.
+- `Path Finding` (budget 2500/5000/7500) is a room setting shared by both
+  peers (lobby.md §2.2; world option `pathingIterations`).
 
 ## 15. Unverified or inferred
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_TIME_LIMIT,
   LOBBY_MAP_SIZES,
   LOBBY_MAP_TYPES,
+  LOBBY_PATH_FINDING,
   LOBBY_POPULATION_LIMITS,
   LOBBY_RESOURCES,
   LOBBY_SCORE_LIMITS,
@@ -18,7 +19,7 @@ import {
 } from '@aoe/sim';
 import type { LobbyState } from './session';
 import type { Session } from './session';
-import { ageName, civName, englishText, gameName, LABELS, mapSizeName, mapTypeName, resourcesName, summaryLines, timeLimitName, victoryName, type Text } from './setting-text';
+import { ageName, civName, englishText, gameName, LABELS, mapSizeName, mapTypeName, pathFindingName, resourcesName, summaryLines, timeLimitName, victoryName, type Text } from './setting-text';
 
 const ERROR_TEXT: Record<string, string> = {
   'bad-code': 'No game with that invite code.',
@@ -188,7 +189,8 @@ export class LobbyView {
 
   /**
    * The host, while not ready, picks Random Map or Death Match, the map size, map type, victory condition, starting age,
-   * resources, Reveal Map, Full Tech Tree and population limit (the Game Settings screen, src/scr_set.cpp); otherwise
+   * resources, Path Finding, population limit, Fixed Positions, Full Tech Tree, Reveal Map and Enable Cheating (the Game
+   * Settings screen, src/scr_set.cpp); otherwise
    * the setup screen's summary of them.
    */
   private settings(s: GameSettings, editable: boolean): HTMLElement {
@@ -229,8 +231,12 @@ export class LobbyView {
     const resources = select('resources', this.label('resources'), levels, s.resources, (v) => change({ resources: v }));
     resources.disabled = s.deathMatch;
     box.append(field('resources', resources));
+    const paths: [number, string][] = LOBBY_PATH_FINDING.map((v) => [v, pathFindingName(this.text, v)]);
+    box.append(field('pathFinding', select('path-finding', this.label('pathFinding'), paths, s.pathFinding, (pathFinding) => change({ pathFinding }))));
+    box.append(field('fixedPositions', checkbox('fixed-positions', this.label('fixedPositions'), s.fixedPositions, (fixedPositions) => change({ fixedPositions }))));
     box.append(field('fullTechTree', checkbox('full-tech-tree', this.label('fullTechTree'), s.fullTechTree, (fullTechTree) => change({ fullTechTree }))));
     box.append(field('revealMap', checkbox('reveal-map', this.label('revealMap'), s.revealMap, (revealMap) => change({ revealMap }))));
+    box.append(field('cheating', checkbox('cheating', this.label('cheating'), s.cheating, (cheating) => change({ cheating }))));
     // The dialog's numbers, "25" .. "200" (scr_set.cpp:189-192).
     const limits: [number, string][] = LOBBY_POPULATION_LIMITS.map((v) => [v, String(v)]);
     box.append(field('populationLimit', select('population-limit', this.label('populationLimit'), limits, s.populationLimit, (populationLimit) => change({ populationLimit }))));

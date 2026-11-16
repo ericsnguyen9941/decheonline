@@ -22,7 +22,8 @@ export const englishText: Text = (_id, fallback) => fallback;
 /**
  * `STRING_ID_MP_SETTINGS_LABEL`, `_MP_CIV_LABEL`, `_SCENARIO_LIST_TITLE` (the multiplayer dialog's, scr_set.cpp:279),
  * `_MAP_SIZE_LABEL`, `_MAP_TYPE_LABEL`, `_VICTORY_CONDITION_LABEL`, `_STARTING_AGE_LABEL`, `_RESOURCES_LABEL`,
- * `_REVEAL_MAP_LABEL`, `_FULL_TECH_TREE_LABEL`, `_POPULATION_LIMIT_LABEL`.
+ * `_REVEAL_MAP_LABEL`, `_FULL_TECH_TREE_LABEL`, `_POPULATION_LIMIT_LABEL`, `_PATH_FINDING_LABEL`, `_FIXED_POSITIONS_LABEL`,
+ * `_CHEATING_LABEL`.
  */
 export const LABELS = {
   settings: [9682, 'Settings'],
@@ -38,6 +39,9 @@ export const LABELS = {
   revealMap: [9724, 'Reveal Map'],
   fullTechTree: [9732, 'Full Tech Tree'],
   populationLimit: [9747, 'Population Limit'],
+  pathFinding: [9741, 'Path Finding'],
+  fixedPositions: [9729, 'Fixed Positions'],
+  cheating: [9723, 'Enable Cheating'],
   /** `STRING_ID_MP_CHAT_LABEL` (scr_mps.cpp:224). */
   chat: [9687, 'Chat'],
 } as const;
@@ -114,6 +118,11 @@ export function victoryName(text: Text, type: number): string {
   return text(id, fallback);
 }
 
+/** `STRING_ID_PATH_FINDING_OPTION_BASE` + line: Default, Medium, High (scr_set.cpp:176-178). */
+export function pathFindingName(text: Text, line: number): string {
+  return text(9742 + line, ['Default', 'Medium', 'High'][line] ?? '');
+}
+
 export function timeLimitName(text: Text, years: number): string {
   const i = LOBBY_TIME_LIMITS.indexOf(years);
   return text(9780 + i, TIME_LIMIT_NAMES[i] ?? String(years));
@@ -123,9 +132,10 @@ export function timeLimitName(text: Text, years: number): string {
  * The setup screen's summary lines (`TribeMPSetupScreen::updateSummary`, scr_mps.cpp:1864-2071) for the settings the
  * lobby offers, in its order: "Scenario: %s" (9709, Random Map or Death Match), "Map Size: %s" (9690), "Map Type: %s"
  * (9654), "Victory: %s" (9660), with the years or points "Victory: %s (%d)" (9662), "Age: %s" (9700, Default 4327, Nomad
- * 4206, else 4199 + age), "Resources: %s" (9701, Default 4327, else 9701 + level), "Reveal Map: %s" (9656) and "Full
- * Tech Tree: %s" (9708) with Yes (4003) or No (4004), and, the screen's last line, "Population Limit: %d" (9712,
- * scr_mps.cpp:2069). The Difficulty, Fixed Positions, Cheating and Path Finding lines are not shown (lobby.md §6).
+ * 4206, else 4199 + age), "Resources: %s" (9701, Default 4327, else 9701 + level), "Fixed Positions: %s" (9705),
+ * "Reveal Map: %s" (9656) and "Full Tech Tree: %s" (9708) with Yes (4003) or No (4004), "Enable Cheating: %s" (9659),
+ * "Path Finding: %s" (9713, the line's name) and, the screen's last line, "Population Limit: %d" (9712,
+ * scr_mps.cpp:2069). The Difficulty line is not shown (lobby.md §6).
  */
 export function summaryLines(text: Text, s: GameSettings): string[] {
   const fill = (format: string, ...values: (string | number)[]) => {
@@ -142,8 +152,11 @@ export function summaryLines(text: Text, s: GameSettings): string[] {
     s.victory.amount === undefined ? fill(text(9660, 'Victory: %s'), victory) : fill(text(9662, 'Victory: %s (%d)'), victory, s.victory.amount),
     fill(text(9700, 'Age: %s'), ageName(text, s.startingAge)),
     fill(text(9701, 'Resources: %s'), resources),
+    fill(text(9705, 'Fixed Positions: %s'), yesNo(s.fixedPositions)),
     fill(text(9656, 'Reveal Map: %s'), yesNo(s.revealMap)),
     fill(text(9708, 'Full Tech Tree: %s'), yesNo(s.fullTechTree)),
+    fill(text(9659, 'Enable Cheating: %s'), yesNo(s.cheating)),
+    fill(text(9713, 'Path Finding: %s'), pathFindingName(text, s.pathFinding)),
     fill(text(9712, 'Population Limit: %d'), s.populationLimit),
   ];
 }

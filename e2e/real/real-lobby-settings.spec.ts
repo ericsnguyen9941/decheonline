@@ -54,8 +54,11 @@ async function playGame(browser: Browser, choice: Choice, lobbyShot?: string): P
     new RegExp(`^Victory: ${choice.victory}`),
     'Age: Default',
     'Resources: Default',
+    'Fixed Positions: Yes',
     'Reveal Map: No',
     'Full Tech Tree: No',
+    'Enable Cheating: No',
+    'Path Finding: Default',
     'Population Limit: 50',
   ]);
   if (lobbyShot) {

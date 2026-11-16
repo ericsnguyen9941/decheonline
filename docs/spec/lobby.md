@@ -157,6 +157,32 @@ Random Map or Death Match (`:1864-1877`), then after the victory line
 Positions, "Reveal Map: %s" and "Full Tech Tree: %s" with Yes or No
 (`:2027-2045`), Cheating, Path Finding, Population Limit.
 
+### 2.2 Path Finding, Fixed Positions and Enable Cheating
+
+- **Path Finding** (`mpPathFinding` in a multiplayer game, 0 Default, 1
+  Medium, 2 High; `scr_set.cpp:176-178`, stored `:753`): the 1.0a exe's
+  `create_game` sets the path search budget `numberPathingIterations` from
+  it, 2500 / 5000 / 7500 (`Empiresx.exe` 0x505f1e-0x505f60: `multiplayerGame()
+  ? mpPathFinding() : pathFinding()`, then 1 → 0x1388, 2 → 0x1D4C, else
+  0x9C4). The beta decomp sets it only when a saved game loads
+  (`tribegam.cpp:2368-2378`); the release wins. The budget scales each
+  search's cap (movement.md §3, `iterationCap`): a longer budget lets a unit
+  find its way round a longer obstacle. Summary "Path Finding: %s" (9713)
+  with the line's name (9742 + line: Default, Medium, High).
+- **Fixed Positions** (check, on by default; stored inverted as
+  `randomizePositions`, `scr_mps.cpp:441`): its only rule effect is the
+  random map generator's `fixed_position = !randomizePositions()`
+  (`rmm_tdbc.cpp:32`), which re-orders the land centres by team
+  (random-maps.md §4 step 5). With 2 players and no alliance at the start
+  (this lobby has no teams) every land keeps its own centre, so the map is
+  the same either way; it changes the map once teams exist (3+ players with
+  allies). Summary "Fixed Positions: %s" (9705) with Yes or No.
+- **Enable Cheating** (check, multiplayer only, off by default,
+  `scr_mps.cpp:444`; label 9723): `allowCheatCodes`, which both the sender's
+  `processCheatCode` and every peer's `TRIBE_World::cheat` read (chat.md §7).
+  Summary "Enable Cheating: %s" (9659) with Yes or No, after Full Tech Tree
+  (`scr_mps.cpp:2047-2054`).
+
 ## 3. Players and civilizations
 
 Each of the 8 rows has a name drop-down (Computer / Closed / Open; the host
@@ -213,7 +239,10 @@ Resources, applied as §2.1 in `World` `startEffects`, `techs.ts`
 score table, and the generator's `nomad`); the Population Limit
 (`GameSettings.populationLimit`, the world's `populationLimit` option, so
 attribute 32; the sim's caps are `buildings.ts` `updateQueue` and
-`checkObjCost`); each player's civ with
+`checkObjCost`); Path Finding, Fixed Positions and Enable Cheating as §2.2
+(`GameSettings.pathFinding`, `fixedPositions`, `cheating`; the world options
+`pathingIterations` (`PATHING_ITERATIONS`), `fixedPositions` (the generator's
+flag) and `cheating`); each player's civ with
 Random; the defaults (Large, Mostly Land, Standard); the who-may-change
 rules of §4 (server: `apps/server/src/rooms.ts` refuses with `not-host` or
 `locked`); Random resolved as §5 (`resolveCivs`; a 0x7FFF draw is kept at
@@ -242,15 +271,14 @@ Offered values (only what the sim can play):
 - Civs: all 16 and Random.
 - Population Limit: all eight, default 50.
 - Random Map and Death Match; Starting Age: all six; Resources: all three;
-  Reveal Map and Full Tech Tree on or off. The summary shows their lines in
-  the original's order (§2.1), without Difficulty, Fixed Positions, Cheating
-  and Path Finding. On the fixed test map (`&map=test`) Nomad changes
-  nothing (no generator); the other start settings apply.
+  Reveal Map and Full Tech Tree on or off; Path Finding: all three; Fixed
+  Positions and Enable Cheating on or off. The summary shows their lines in
+  the original's order (§2.1), without Difficulty. On the fixed test map
+  (`&map=test`) Nomad and Fixed Positions change nothing (no generator); the
+  other settings apply.
 
 Not offered (each needs the noted work first): scenarios (scenario loading),
-Path Finding (MP `pathingIterations` wiring), Difficulty (computer players),
-Fixed Positions off (randomized positions in the generator), Enable Cheating
-(chat and cheat codes), colours, teams and more than 2 players.
+Difficulty (computer players), colours, teams and more than 2 players.
 
 ## 7. Strings (`language.dll` ids)
 
@@ -273,3 +301,5 @@ Fixed Positions off (randomized positions in the generator), Enable Cheating
 | Resources lines "Medium", "High" (dialog); in the summary 9701 + level | 9737, 9738; 9703, 9704 |
 | summary: "Scenario: %s", "Age: %s", "Resources: %s", "Reveal Map: %s", "Full Tech Tree: %s"; "Yes", "No" | 9709, 9700, 9701, 9656, 9708; 4003, 4004 |
 | help: Starting Age, Resources, Reveal Map, Full Tech Tree | 30257, 30258, 30260, 30263 |
+| "Path Finding", "Fixed Positions", "Enable Cheating" (labels); Path Finding lines "Default", "Medium", "High" | 9741, 9729, 9723; 9742, 9743, 9744 |
+| summary: "Fixed Positions: %s", "Enable Cheating: %s", "Path Finding: %s" | 9705, 9659, 9713 |

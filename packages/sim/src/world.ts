@@ -129,6 +129,10 @@ export interface WorldOptions {
   fullTechTree?: boolean;
   /** Reveal Map (`fullVisibility`): every player starts with the whole map explored. */
   revealMap?: boolean;
+  /** Fixed Positions (`!randomizePositions`, default on): the generator's `fixed_position` (random-maps.md §4 step 5). */
+  fixedPositions?: boolean;
+  /** Enable Cheating (`allowCheatCodes`, default off): the cheat codes typed in chat take effect (chat.md §7). */
+  cheating?: boolean;
   /**
    * A random map game (docs/spec/random-maps.md): the map and every start object come from `randomSeed` through the
    * original's `new_game` chain; `map` and `units` are not used.
@@ -476,10 +480,11 @@ export class World {
     rng.srand(this.randomSeed);
     for (let i = 0; i < 5; i++) rng.rand();
     const m = new RmmMap(this.map, rng, this.rmmWorld());
-    // Positions fixed (the multiplayer default); no alliances in a 2-player room. Nomad: Villagers, no Town Center.
+    // Fixed Positions as the lobby set it (`randomizePositions() == 0`, src/rmm_tdbc.cpp:32); no alliances in a 2-player
+    // room. Nomad: Villagers, no Town Center.
     this.randomMapSeed = rng.rand();
     const nomad = options.startingAge === AGE_NOMAD;
-    mapGenerate2(m, this.randomMapSeed, { type, players: this.players - 1, fixedPositions: true, nomad, allied: () => false });
+    mapGenerate2(m, this.randomMapSeed, { type, players: this.players - 1, fixedPositions: options.fixedPositions ?? true, nomad, allied: () => false });
     // The game's zone maps are made over the finished terrain.
     this.pathing.zones.clear();
     rng.rand();

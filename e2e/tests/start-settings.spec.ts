@@ -77,8 +77,11 @@ test('Death Match in the Bronze Age with Reveal Map and Full Tech Tree: the gues
     'Victory: Standard',
     'Age: Bronze Age',
     'Resources: Default',
+    'Fixed Positions: Yes',
     'Reveal Map: Yes',
     'Full Tech Tree: Yes',
+    'Enable Cheating: No',
+    'Path Finding: Default',
     'Population Limit: 50',
   ];
   await expect(summary(guest)).toHaveText(lines);
@@ -112,8 +115,11 @@ test('Nomad with High resources: one Villager and no Town Center each, 1000 food
     'Victory: Standard',
     'Age: Nomad',
     'Resources: High',
+    'Fixed Positions: Yes',
     'Reveal Map: No',
     'Full Tech Tree: No',
+    'Enable Cheating: No',
+    'Path Finding: Default',
     'Population Limit: 50',
   ]);
   await start(host, guest);

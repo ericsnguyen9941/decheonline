@@ -1,6 +1,7 @@
 /**
  * The multiplayer setup screen's settings (docs/spec/lobby.md): the host's game (Random Map or Death Match), map type,
- * map size, victory condition, starting age, resources, reveal map, full tech tree and population limit, each player's
+ * map size, victory condition, starting age, resources, reveal map, full tech tree, population limit, path finding, fixed
+ * positions and cheating, each player's
  * civilization, and the game they start. Only the values the sim can play are offered (lobby.md §6).
  */
 import { CrtRand } from './rng';
@@ -41,7 +42,8 @@ import {
 /**
  * The host's settings: Death Match (the scenario list's second line) or a Random Map, map type (`MAP_*`), map side in
  * tiles, the victory type with its years or points, the Starting Age (`AGE_*`), the Resources (`RESOURCES_*`), the
- * Reveal Map and Full Tech Tree check boxes, and the population limit, each player's attribute 32 at game start.
+ * Reveal Map and Full Tech Tree check boxes, the population limit, each player's attribute 32 at game start, the Path
+ * Finding line (`PATH_FINDING_*`), and the Fixed Positions and Enable Cheating check boxes.
  */
 export interface GameSettings {
   deathMatch: boolean;
@@ -53,12 +55,23 @@ export interface GameSettings {
   revealMap: boolean;
   fullTechTree: boolean;
   populationLimit: number;
+  pathFinding: number;
+  fixedPositions: boolean;
+  cheating: boolean;
 }
+
+/** `RGE_PATH_FINDING_*`: the Path Finding drop-down's ids (src/scr_set.cpp:176-178). */
+export const PATH_FINDING_DEFAULT = 0;
+export const PATH_FINDING_MEDIUM = 1;
+export const PATH_FINDING_HIGH = 2;
+/** `numberPathingIterations` by Path Finding line, set by 1.0a's `create_game` from `mpPathFinding` (lobby.md §2.2). */
+export const PATHING_ITERATIONS: readonly number[] = [2500, 5000, 7500];
 
 /**
  * `TribeMPSetupScreen::init_vars` (src/scr_mps.cpp:436-453): Random Map (Death Match off), Large, Mostly Land, Default
- * victory (Standard), Default age and resources, Reveal Map and Full Tech Tree off; the population limit `TRIBE_Game`'s
- * constructor sets, 50 (src/tribegam.cpp:198).
+ * victory (Standard), Default age and resources, Reveal Map and Full Tech Tree off, positions fixed and cheating off
+ * (:441-444); the population limit `TRIBE_Game`'s constructor sets, 50 (src/tribegam.cpp:198); Path Finding Default
+ * (src/basegame.cpp:101).
  */
 export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   deathMatch: false,
@@ -70,6 +83,9 @@ export const DEFAULT_GAME_SETTINGS: Readonly<GameSettings> = {
   revealMap: false,
   fullTechTree: false,
   populationLimit: DEFAULT_POPULATION_LIMIT,
+  pathFinding: PATH_FINDING_DEFAULT,
+  fixedPositions: true,
+  cheating: false,
 };
 
 /** The map types offered, all nine in the drop-down's order (src/scr_set.cpp:63-71, lobby.md §6). */
@@ -100,6 +116,8 @@ export const LOBBY_STARTING_AGES: readonly number[] = [AGE_DEFAULT, AGE_NOMAD, A
 export const LOBBY_RESOURCES: readonly number[] = [RESOURCES_DEFAULT, RESOURCES_MEDIUM, RESOURCES_HIGH];
 /** The multiplayer Population Limit drop-down, 25 to 200 by 25 (src/scr_set.cpp:181-194). */
 export const LOBBY_POPULATION_LIMITS: readonly number[] = [25, 50, 75, 100, 125, 150, 175, 200];
+/** The Path Finding drop-down: Default, Medium, High (src/scr_set.cpp:176-178). */
+export const LOBBY_PATH_FINDING: readonly number[] = [PATH_FINDING_DEFAULT, PATH_FINDING_MEDIUM, PATH_FINDING_HIGH];
 
 /** `CIVILIZATION_COUNT`: Egyptian (1) .. Macedonian (16). */
 export const CIV_COUNT = 16;
@@ -108,14 +126,14 @@ export const CIV_RANDOM = 17;
 
 /**
  * Whether `s` is a setting the lobby offers: a listed map type and size, starting age, resources (Default in Death
- * Match), population limit, victory type and, for time or score, amount.
+ * Match), population limit, path finding, victory type and, for time or score, amount.
  */
 export function isLobbySettings(s: GameSettings): boolean {
   const { type, amount } = s.victory;
   if (!LOBBY_MAP_TYPES.includes(s.mapType) || !LOBBY_MAP_SIZES.includes(s.mapSize) || !LOBBY_VICTORY_TYPES.includes(type)) return false;
   if (!LOBBY_STARTING_AGES.includes(s.startingAge) || !LOBBY_RESOURCES.includes(s.resources)) return false;
   if (s.deathMatch && s.resources !== RESOURCES_DEFAULT) return false;
-  if (!LOBBY_POPULATION_LIMITS.includes(s.populationLimit)) return false;
+  if (!LOBBY_POPULATION_LIMITS.includes(s.populationLimit) || !LOBBY_PATH_FINDING.includes(s.pathFinding)) return false;
   if (type === VICTORY_TIME_LIMIT) return amount !== undefined && LOBBY_TIME_LIMITS.includes(amount);
   if (type === VICTORY_SCORE) return amount !== undefined && LOBBY_SCORE_LIMITS.includes(amount);
   return amount === undefined;
@@ -141,7 +159,9 @@ export function resolveCivs(seed: number, civs: readonly number[]): number[] {
  * The world a lobby game starts: the random map of `settings` from `seed` (or, `testMap`, the fixed test map and its
  * start objects, where Nomad changes nothing), each player's civ (by slot, Random resolved), the victory setting, the
  * start settings `TRIBE_World::new_game` applies (src/tworld.cpp:796-855; Nomad in the generator, src/rmm_tdbc.cpp:284-293;
- * Reveal Map in `create_game`, src/tribegam.cpp:3024-3033) and the population limit (attribute 32, src/tworld.cpp:869-872).
+ * Reveal Map in `create_game`, src/tribegam.cpp:3024-3033), the population limit (attribute 32, src/tworld.cpp:869-872),
+ * the path search budget of Path Finding, Fixed Positions (the generator's `fixed_position`, src/rmm_tdbc.cpp:32) and
+ * Enable Cheating (`allowCheatCodes`, chat.md §7).
  */
 export function lobbyWorldOptions(seed: number, settings: GameSettings, civs: readonly number[], testMap = false): WorldOptions {
   const players = civs.length + 1;
@@ -156,6 +176,9 @@ export function lobbyWorldOptions(seed: number, settings: GameSettings, civs: re
     fullTechTree: settings.fullTechTree,
     revealMap: settings.revealMap,
     populationLimit: settings.populationLimit,
+    pathingIterations: PATHING_ITERATIONS[settings.pathFinding] ?? PATHING_ITERATIONS[PATH_FINDING_DEFAULT],
+    fixedPositions: settings.fixedPositions,
+    cheating: settings.cheating,
   };
   return testMap ? { ...common, units: startingObjects(players) } : { ...common, randomMap: { type: settings.mapType, size: settings.mapSize } };
 }

@@ -30,7 +30,7 @@ describe('invite codes', () => {
 
 describe('client message decoding', () => {
   /** The start settings at their defaults (Random Map, Default age and resources, both check boxes off). */
-  const START = { deathMatch: false, startingAge: 0, resources: 0, revealMap: false, fullTechTree: false };
+  const START = { deathMatch: false, startingAge: 0, resources: 0, revealMap: false, fullTechTree: false, pathFinding: 0, fixedPositions: true, cheating: false };
   const roundTrips: ClientMessage[] = [
     { t: 'create', name: 'Eric' },
     { t: 'join', code: 'ABCD2', name: 'Bao' },
@@ -38,7 +38,7 @@ describe('client message decoding', () => {
     { t: 'settings', settings: { ...START, mapType: 7, mapSize: 96, victory: { type: 0 }, populationLimit: 50 } },
     { t: 'settings', settings: { ...START, mapType: 3, mapSize: 250, victory: { type: 2, amount: 9000 }, populationLimit: 200 } },
     { t: 'settings', settings: { ...START, mapType: 4, mapSize: 72, victory: { type: 3, amount: 300 }, populationLimit: 25 } },
-    { t: 'settings', settings: { deathMatch: true, mapType: 7, mapSize: 120, victory: { type: 0 }, startingAge: 1, resources: 0, revealMap: true, fullTechTree: true, populationLimit: 75 } },
+    { t: 'settings', settings: { deathMatch: true, mapType: 7, mapSize: 120, victory: { type: 0 }, startingAge: 1, resources: 0, revealMap: true, fullTechTree: true, populationLimit: 75, pathFinding: 2, fixedPositions: false, cheating: true } },
     { t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 0 }, startingAge: 5, resources: 3, populationLimit: 50 } },
     { t: 'civ', civ: 1 },
     { t: 'civ', civ: 17 },
@@ -84,6 +84,9 @@ describe('client message decoding', () => {
     ['Death Match with High resources', JSON.stringify({ t: 'settings', settings: { ...START, deathMatch: true, mapType: 3, mapSize: 144, victory: { type: 0 }, resources: 3, populationLimit: 50 } })],
     ['reveal map not a boolean', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 0 }, revealMap: 1, populationLimit: 50 } })],
     ['settings without full tech tree', JSON.stringify({ t: 'settings', settings: { deathMatch: false, mapType: 3, mapSize: 144, victory: { type: 0 }, startingAge: 0, resources: 0, revealMap: false, populationLimit: 50 } })],
+    ['path finding not offered', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 0 }, populationLimit: 50, pathFinding: 3 } })],
+    ['fixed positions not a boolean', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 0 }, populationLimit: 50, fixedPositions: 0 } })],
+    ['settings without cheating', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 0 }, populationLimit: 50, cheating: undefined } })],
     ['settings without population limit', JSON.stringify({ t: 'settings', settings: { ...START, mapType: 3, mapSize: 144, victory: { type: 0 } } })],
     ['civ 0 (Gaia)', JSON.stringify({ t: 'civ', civ: 0 })],
     ['civ past Random', JSON.stringify({ t: 'civ', civ: 18 })],
