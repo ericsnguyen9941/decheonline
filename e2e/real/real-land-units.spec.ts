@@ -127,16 +127,21 @@ test('the land units, their buildings, icons, build menu pages and fight animati
     await page.evaluate(([x, y]) => window.__map!.centerOnTile(Math.floor(x), Math.floor(y)), [first.x, first.y] as const);
     await frames(page);
     await shot(page, `land-units-${civ}-standing.png`);
+    const names = new Set<string>();
     for (const type of UNITS) {
       const unit = own.find((o) => o.type === type)!;
       await selectObject(page, unit.id, true);
       expect(await background(page, 'object-icon')).toContain(`/assets/sprites/interface/${UNIT_ICONS}.o${player}.png`);
       if (player === 1) await shot(page, `land-unit-icon-${type}.png`, 'object-panel');
-      console.log(`${civ} unit ${type}: "${await page.getByTestId('object-name').textContent()}" ${await page.getByTestId('object-hp').textContent()}`);
+      const name = await page.getByTestId('object-name').textContent();
+      names.add(name!);
+      console.log(`${civ} unit ${type}: "${name}" ${await page.getByTestId('object-hp').textContent()}`);
     }
     const selects = (await page.evaluate(() => window.__game!.sounds())).filter((s) => s.event === 'select' && UNITS.includes(s.source));
     console.log(`${civ} select sounds: ${selects.map((s) => `${s.source}:${s.sound}/${s.wav}`).join(' ')}`);
-    expect(new Set(selects.map((s) => s.source)).size).toBe(UNITS.length);
+    // A master a tech upgraded into another (the Egyptians' Improved Bowman 5 is the Composite Bowman 6, tech 57) selects as that one:
+    // one select sound per distinct unit shown.
+    expect(new Set(selects.map((s) => s.source)).size).toBe(names.size);
     expect(selects.every((s) => s.sound < 0 || s.wav !== null)).toBe(true);
 
     // The buildings, in the culture's art: the view, then each selected (its picture from btnbldg_<culture>).
