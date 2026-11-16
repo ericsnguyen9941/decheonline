@@ -32,7 +32,7 @@ test(`quick successive setting changes by the host all arrive, with the server s
   await hostPage.getByTestId('starting-age').selectOption({ label: 'Tool Age' });
   await hostPage.getByTestId('reveal-map').check();
 
-  const lines = ['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Conquest', 'Age: Tool Age', 'Resources: Default', 'Reveal Map: Yes', 'Full Tech Tree: No', 'Population Limit: 50'];
+  const lines = ['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Conquest', 'Age: Tool Age', 'Resources: Default', 'Fixed Positions: Yes', 'Reveal Map: Yes', 'Full Tech Tree: No', 'Enable Cheating: No', 'Path Finding: Default', 'Population Limit: 50'];
   await expect(guest.getByTestId('settings-summary').locator('li')).toHaveText(lines);
   // Past every delayed echo the host's selects still show the picks.
   await hostPage.waitForTimeout(1000);

@@ -40,7 +40,7 @@ const setup = (page: Page) =>
 test("the host's map size, map type and victory and each player's civ show live on both screens and are what both games play", async ({ browser }) => {
   const [host, guest] = await pair(browser);
   // The original's multiplayer defaults (scr_mps.cpp init_vars); the e2e server starts every player Egyptian.
-  await expect(summary(guest)).toHaveText(['Scenario: Random Map', 'Map Size: Large', 'Map Type: Inland', 'Victory: Standard', 'Age: Default', 'Resources: Default', 'Reveal Map: No', 'Full Tech Tree: No', 'Population Limit: 50']);
+  await expect(summary(guest)).toHaveText(['Scenario: Random Map', 'Map Size: Large', 'Map Type: Inland', 'Victory: Standard', 'Age: Default', 'Resources: Default', 'Fixed Positions: Yes', 'Reveal Map: No', 'Full Tech Tree: No', 'Enable Cheating: No', 'Path Finding: Default', 'Population Limit: 50']);
   await expect(host.getByTestId('map-size')).toHaveValue('144');
   await expect(host.getByTestId('civ-0')).toHaveValue('1');
   await expect(guest.getByTestId('civ-0')).toHaveText('Egyptian');
@@ -57,13 +57,13 @@ test("the host's map size, map type and victory and each player's civ show live 
   await host.getByTestId('civ-0').selectOption({ label: 'Shang' });
   await guest.getByTestId('civ-1').selectOption({ label: 'Yamato' });
 
-  await expect(summary(guest)).toHaveText(['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)', 'Age: Default', 'Resources: Default', 'Reveal Map: No', 'Full Tech Tree: No', 'Population Limit: 50']);
+  await expect(summary(guest)).toHaveText(['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)', 'Age: Default', 'Resources: Default', 'Fixed Positions: Yes', 'Reveal Map: No', 'Full Tech Tree: No', 'Enable Cheating: No', 'Path Finding: Default', 'Population Limit: 50']);
   await expect(guest.getByTestId('civ-0')).toHaveText('Shang');
   await expect(host.getByTestId('civ-1')).toHaveText('Yamato');
 
   // Ready locks a player's civ and the host's settings: the host sees its summary.
   await host.getByTestId('ready').click();
-  await expect(summary(host)).toHaveText(['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)', 'Age: Default', 'Resources: Default', 'Reveal Map: No', 'Full Tech Tree: No', 'Population Limit: 50']);
+  await expect(summary(host)).toHaveText(['Scenario: Random Map', 'Map Size: Small', 'Map Type: Hill Country', 'Victory: Time Limit (3000)', 'Age: Default', 'Resources: Default', 'Fixed Positions: Yes', 'Reveal Map: No', 'Full Tech Tree: No', 'Enable Cheating: No', 'Path Finding: Default', 'Population Limit: 50']);
   await expect(host.getByTestId('civ-0')).toHaveText('Shang');
 
   await startAndWait(host, guest);
