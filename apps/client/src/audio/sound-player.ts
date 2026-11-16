@@ -59,6 +59,7 @@ export class SoundPlayer {
   constructor() {
     const stored = Number(globalThis.localStorage?.getItem(STORAGE_KEY));
     this.position = Number.isInteger(stored) && stored >= 0 && stored <= VOLUME_STOPS ? stored : 0;
+    this.create();
     const unlock = () => this.unlock();
     for (const type of ['pointerdown', 'keydown'] as const) {
       window.addEventListener(type, unlock, { capture: true });
@@ -68,7 +69,7 @@ export class SoundPlayer {
 
   /** Runs `fn` with the audio context once it exists (at once if it does). */
   onStart(fn: (context: AudioContext) => void): void {
-    if (this.context) fn(this.context);
+    if (this.meter) fn(this.context!);
     else this.started.push(fn);
   }
 
@@ -155,18 +156,25 @@ export class SoundPlayer {
     this.context = null;
   }
 
+  /** The context is made before any gesture (it stays suspended); the click task only resumes it, the rest follows it. */
+  private create(): void {
+    const Context = globalThis.AudioContext as typeof AudioContext | undefined;
+    if (!Context) return;
+    this.context = new Context();
+  }
+
   private unlock(): void {
-    if (!this.context) {
-      const Context = globalThis.AudioContext as typeof AudioContext | undefined;
-      if (!Context) return;
-      this.context = new Context();
-      this.gain = this.context.createGain();
-      this.gain.gain.value = volumeGain(this.position);
-      this.gain.connect(this.context.destination);
-      this.meter = new Meter(this.context, this.gain);
-      for (const fn of this.started.splice(0)) fn(this.context);
-    }
-    if (this.context.state === 'suspended') void this.context.resume().catch(() => undefined);
+    const context = this.context;
+    if (!context) return;
+    if (context.state === 'suspended') void context.resume().catch(() => undefined);
+    if (this.gain) return;
+    this.gain = context.createGain();
+    this.gain.gain.value = volumeGain(this.position);
+    this.gain.connect(context.destination);
+    setTimeout(() => {
+      this.meter = new Meter(context, this.gain!);
+      for (const fn of this.started.splice(0)) fn(context);
+    });
   }
 
   /** The decoded wav, fetched once; null when it cannot be loaded or decoded. */
