@@ -64,10 +64,9 @@ async function rate(page: Page, seconds: number): Promise<Rate> {
 
 const clock = (page: Page) => page.getByTestId('game-clock');
 
-test('1.0, 1.5 and 2.0: game time runs 1.5x and 2x as fast on both clients, F11 shows the speed', async ({ browser }) => {
+test('1.0, 1.5 and 2.0: game time runs 1.5x and 2x as fast on both clients, the clock shows the speed', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   for (const page of [host, guest]) {
-    await page.keyboard.press('F11');
     await expect(clock(page)).toHaveText(/^\d\d:\d\d:\d\d \(1\.0\)$/);
   }
   // Both clients measure at the same time, so a slow stretch of the machine counts in every speed's baseline alike.

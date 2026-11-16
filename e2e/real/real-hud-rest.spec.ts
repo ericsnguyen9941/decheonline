@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-// Local only; the screenshots land in assets-local/ (gitignored) because they show game art. F11's clock and
+// Local only; the screenshots land in assets-local/ (gitignored) because they show game art. The clock and
 // population, F5's timings, REVEAL MAP and NO FOG, the tribute notice and a taunt with the real pack (docs/spec/hud.md
 // "F11 clock and population, F5 timings, formations", chat.md §7.5, §8).
 const dir = process.env.AOE1_DIR;
@@ -49,11 +49,11 @@ test('F11 and F5 overlays, REVEAL MAP and NO FOG, the tribute notice and a taunt
     await page.getByTestId('net-debug').evaluate((el) => el.remove());
   }
 
-  // F11: "00:00:12 (1.0)" at the top left of the view, "pop: 3/..." from language string 11050; F5's timings over the
+  // Always on: "00:00:12 (1.0)" at the top left of the view, "pop: 3/..." from language string 11050; F5's timings over the
   // resource counts.
-  await host.keyboard.press('F11');
   await expect(host.getByTestId('game-clock')).toHaveText(/^\d\d:\d\d:\d\d \(1\.0\)$/);
   await expect(host.getByTestId('population')).toHaveText(/^pop: \d+\/\d+$/);
+  await shoot(host, 'hud-pop-always.png');
   await host.keyboard.press('F5');
   await expect(host.getByTestId('timings')).toHaveText(/^t\d+,f\d+,avg\(/);
   await shoot(host, 'hud-f11-f5.png');

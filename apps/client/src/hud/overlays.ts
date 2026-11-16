@@ -1,7 +1,7 @@
-// F11's game clock and population (`TRIBE_Panel_Time` clock type 2, src/tpnl_tim.cpp; `TRIBE_Panel_Pop`,
-// src/tpnl_pop.cpp; toggled by `key_down_action`'s `VK_F11`, src/scr_game.cpp:1824-1833) and F5's timings panel
-// (`command_fps`, src/scr_game.cpp:3871-3886; `calc_timing_text`, src/tribegam.cpp:1622-1650). docs/spec/hud.md
-// "F11 clock and population, F5 timings".
+// The game clock and population (`TRIBE_Panel_Time` clock type 2, src/tpnl_tim.cpp; `TRIBE_Panel_Pop`,
+// src/tpnl_pop.cpp; the original toggles them with `key_down_action`'s `VK_F11`, src/scr_game.cpp:1824-1833, the port
+// always shows them) and F5's timings panel (`command_fps`, src/scr_game.cpp:3871-3886; `calc_timing_text`,
+// src/tribegam.cpp:1622-1650). docs/spec/hud.md "F11 clock and population, F5 timings".
 import { ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, type World } from '@aoe/sim';
 import type { AssetProvider } from '../assets';
 import { FONT, placed, textColours } from './easy-panel';
@@ -77,15 +77,15 @@ export class PopulationBlink {
 }
 
 /**
- * F11's overlay over the main view: the game clock (120 x 20 at 4, 4, left-aligned) and the population "pop: 5/10"
- * (160 x 20, centred, at `POPULATION_X`), both in the standard font, white over black one pixel off each diagonal.
+ * The overlay over the main view, always shown (F11 does not hide it): the game clock (120 x 20 at 4, 4, left-aligned)
+ * and the population "pop: 5/10" (160 x 20, centred, at `POPULATION_X`), both in the standard font, white over black one
+ * pixel off each diagonal.
  */
 export class ClockOverlay {
   private readonly clock: HTMLDivElement;
   private readonly pop: HTMLDivElement;
   private readonly blink = new PopulationBlink();
   private lastTime: number;
-  private shown = false;
 
   constructor(
     view: HTMLElement,
@@ -100,19 +100,8 @@ export class ClockOverlay {
     this.pop.dataset.testid = 'population';
     for (const el of [this.clock, this.pop]) {
       Object.assign(el.style, { color: WHITE, textShadow: OUTLINE });
-      el.hidden = true;
     }
     this.lastTime = world.worldTime;
-  }
-
-  get visible(): boolean {
-    return this.shown;
-  }
-
-  /** F11: `set_clock_type(2)` and the population panel on, or both off. */
-  toggle(): void {
-    this.shown = !this.shown;
-    this.clock.hidden = this.pop.hidden = !this.shown;
     this.update();
   }
 
@@ -125,7 +114,6 @@ export class ClockOverlay {
     const { world, player } = this;
     const delta = (world.worldTime - this.lastTime) / 1000;
     this.lastTime = world.worldTime;
-    if (!this.shown) return;
     this.clock.textContent = clockText(world.worldTime, world.gameSpeed);
     this.blink.step(waitingOnPopulation(world, player), delta);
     const { pop, max } = populationRoom(world, player);

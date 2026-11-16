@@ -218,7 +218,7 @@ export class GameHud {
   readonly gameOver: GameOver;
   /** All relics or all ruins held: the notifications and the countdown clocks. */
   readonly held: HeldDisplay;
-  /** F11's game clock and population. */
+  /** The game clock and population, always shown. */
   readonly clock: ClockOverlay;
   /** F5's timings, in place of the resource counts. */
   readonly timings: TimingsPanel;
@@ -247,8 +247,8 @@ export class GameHud {
   };
   /**
    * `key_down_action`'s function keys (src/scr_game.cpp:1490-1519, :1798-1833): Shift+F2 .. Shift+F7 the formations 0-5
-   * while the game is on; without Ctrl, F5 the timings (not with Shift: Shift+F5 is a formation) and F11 the clock and
-   * population. F4 is the score display's.
+   * while the game is on; without Ctrl, F5 the timings (not with Shift: Shift+F5 is a formation). F11 only keeps the
+   * browser's full screen off: the clock and population are always shown. F4 is the score display's.
    */
   private readonly onFunctionKey = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.repeat) return;
@@ -261,7 +261,6 @@ export class GameHud {
       this.timings.toggle();
     } else if (e.key === 'F11') {
       e.preventDefault();
-      this.clock.toggle();
     }
   };
   private layout: HudLayout | undefined;

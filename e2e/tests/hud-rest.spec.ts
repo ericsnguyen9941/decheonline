@@ -51,8 +51,8 @@ async function say(page: Page, text: string): Promise<void> {
 test('F11, F4, F5 and Shift+F2..F7 on both clients, as the original', async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   for (const page of [host, guest]) {
-    // F11: the game clock at the main view's top left and "pop: n/room" (tpnl_pop.cpp); again, both go.
-    await page.keyboard.press('F11');
+    // The game clock at the main view's top left and "pop: n/room" (tpnl_pop.cpp) are always shown; F11 does not hide them
+    // (`pop-overlay.spec.ts` covers the rest).
     await expect(page.getByTestId('game-clock')).toBeVisible();
     await expect(page.getByTestId('game-clock')).toHaveText(/^\d\d:\d\d:\d\d \(1\.0\)$/);
     const first = (await page.getByTestId('game-clock').textContent())!;
@@ -60,8 +60,8 @@ test('F11, F4, F5 and Shift+F2..F7 on both clients, as the original', async ({ b
     const pop = await page.evaluate(() => window.__game!.population());
     await expect(page.getByTestId('population')).toHaveText(`pop: ${pop.count}/${Math.min(pop.count + pop.headroom, pop.limit)}`);
     await page.keyboard.press('F11');
-    await expect(page.getByTestId('game-clock')).toBeHidden();
-    await expect(page.getByTestId('population')).toBeHidden();
+    await expect(page.getByTestId('game-clock')).toBeVisible();
+    await expect(page.getByTestId('population')).toBeVisible();
 
     // F4: the score display, a line per player; again, gone.
     await page.keyboard.press('F4');
