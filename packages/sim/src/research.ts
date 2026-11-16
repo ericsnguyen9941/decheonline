@@ -10,7 +10,7 @@ import type { Entity } from './entities';
 import { deleteActions } from './gather';
 import { typeOf } from './masters';
 import { ActionResult } from './movement';
-import { mul32 } from './num';
+import { f32, mul32 } from './num';
 import { cancelResearch, research, startResearch } from './techs';
 import { AI_ACTION_RESEARCH, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, notifyObject, setAiAction, stopObject } from './unit-ai';
 
@@ -50,7 +50,7 @@ export function orderResearch(ctx: GameContext, e: Entity, tech: number): void {
 export function updateResearch(ctx: GameContext, e: Entity, a: ResearchAction): ActionResult {
   if (a.state === RESEARCH_DONE) return ActionResult.Remove;
   if (a.state !== RESEARCH_WORKING) return ActionResult.Continue;
-  const work = mul32(ctx.deltaSeconds, typeOf(ctx, e).action!.workRate);
+  const work = ctx.quickBuild ? f32(1000) : mul32(ctx.deltaSeconds, typeOf(ctx, e).action!.workRate);
   if (!research(ctx, e.owner, a.tech, work)) {
     a.state = RESEARCH_DONE;
     notifyObject(ctx, e, e.id, NOTIFY_ACTION_COMPLETED, AI_ACTION_RESEARCH);

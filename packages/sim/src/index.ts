@@ -32,6 +32,7 @@ export * from './hash';
 export * from './visibility';
 export * from './victory';
 export * from './game-log';
+export * from './cheats';
 export * from './diplomacy';
 export * from './world';
 export * from './game-settings';

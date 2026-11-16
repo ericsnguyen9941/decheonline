@@ -185,7 +185,7 @@ export function updateBuild(ctx: GameContext, e: Entity, a: WorkAction): ActionR
         return ActionResult.Continue;
       }
       const task = taskOf(ctx, e, a);
-      const work = mul32(mul32(task.workValue1, typeOf(ctx, e).action!.workRate), ctx.deltaSeconds);
+      const work = ctx.quickBuild ? f32(1000) : mul32(mul32(task.workValue1, typeOf(ctx, e).action!.workRate), ctx.deltaSeconds);
       if (!target || build(ctx, target, work)) {
         if (target?.type === FARM) {
           a.timer = f32(-1);

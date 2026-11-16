@@ -262,7 +262,7 @@ function victoryIfGameOn(v: VictoryState, player: number): void {
   if (v.status[player] === STATUS_PLAYING) setGameStatus(v, player, STATUS_WON);
 }
 
-function lossIfGameOn(v: VictoryState, player: number): void {
+export function lossIfGameOn(v: VictoryState, player: number): void {
   if (v.status[player] === STATUS_PLAYING) setGameStatus(v, player, STATUS_LOST);
 }
 

@@ -1,5 +1,5 @@
 import type { Application, Ticker } from 'pixi.js';
-import { ATTR_FOOD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, FARM, HOUSE, ObjectState, STATUS_LOST, typeOf, type Command, type Entity, type World } from '@aoe/sim';
+import { ATTR_FOOD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, FARM, HOUSE, ObjectState, processCheatCode, STATUS_LOST, typeOf, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import type { MapView } from '../map/map-view';
 import { CommandPanel } from './command-panel';
@@ -404,7 +404,10 @@ export class GameHud {
    * chat group still in the game, and on this screen too when this player is in it.
    */
   private sendChat(text: string): void {
-    const { player, game } = this.o;
+    const { player, game, world } = this.o;
+    // `processCheatCode` first (chat.md §7.1): a cheat goes out as its command, not as chat.
+    const cheat = processCheatCode(text, world.cheats.allowed, world.cheats.quickBuild);
+    if (cheat) return this.o.issue(cheat);
     if (this.gameOver.over) return;
     if (this.chatGroup.has(player)) this.receiveChat(player, text);
     const to = [...this.chatGroup].filter((p) => p !== player && !game.dropped(p));

@@ -14,7 +14,7 @@ import { add32, div32, f32, i16, mul32, sqrt32, sub32, toInt } from './num';
 import { framePassed, newSprite } from './sprites';
 import { atan2, cos, sin } from './trig';
 import { AI_ACTION_ATTACK, AI_ORDER_STAND_GROUND, GROUP_BUILDING, GROUP_WALL, notifyObject, NOTIFY_ACTION_COMPLETED, NOTIFY_ACTION_FAILED, NOTIFY_ATTACKED, NOTIFY_TARGET_INVALID } from './unit-ai';
-import { spriteInfo, type SpriteInfo, type UnitType } from './units';
+import { HUNTER, LUMBERJACK, spriteInfo, type SpriteInfo, type UnitType } from './units';
 import { TILE_BLACK, TILE_FOGGED } from './visibility';
 
 /** `RGE_Action_Attack` states (combat.md §3.2). */
@@ -534,6 +534,12 @@ function throwMissile(ctx: GameContext, e: Entity, targetId: number, x: number, 
  * hit roll, then damage on a hit.
  */
 export function doAttack(ctx: GameContext, attacker: Entity, target: Entity, x: number, y: number): void {
+  if (ctx.quickBuild && (attacker.type === HUNTER || attacker.type === LUMBERJACK)) {
+    // `quick_build` (chat.md §7.2): the target dies outright (`die_die_die`); the notify 0x200 has no handler.
+    ctx.wake(target);
+    target.hp = 0;
+    return;
+  }
   const t = typeOf(ctx, attacker);
   const c = t.combat!;
   if (c.blastWidth > 0) {

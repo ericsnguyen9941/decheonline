@@ -36,6 +36,7 @@ import {
 } from './diplomacy';
 import { EntityStore, ObjectState, type Entity } from './entities';
 import { deleteActions, orderWork, workMoveTo } from './gather';
+import { cheat, newCheatState, type CheatState } from './cheats';
 import { addPopulationEntry, copyGameLog, historySecond, historyTech, newGameLog, notify, NOTIFY_DIPLOMACY_CHANGED, NOTIFY_PLAYER_DEFEATED, NOTIFY_PLAYER_RESIGNED, NOTIFY_TRIBUTE_PAID, type GameLog } from './game-log';
 import { Hasher } from './hash';
 import { defaultWonderTask, startWonder, WONDER } from './wonder';
@@ -309,9 +310,10 @@ export interface Snapshot {
   victory: VictoryState;
   diplomacy: DiplomacyState;
   log: GameLog;
+  cheats: CheatState;
 }
 
-const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19, formation: 20 };
+const COMMAND_TYPE_IDS: Record<Command['type'], number> = { noop: 0, test: 1, move: 2, work: 3, build: 4, queue: 5, cancel: 6, attack: 7, research: 8, stop: 9, resign: 10, repair: 11, 'stand-ground': 12, relation: 13, 'allied-victory': 14, tribute: 15, 'build-wall': 16, 'attack-ground': 17, unload: 18, 'trade-attribute': 19, formation: 20, cheat: 21, 'quick-build': 22 };
 
 /** `command_flag += 1` (src/act_obj.cpp:107, :135, :143): a player's command reached the unit; a byte. */
 function countCommand(e: Entity): void {
@@ -384,6 +386,8 @@ export class World {
   diplomacy: DiplomacyState;
   /** The notifications raised so far and each player's population history (victory.md §16). The client's read API. */
   log: GameLog;
+  /** Enable Cheating and the flags the cheat codes set (chat.md §7); `mapVisible`/`mapFog` are the client's to draw. */
+  cheats: CheatState;
   /** `save_random_map_seed`: the map seed a random map game drew, -1 otherwise. Not state: nothing reads it. */
   randomMapSeed = -1;
   /** Per player, the hash of its masters while no effect has changed them since (they are large to hash). */
@@ -411,6 +415,7 @@ export class World {
     this.visibility = new Visibility(this.map.width, this.map.height, this.players);
     this.diplomacy = newDiplomacy(this.players);
     this.log = newGameLog(this.players);
+    this.cheats = newCheatState(options.cheating ?? false);
     // Player creation copies the civ's masters, draws its `fog_update` and runs its tech tree's first
     // `check_for_new_tech` (techs.md §3.7): the zero-time start techs complete, Gaia's too. The draw comes before the
     // setup seed below: `randomSeed` stands for the stream after player creation (visibility.md §6).
@@ -698,6 +703,7 @@ export class World {
       depleted: this.depleted,
       victory: this.victory,
       civs: this.civs,
+      quickBuild: this.cheats.quickBuild,
       create: (owner, type, x, y, z) => this.createObject(owner, type, x, y, z),
       wake: (e) => this.wake(e),
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
@@ -937,6 +943,12 @@ export class World {
         return this.doCommandTradeAttribute(player, command);
       case 'formation':
         return this.doCommandFormation(player, command);
+      case 'cheat':
+        return cheat(this.gameContext(), this.cheats, player, command.code);
+      case 'quick-build':
+        // `do_command_game` case 4: not gated (chat.md §7.2).
+        this.cheats.quickBuild = command.on;
+        return;
       case 'relation':
         return this.doCommandRelation(player, command);
       case 'allied-victory':
@@ -1026,7 +1038,7 @@ export class World {
   }
 
   /**
-   * `RGE_Command::do_command_formation` (src/Command.cpp:492-578, commands.md §12): with two units or more listed, the
+   * `RGE_Command::do_command_formation` (src/Command.cpp:492-578, commands.md §6): with two units or more listed, the
    * one nearest the map origin stays and the others, in list order, walk to points stepped off from it. Every unit
    * joins the others' pathing group and waits to move. Listed units missing, not the sender's or not mobile are skipped
    * (port: the original lines up any object listed).
@@ -1437,6 +1449,7 @@ export class World {
     hashValue(h, this.victory);
     hashValue(h, this.diplomacy);
     hashValue(h, this.log);
+    hashValue(h, this.cheats);
     this.map.hashInto(h);
     h.u32(this.pathing.iterations);
     this.pathing.hashInto(h);
@@ -1456,7 +1469,7 @@ export class World {
         for (const id of q.command.units) h.u32(id);
         h.u32(q.command.formation);
       }
-      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute' || q.command.type === 'trade-attribute') {
+      if (q.command.type === 'build' || q.command.type === 'build-wall' || q.command.type === 'queue' || q.command.type === 'cancel' || q.command.type === 'attack' || q.command.type === 'research' || q.command.type === 'stop' || q.command.type === 'repair' || q.command.type === 'stand-ground' || q.command.type === 'relation' || q.command.type === 'allied-victory' || q.command.type === 'tribute' || q.command.type === 'trade-attribute' || q.command.type === 'cheat' || q.command.type === 'quick-build') {
         hashValue(h, q.command);
       }
     }
@@ -1496,6 +1509,7 @@ export class World {
       victory: copyVictory(this.victory),
       diplomacy: copyDiplomacy(this.diplomacy),
       log: copyGameLog(this.log),
+      cheats: { ...this.cheats },
     };
   }
 
@@ -1534,6 +1548,7 @@ export class World {
     w.victory = copyVictory(s.victory);
     w.diplomacy = copyDiplomacy(s.diplomacy);
     w.log = copyGameLog(s.log);
+    w.cheats = { ...s.cheats };
     return w;
   }
 }

@@ -171,6 +171,22 @@ export interface TradeAttributeCommand {
  * Formation (`RGE_Command::do_command_formation`, command 6, src/Command.cpp:492, commands.md §6): the listed units of
  * the sender line up on the one nearest the map origin in formation `formation` (0-5, Shift+F2..F7).
  */
+/**
+ * A cheat code typed in chat (`TRIBE_GAME_COMMAND_ID_CHEAT`, game command 6, `TRIBE_World::cheat`; chat.md §7): runs
+ * only when the game allows cheats.
+ */
+export interface CheatCommand {
+  type: 'cheat';
+  /** The code, an unsigned char. */
+  code: number;
+}
+
+/** STEROIDS (`command_quick_build`, game command 4; chat.md §7.2): sets the game-wide quick build flag. */
+export interface QuickBuildCommand {
+  type: 'quick-build';
+  on: boolean;
+}
+
 export interface FormationCommand {
   type: 'formation';
   units: number[];
@@ -231,6 +247,8 @@ export type Command =
   | UnloadCommand
   | TradeAttributeCommand
   | FormationCommand
+  | CheatCommand
+  | QuickBuildCommand
   | RelationCommand
   | AlliedVictoryCommand
   | TributeCommand;
@@ -361,6 +379,15 @@ export function parseCommand(v: unknown): Command | null {
       if (!Array.isArray(units) || units.length === 0 || units.length > MAX_ORDER_UNITS || !units.every(isId)) return null;
       return { type: 'formation', units: [...(units as number[])], formation: formation as number };
     }
+    case 'cheat': {
+      // `command_cheat` sends the code as an unsigned char.
+      const { code } = o;
+      if (!Number.isInteger(code) || (code as number) < 0 || (code as number) > 255) return null;
+      return { type: 'cheat', code: code as number };
+    }
+    case 'quick-build':
+      if (typeof o.on !== 'boolean') return null;
+      return { type: 'quick-build', on: o.on };
     case 'relation': {
       const { player, relation } = o;
       // The Diplomacy dialog sends only ally, neutral or enemy (src/dlg_dip.cpp:443-450).

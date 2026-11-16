@@ -276,8 +276,8 @@ open, from the decomp:
 - Martyrdom triggers on the delete command (`cancel_object` →
   `die_die_die`, `src/t_c_obj.cpp:198-210`). A priest killed in combat
   does not pass there (damage only lowers hp); the other callers are
-  cheats (`src/tworld.cpp:1201-1255`), scenario objects and quick-build,
-  none in a 1.0a multiplayer game.
+  cheats (`src/tworld.cpp:1201-1255`; in a multiplayer game only HARI KARI,
+  with Enable Cheating, chat.md §7.2), scenario objects and quick-build.
 - A converted object's private master (`Entity.ownMaster`) is skipped by
   the owner's later tech effects and freed by a transform; it is in the
   snapshot and the hash.

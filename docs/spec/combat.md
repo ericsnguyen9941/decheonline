@@ -371,7 +371,8 @@ position (`:302-304`; the minimap attack flare), then call the base.
 ### 4.3 `do_attack` (`src/t_c_obj.cpp:308`, M → `src/com_obj.cpp:268`, M)
 
 1. Cheat only (`quick_build` + hunter/lumberjack): kill outright
-   (`src/t_c_obj.cpp:313-318`). Not in multiplayer play.
+   (`src/t_c_obj.cpp:313-318`). In multiplayer only with Enable Cheating and
+   STEROIDS (chat.md §7.2).
 2. **Melee splash**: if `area_effect_range > 0` **and** `weapon_range < 0.99`:
    `area_attack(x, y, z, attacker, ignore = target)`, then a separate roll and
    direct hit on the target (`src/t_c_obj.cpp:323-336`).

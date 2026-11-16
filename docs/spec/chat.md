@@ -92,7 +92,7 @@ info file's background colour and its focus colours (Panel_ez.cpp:1139-1179).
 - `SendGroupChatMsg`: the recipients are the chat group's players who are still
   human (`IsPlayerHuman`). In the game over mode (`prog_mode ==
   ProgModeGameOver`) nothing is sent. Cheat codes are tried first
-  (`processCheatCode`, not ported).
+  (`processCheatCode`, §7): a line that is one is not sent.
 - `TXChat`: when this player is a recipient, its own copy is added at once
   (`AddChatMsg(..., Local = 1)`); the text is cut to 255 characters and goes
   out as message `'C'` with the recipients' map, outside the command turns.
@@ -137,8 +137,112 @@ the settings and the ready buttons, with the same lengths and behaviour.
 
 ## 6. Not ported
 
-- Cheat codes typed in chat (`processCheatCode`, before sending) and taunts
-  (`TTaunt::PlayTauntStr` on a line that is a number).
+- Taunts (`TTaunt::PlayTauntStr` on a line that is a number).
+- The single-player cheats (§7.3), GAIA, and the cheats' feedback on screen.
 - Team games, which would make Allies differ. (The Diplomacy dialog changes this
   player's stance, which Allies and Enemies read: diplomacy.md §7.)
 - More than 2 players' rows (the code handles up to 8).
+
+## 7. Cheat codes
+
+Read from the 1.0a exe (`Empiresx.exe`): `TRIBE_Game::processCheatCode`
+(0x5061e0) and `TRIBE_World::cheat` (0x50ecb0, jump tables 0x50f3ec, 0x50f368).
+The beta decomp (`tribegam.cpp:3150-3290`, `tworld.cpp`) differs: 1.0a sends
+the resource cheats as cheat codes 20-23 instead of `command_add_attribute`,
+and has POW where the beta has MINIWINSETT.
+
+### 7.1 Typing one
+
+Both chat entries (§2.1, §2.2) call `processCheatCode(player, text)` before
+sending; when it returns nonzero the line is not sent as chat. It returns 0 at
+once unless `allowCheatCodes()` (the game option byte at +0x982, the setup
+screen's Enable Cheating, [lobby.md](lobby.md) §2.2; off by default in a
+multiplayer game). The text is uppercased; six codes match as substrings
+(`strstr`), the rest must be the whole line. A match sends a command to every
+peer (`command_cheat(player, code)`: `TRIBE_GAME_COMMAND_ID_CHEAT` 6, the code
+as an unsigned char) and nothing else, except where the table says.
+
+| text | match | code / command |
+| --- | --- | --- |
+| PHOTON MAN | whole | 0 |
+| E=MC2 TROOPER | whole | 1 |
+| JACK BE NIMBLE | whole | 2 |
+| BIG BERTHA | whole | 3 |
+| FLYING DUTCHMAN | whole | 4 |
+| UPSIDFLINTMOBILE | whole | 7 |
+| HOYOHOYO | whole | 8 |
+| DARK RAIN | whole | 10 |
+| BLACK RIDER | whole | 11 |
+| MEDUSA | whole | 12 |
+| ICBM | whole | 13 |
+| STORMBILLY | substring | 14 |
+| CONVERT THIS! | substring | 15 |
+| BIG MOMMA | substring | 16 |
+| POW | substring | 17 |
+| GRANTLINKSPENCE | substring | 18 |
+| KING ARTHUR | substring | 19 |
+| PEPPERONI PIZZA | whole | 20 |
+| COINAGE | whole | 21 |
+| QUARRY | whole | 22 |
+| WOODSTOCK | whole | 23 |
+| HARI KARI | whole | 101 |
+| RESIGN | whole | 103 |
+| BIGDADDY | whole | 220 |
+| REVEAL MAP | whole | 230 |
+| NO FOG | whole | 231 |
+| STEROIDS | whole | `command_quick_build(!quick_build)`: game command 4 |
+
+The substring tests run first, in the table's order, so "POWER" is POW.
+
+### 7.2 What a code does (`TRIBE_World::cheat`)
+
+Every peer runs it when the command executes; it does nothing unless
+`allowCheatCodes()`.
+
+- 0, 1, 14, 15, 16, 17, 220, for a player other than Gaia: the player's first
+  Town Center (master 109) that is finished gets `command_make` of unit 274
+  (Photon Man), 248 (Nuke Trooper), 386 (Stormbilly), 394 (Saint Francis), 397
+  (Big Momma), 398 (Pow) or 372 (Bigdaddy). `do_command_make`
+  (`tcommand.cpp:104-125`) does nothing while the building trains or
+  researches; else its only action becomes a make action that is not pre-paid:
+  the cost is paid at once (`first_in_stack`, `tact_mob.cpp:55-90`; these units
+  cost nothing in the dat), and the production queue empties without a refund
+  while it runs (`t_b_obj.cpp:974-1029`, economy.md §5.1). It ends as a train
+  (§5.2): the unit is placed on its train time (0 for all seven), with no
+  population check.
+- 2-13: `do_effect` of effect 125 + code for the player (2 JACK BE NIMBLE 127,
+  3 BIG BERTHA 128, 4 FLYING DUTCHMAN 129, 7 UPSIDFLINTMOBILE 132, 8 HOYOHOYO
+  133, 10 DARK RAIN 135, 11 BLACK RIDER 136, 12 MEDUSA 137, 13 ICBM 138); code
+  5 (130) goes to Gaia. 5, 6 and 9 have no text.
+- 18, 19: effects 216 (GRANTLINKSPENCE) and 217 (KING ARTHUR) on Gaia.
+- 20-23: 1000 added to food (20), gold (21), stone (22), wood (23).
+- 100 (DIEDIEDIE): every object of every other player not on the cheater's
+  side dies. 101: every object of the player dies (`die_die_die`). 102: the
+  player wins (`win_game_now`). 103: `loss_if_game_on`, which is not a
+  resignation (no notice, the player is not marked resigned).
+- 200-209 (KILLn): player n's objects die.
+- 230: `set_map_visible(1)`; 231: `set_map_fog(0)`. Both are drawing flags of
+  the shared map (`diam_map.cpp:468-734`): the whole map drawn as explored, no
+  fog. They change no unit's sight.
+
+`quick_build` (game command 4 sets it to its value; `do_command_game`, not gated)
+is one game-wide flag. While set: a train's work jumps to 1000
+(`tact_mob.cpp:107`), a build's and a research's work per step is 1000
+(`tact_bld.cpp:216`, `tact_tek.cpp:85`), a gatherer or hunter takes the whole
+amount the target holds (`act_gath.cpp:347`, `tact_hnt.cpp:384`), and a Hunter
+or Lumberjack's attack kills its target outright (`t_c_obj.cpp:313`).
+
+### 7.3 Single-player only
+
+HOME RUN (102), DIEDIEDIE (100) and KILL1-KILL7, KILL9 (201-207, 209) are
+tried only in a single-player game (the check at 0x41bd00); GAIA switches the
+local view to Gaia (`set_player(0)`, no command). SELECTOBJ, RUNPLAY and ZEUS
+are debug and computer-player codes.
+
+### 7.4 Our port
+
+Commands `cheat` (`{ code }`) and `quick-build` (`{ on }`), type ids 21 and 22;
+`World` option `cheating` from the lobby; `World.cheat` codes 0-23, 101, 103,
+220, 230, 231, which the chat can send (100, 102 and 200-209 are ignored);
+`World.mapVisible`, `mapFog`, `quickBuild`. The client tries the line
+(`processCheatCode` in `apps/client`) before sending chat in both entries.

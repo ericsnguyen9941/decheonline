@@ -26,6 +26,8 @@ export interface TrainAction {
   workDone: number;
   /** 6 working, 1 done. */
   state: number;
+  /** Started by the make command (a cheat, chat.md §7.2), not the queue: the queue empties while it runs. */
+  make?: boolean;
 }
 
 export const MASTER_TYPE_BUILDING = 80;
@@ -471,9 +473,15 @@ export function emptyQueue(e: Entity): void {
  */
 export function updateQueue(ctx: GameContext, e: Entity): void {
   const queue = e.queue;
-  if (!queue || queue.length === 0) return;
+  if (!queue || (queue.length === 0 && !e.train?.make)) return;
   if (e.research) {
     emptyQueue(e);
+    return;
+  }
+  if (e.train?.make) {
+    // The building's main action is a make: `remove_from_production_queue(id, -1)` drops every record unrefunded.
+    queue.length = 0;
+    if (updateTrain(ctx, e, e.train) !== ActionResult.Continue) e.train = null;
     return;
   }
   if (!e.train) {
@@ -496,7 +504,8 @@ export function updateQueue(ctx: GameContext, e: Entity): void {
  */
 function updateTrain(ctx: GameContext, e: Entity, a: TrainAction): ActionResult {
   if (a.state === TRAIN_DONE) return ActionResult.Remove;
-  a.workDone = add32(mul32(typeOf(ctx, e).action!.workRate, ctx.deltaSeconds), a.workDone);
+  // STEROIDS (`quick_build`, chat.md §7.2) sets the work to 1000.
+  a.workDone = ctx.quickBuild ? f32(1000) : add32(mul32(typeOf(ctx, e).action!.workRate, ctx.deltaSeconds), a.workDone);
   if (f32(master(ctx, e.owner, a.unit).creatable!.trainTime) <= a.workDone) {
     a.state = TRAIN_DONE;
     if (!placeUnit(ctx, e, a.unit)) reimburseObjCost(ctx, e.owner, a.unit);

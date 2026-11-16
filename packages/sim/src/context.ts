@@ -28,4 +28,6 @@ export interface GameContext extends MoveContext, TechContext, DiplomacyContext 
   civs: readonly number[];
   /** Game statuses and countdowns (victory.md): the Wonder's action counts and wins (`wonder.ts`). */
   victory: VictoryState;
+  /** `quick_build` (STEROIDS, chat.md §7.2): trains, builds and research finish at once, gathering takes it all. */
+  quickBuild?: boolean;
 }

@@ -758,7 +758,8 @@ export function updateWork(ctx: GameContext, e: Entity): ActionResult {
 /** State 7: one step's take (economy.md §3.3). */
 function transfer(ctx: GameContext, e: Entity, a: WorkAction, task: Task, target: Entity): void {
   const t = typeOf(ctx, e);
-  let give = mul32(mul32(task.workValue1, t.action!.workRate), ctx.deltaSeconds);
+  // `quick_build` (chat.md §7.2): the whole amount held.
+  let give = ctx.quickBuild ? target.heldAmount : mul32(mul32(task.workValue1, t.action!.workRate), ctx.deltaSeconds);
   if (give > target.heldAmount) give = target.heldAmount;
   const modifier = task.resourceMultiplier === -1 ? 1 : ctx.attributes[e.owner]![task.resourceMultiplier]!;
   let adjusted = mul32(modifier, give);
