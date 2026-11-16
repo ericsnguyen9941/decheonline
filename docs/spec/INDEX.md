@@ -38,7 +38,7 @@ Spec: [core.md](core.md).
 
 Turn length, latency and speed retuning, and the relay protocol for a broken socket, a dropped player and Quit Game (§9): [turn-timing.md](turn-timing.md).
 
-Unit commands stop, stand ground and repair, and the ones not ported (attack ground, heal, convert, unload): [commands.md](commands.md).
+Unit commands stop, stand ground, repair, attack ground, heal, convert, unload and trade attribute: [commands.md](commands.md).
 
 | file | M/D/L/N | entry points | spec |
 | --- | --- | --- | --- |

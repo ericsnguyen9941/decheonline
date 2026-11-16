@@ -22,6 +22,7 @@ export const HOTKEY_STRING = {
   convert: 0x1049,
   move: 0x104a,
   repair: 0x104d,
+  unload: 0x104e,
 } as const;
 
 /** The key a string names: its first character in upper case (`*get_string(id)`); null for an id with no text. */
@@ -53,6 +54,7 @@ export function buttonLetter(provider: AssetProvider, b: CommandButton, world: W
     case 'attack-ground':
     case 'heal':
     case 'convert':
+    case 'unload':
       return hotkeyLetter(provider, HOTKEY_STRING[b.kind]);
     case 'place':
     case 'train':

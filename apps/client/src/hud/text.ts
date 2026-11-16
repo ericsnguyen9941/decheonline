@@ -26,6 +26,7 @@ const STRING_COMMAND = {
   'attack-ground': [4123, 'Attack Ground'],
   heal: [4124, 'Heal'],
   convert: [4125, 'Convert'],
+  unload: [4107, 'Unload'],
   'cancel-construction': [4120, 'Cancel construction'],
   more: [4112, 'More'],
   cancel: [4111, 'Cancel'],
@@ -33,6 +34,8 @@ const STRING_COMMAND = {
   group: [4108, 'Group'],
   ungroup: [4109, 'Ungroup'],
 } as const;
+/** The trade buttons' texts by attribute (0 food, 1 wood, 2 stone). */
+const STRING_TRADE: Record<number, readonly [number, string]> = { 0: [4128, 'Trade Food for Gold'], 1: [4129, 'Trade Wood for Gold'], 2: [4130, 'Trade Stone for Gold'] };
 /** `PLAYER_ATTRIBUTE_GOLD`, `_GOLD_REPLACEMENT`: with the latter at 1 or more gold covers a tech's other costs. */
 const ATTR_GOLD = 3;
 const ATTR_GOLD_REPLACEMENT = 29;
@@ -222,6 +225,11 @@ export function commandMessage(provider: AssetProvider, b: CommandButton, world:
       const id = provider.techInfo(b.tech)?.creationId ?? 0;
       const command = (id >= 1 && provider.string(id)) || `Research ${techName(provider, b.tech)}`;
       return costMessage(provider, command, techCost(world, player, b.tech));
+    }
+    case 'trade': {
+      // `STRING_ID_COMMAND_TRADE_FOOD_FOR_GOLD` .. `_STONE_FOR_GOLD`.
+      const [id, fallback] = STRING_TRADE[b.attribute] ?? STRING_TRADE[0]!;
+      return provider.string(id) ?? fallback;
     }
     default: {
       const [id, fallback] = STRING_COMMAND[b.kind];

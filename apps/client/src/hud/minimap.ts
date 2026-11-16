@@ -194,6 +194,8 @@ export class Minimap {
    * set; `map_draw_level` 1 a 3x3 square, 2 a plus, 3 a plus in the master's own `map_color`.
    */
   private drawVisible(e: Entity, colour1: number, colour2: number, flashing = false): void {
+    // A passenger is off the map, inside its transport.
+    if (e.inside !== undefined && e.inside !== null) return;
     const { world } = this.o;
     const col = Math.floor(e.x);
     const row = Math.floor(e.y);

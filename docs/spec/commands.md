@@ -228,9 +228,9 @@ sender's, and objects that cannot move (the original's `move_to` would give
 a building a failing walk in place of its action), are skipped as missing.
 The client's Shift+F2..F7 keys are not ported (C6).
 
-## 7. Not ported
+## 7. Boat commands
 
-| command | original | why |
+| command | original | status |
 | --- | --- | --- |
-| Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | ported in the sim (command `unload`, naval.md §7.6); the client's button is not (C5) |
-| Trade attribute | `TRIBE_Player::command_trade_attribute` (`src/tplayer.cpp:942`) | ported in the sim (command `trade-attribute`, support-actions.md §7.6); the client's trade buttons are not (C5) |
+| Unload | `TRIBE_Player::command_unload` (`src/tplayer.cpp:1024`) | ported (command `unload`, naval.md §7.6; the client's Unload button and click: hud.md "Boats: transports and trade") |
+| Trade attribute | `TRIBE_Player::command_trade_attribute` (`src/tplayer.cpp:942`) | ported (command `trade-attribute`, support-actions.md §7.6; the client's trade buttons: hud.md "Boats: transports and trade") |

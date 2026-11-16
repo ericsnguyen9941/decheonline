@@ -238,3 +238,34 @@ test('an order mode (repair, attack ground, heal, convert, move) leaves only Can
   expect(commandButtons(context(1, 'command'))).toEqual([{ kind: 'cancel', slot: 11 }]);
   expect(commandButtons(context(2, 'command'))).toEqual([{ kind: 'cancel', slot: 11 }]);
 });
+
+// Transport Boat and Trade Boat (docs/spec/naval.md §7.1, support-actions.md §7).
+const TRANSPORT_BOAT = 17;
+const TRADE_BOAT = 15;
+
+test('a transport gets Unload in slot 0 (Stop then in 1) only while it carries someone', () => {
+  const { world, context } = unitsGame([TRANSPORT_BOAT]);
+  expect(commandButtons(context(1))).toEqual([{ kind: 'unselect', slot: 11 }]);
+  world.entities.get(1)!.cargo = [99];
+  expect(commandButtons(context(1))).toEqual([
+    { kind: 'unload', slot: 0 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+  world.addBatch(world.turn, 1, [{ type: 'move', units: [1], x: 20, y: 20 }]);
+  for (let i = 0; i < 40; i++) world.runStep();
+  world.entities.get(1)!.cargo = [99];
+  expect(bySlot(commandButtons(context(1))).slice(0, 2)).toEqual([
+    { kind: 'unload', slot: 0 },
+    { kind: 'stop', slot: 1 },
+  ]);
+});
+
+test('a trade boat gets the food, wood and stone trade buttons in slots 1-3', () => {
+  const { context } = unitsGame([TRADE_BOAT]);
+  expect(commandButtons(context(1))).toEqual([
+    { kind: 'trade', slot: 1, attribute: 0 },
+    { kind: 'trade', slot: 2, attribute: 1 },
+    { kind: 'trade', slot: 3, attribute: 2 },
+    { kind: 'unselect', slot: 11 },
+  ]);
+});

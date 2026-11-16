@@ -5,6 +5,11 @@ import { ObjectState, type UnitType } from '@aoe/sim';
  * groups whose selection can attack. Towers (69, 79, 199, 278) add the bit by master id.
  */
 const ATTACKER_GROUPS = new Set([0, 4, 6, 12, 13, 22, 23, 24, 25, 26, 28, 35, 36, 39]);
+/**
+ * The same table's bit 2, which the right-click tables' action 2 needs (an own or ally transport: the ring): the land
+ * units' groups, the priest's (0x16) among them; boats have none.
+ */
+const BOARDER_GROUPS = new Set([0, 4, 6, 12, 13, 18, 23, 24, 25, 26, 28, 35, 36, 39]);
 const TOWERS = new Set([69, 79, 199, 278]);
 
 /**
@@ -25,9 +30,9 @@ const HEAL_GROUPS = new Set([0, 4, 6, 12, 13, 17, 18, 23, 24, 25, 26, 28, 35, 36
 const GAIA_GROUPS = new Set([0, 1, 2, 3, 4, 6, 12, 13, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 35, 36, 39]);
 /** Enemy and neutral action 8: the sword for a selection that can attack, else convert (action 7, needs bit 0x80). */
 const CONVERT_GROUPS = new Set([0, 2, 3, 4, 6, 12, 13, 17, 18, 20, 21, 22, 23, 24, 25, 26, 28, 35, 36, 39]);
-/** `OBJECT_GROUP_ARTIFACT` (action 3 for an ally, a neutral and an enemy) and `_TRADE_BOAT` (own and ally action 2). */
+/** `OBJECT_GROUP_ARTIFACT` (action 3 for an ally, a neutral and an enemy) and `_TRANSPORT_BOAT` (own and ally action 2). */
 const GROUP_ARTIFACT = 1;
-const GROUP_TRADE_BOAT = 20;
+const GROUP_TRANSPORT_BOAT = 20;
 const GROUP_BUILDING = 3;
 const GROUP_PRIEST = 18;
 /** Masters no priest converts, so no ring over them: Town_Center1, the Wonder. */
@@ -42,6 +47,22 @@ export function canAttack(t: UnitType): boolean {
 /** Does the right-click table give an enemy object of type `t` the attack action? */
 export function isAttackable(t: UnitType): boolean {
   return ATTACKABLE_GROUPS.has(t.group);
+}
+
+/**
+ * Can a selection holding an own object of type `t` board (`sel_object_properties & 2`)? A trade boat's selection has no
+ * bit at all, so over another player's Dock it keeps the normal cursor (the left-click table's facet 0).
+ */
+export function canBoard(t: UnitType): boolean {
+  return BOARDER_GROUPS.has(t.group);
+}
+
+/**
+ * `get_mouse_pointer_action_vars` action 2 (src/tplayer.cpp): the ring (facet 5) over an own or ally transport for a
+ * selection that can board (`canBoard`).
+ */
+export function boardCursor(boards: boolean, target: CursorTarget, stance: Stance): boolean {
+  return boards && target.group === GROUP_TRANSPORT_BOAT && (stance === 'self' || stance === 'ally');
 }
 
 /** What `analyize_selected_objects` finds in a selection with an own priest (which gives bits 2, 4 and 0x10). */
@@ -76,13 +97,13 @@ export type Stance = 'self' | 'gaia' | 'ally' | 'neutral' | 'enemy';
  * `TRIBE_Player::get_mouse_pointer_action_vars` (src/tplayer.cpp) for a selection with an own priest: true where it
  * gives facet 5, the ring. Own and ally units short of hit points (heal; not the priest itself when it is the only one),
  * an enemy's or a neutral's convertible object while a priest has full faith and the selection cannot attack it,
- * Gaia's objects, artifacts and trade boats (actions 2 and 3, which a priest's bits pass).
+ * Gaia's objects, artifacts and transports (actions 2 and 3, which a priest's bits pass).
  */
 export function priestCursor(sel: PriestSelection, target: CursorTarget, stance: Stance): boolean {
   const g = target.group;
   if (stance === 'gaia') return GAIA_GROUPS.has(g);
   if (stance === 'self' || stance === 'ally') {
-    if (g === GROUP_TRADE_BOAT || (stance === 'ally' && g === GROUP_ARTIFACT)) return true;
+    if (g === GROUP_TRANSPORT_BOAT || (stance === 'ally' && g === GROUP_ARTIFACT)) return true;
     if (!HEAL_GROUPS.has(g) || sel.single === target.id) return false;
     const hp = Math.trunc(target.hp);
     return hp > 0 && hp < target.maxHp;

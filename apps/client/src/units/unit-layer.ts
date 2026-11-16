@@ -1,7 +1,9 @@
 import { Assets, Container, Graphics, Rectangle, Sprite, Texture, type Application, type Ticker } from 'pixi.js';
 import {
   ACTION_CONVERT,
+  ACTION_ENTER,
   ACTION_HEAL,
+  ACTION_TRADE,
   buildingFacet,
   checkPlacement,
   master,
@@ -14,6 +16,7 @@ import {
   typeOf,
   UNIT_TYPES,
   unitDiplomacy,
+  UNIT_LEVEL_TRANSPORT,
   unitType,
   type Command,
   type Entity,
@@ -35,7 +38,7 @@ import { Doppelgangers, fogDraw, TERRAIN_LAYER, type Doppelganger } from './fog-
 import { FIRST_GROUP, GroupIds } from './group-ids';
 import { groupKey } from './group-keys';
 import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
-import { ATTACK_CURSOR_FRAME, canAttack, isAttackable, priestCursor, type PriestSelection } from './mouse-actions';
+import { ATTACK_CURSOR_FRAME, boardCursor, canAttack, canBoard, isAttackable, priestCursor, type PriestSelection, type Stance } from './mouse-actions';
 import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
 import { alignBuilding, wallOutline } from './placement';
 
@@ -52,14 +55,14 @@ const FLASH_MS = 1500;
 const FLASH_BIT = 0x100;
 /**
  * An order mode waiting for its click on the map (`game_mode`): the Move key's (`RGE_GAME_MODE_COMMAND_MOVE`), and the
- * Repair, Attack Ground, Heal and Convert buttons' (`TRIBE_GAME_MODE_COMMAND_*`).
+ * Repair, Attack Ground, Heal, Convert and Unload buttons' (`TRIBE_GAME_MODE_COMMAND_*`).
  */
-export type ClickMode = 'move' | 'repair' | 'attack-ground' | 'heal' | 'convert';
+export type ClickMode = 'move' | 'repair' | 'attack-ground' | 'heal' | 'convert' | 'unload';
 /**
  * `STRING_ID_MESSAGE_*`, shown when a mode is armed: "Click an area to move there.", "... to repair.", "Click the unit to
- * heal.", "... to convert.", "Click an area to attack ground." (scr_game.cpp:3840-4370).
+ * heal.", "... to convert.", "Click an area to attack ground.", the unload's (scr_game.cpp:3840-4370).
  */
-const MODE_MESSAGE: Record<ClickMode, number> = { move: 0x0be0, repair: 0x0bec, heal: 0x0be3, convert: 0x0be4, 'attack-ground': 0x0be5 };
+const MODE_MESSAGE: Record<ClickMode, number> = { move: 0x0be0, repair: 0x0bec, heal: 0x0be3, convert: 0x0be4, 'attack-ground': 0x0be5, unload: 0x0bed };
 /** `unit_level` of the units `command_attack_ground` sends (`get_selected_objects_to_command(.., 4, -1, -1, 4)`). */
 const LEVEL_SOLDIER = 4;
 /** `OBJECT_GROUP_PRIEST`: a selected own priest gives `sel_object_properties` 0x16, and 0x80 with full faith. */
@@ -594,8 +597,10 @@ export class UnitLayer {
       const tile = this.tileState(e.x, e.y);
       const layer = graphicInfo?.layer ?? DEFAULT_LAYER;
       const doppelganger = type.fogFlag === 4 && this.doppelgangers.onTile(Math.floor(e.x), Math.floor(e.y));
-      const fog = fogDraw(type.fogFlag, e.state, tile, clipped ? Math.max(layer, TERRAIN_LAYER + 1) : layer, doppelganger);
-      const underFog = clipped ? fogDraw(type.fogFlag, e.state, tile, 0, doppelganger) : 'hidden';
+      // A passenger has left the map for its transport (`enter_obj` takes it off its tile): nothing draws or picks it.
+      const aboard = e.inside !== undefined && e.inside !== null;
+      const fog = aboard ? 'hidden' : fogDraw(type.fogFlag, e.state, tile, clipped ? Math.max(layer, TERRAIN_LAYER + 1) : layer, doppelganger);
+      const underFog = clipped && !aboard ? fogDraw(type.fogFlag, e.state, tile, 0, doppelganger) : 'hidden';
       if (fog !== 'hidden') this.shown++;
       const art = fog === 'hidden' ? null : this.loadArt(graphic, e.owner, split ? 'air' : clipped ? 'above' : 'all');
       const shadow = split && art ? this.loadArt(graphic, e.owner, 'ground') : null;
@@ -1061,7 +1066,7 @@ export class UnitLayer {
       if (!this.press) {
         const enemy = this.attackTarget(p.x, p.y);
         const work = enemy ? undefined : this.workTarget(p.x, p.y);
-        const ring = enemy || work ? false : this.priestTarget(p.x, p.y) !== undefined;
+        const ring = enemy || work ? false : (this.priestTarget(p.x, p.y) ?? this.boardTarget(p.x, p.y)) !== undefined;
         canvas.style.cursor = enemy ? this.attackCursor : work ? 'var(--cursor-work, pointer)' : ring ? 'var(--cursor-target, crosshair)' : '';
         this.rollover(enemy);
         return;
@@ -1151,7 +1156,7 @@ export class UnitLayer {
 
   /**
    * A grid button's order mode (`command_repair`, `command_attack_ground`, `command_heal`, `command_convert`,
-   * scr_game.cpp:3840-4370): the next left or right click on the map names its target, and the message line says so.
+   * `command_unload`, scr_game.cpp:3840-4370): the next left or right click on the map names its target, and the message line says so.
    */
   armCommand(mode: ClickMode): void {
     this.cancelPlacement();
@@ -1179,6 +1184,7 @@ export class UnitLayer {
     if (mode === 'move') this.moveTo(x, y);
     else if (mode === 'repair') this.repairAt(x, y);
     else if (mode === 'attack-ground') this.groundAt(x, y);
+    else if (mode === 'unload') this.unloadAt(x, y);
     else this.doAt(x, y, mode === 'heal' ? ACTION_HEAL : ACTION_CONVERT);
   }
 
@@ -1218,6 +1224,24 @@ export class UnitLayer {
     // `reset_display_object_selection(2)`: the flashing targets stop.
     this.flashes.clear();
     this.o.issue({ type: 'attack-ground', units, x: col, y: row });
+  }
+
+  /**
+   * The click of the Unload mode (src/tvw_main.cpp:463): the map point under the pointer goes to `command_make_unload`
+   * (src/tplayer.cpp:1017), which sends `unload` for the selected transports (`unit_level` 7): they sail there and drop
+   * their passengers on that shore (naval.md §7.6). A click off the map, or no transport, plays cantdo.wav.
+   */
+  private unloadAt(x: number, y: number): void {
+    const { camera, ground } = this.o.view;
+    const { col, row } = ground.pointAt(x + camera.x, y + camera.y);
+    const { width, height } = this.o.world.map;
+    const units = col < 0 || row < 0 || col >= width || row >= height ? [] : this.commandObjects(SELECT_BOX, -1, UNIT_LEVEL_TRANSPORT);
+    if (units.length === 0) {
+      this.o.sounds?.cantDo();
+      return;
+    }
+    this.flashes.clear();
+    this.o.issue({ type: 'unload', units, x: col, y: row });
   }
 
   /**
@@ -1459,17 +1483,51 @@ export class UnitLayer {
       priestConversion: attributes[ATTR_PRIEST_CONVERSION] !== 0,
       buildingConversion: attributes[ATTR_BUILDING_CONVERSION] !== 0,
     };
-    // `unitDiplomacy[owner]`: 0 Gaia, 1 self, 2 ally, 3 neutral, 4 enemy.
-    const stances = ['gaia', 'self', 'ally', 'neutral', 'enemy'] as const;
-    const stance = (owner: number) => stances[unitDiplomacy(world, player, owner)] ?? 'enemy';
     return this.topmostAt(
       x,
       y,
       (e) => {
         const t = typeOf(world, e);
-        return priestCursor(sel, { id: e.id, type: t.id, group: t.group, hp: e.hp, maxHp: t.hitPoints, state: e.state }, stance(e.owner));
+        return priestCursor(sel, { id: e.id, type: t.id, group: t.group, hp: e.hp, maxHp: t.hitPoints, state: e.state }, this.stance(e.owner));
       },
       false,
+    );
+  }
+
+  /** The own or ally transport under the pointer that shows the ring for a selection that can board (`boardCursor`). */
+  private boardTarget(x: number, y: number): Entity | undefined {
+    const { world } = this.o;
+    if (!this.selectedOwn().some((id) => canBoard(typeOf(world, world.entities.get(id)!)))) return undefined;
+    return this.topmostAt(
+      x,
+      y,
+      (e) => {
+        const t = typeOf(world, e);
+        return boardCursor(true, { id: e.id, type: t.id, group: t.group, hp: e.hp, maxHp: t.hitPoints, state: e.state }, this.stance(e.owner));
+      },
+      false,
+    );
+  }
+
+  /** `unitDiplomacy[owner]` of this player: 0 Gaia, 1 self, 2 ally, 3 neutral, 4 enemy. */
+  private stance(owner: number): Stance {
+    const stances = ['gaia', 'self', 'ally', 'neutral', 'enemy'] as const;
+    return stances[unitDiplomacy(this.o.world, this.o.player, owner)] ?? 'enemy';
+  }
+
+  /**
+   * The object under the pointer a selected unit's task list boards (an own or ally transport, Enter 3, naval.md §7.2) or
+   * trades with (another player's Dock, Trade 111, support-actions.md §7): a right click's `work` order.
+   */
+  private taskTarget(x: number, y: number): Entity | undefined {
+    const { world } = this.o;
+    const units = this.orderedUnits().flatMap((id) => world.entities.get(id) ?? []);
+    if (units.length === 0) return undefined;
+    return this.topmostAt(x, y, (e) =>
+      units.some((u) => {
+        const action = targetActionType(world, u, e);
+        return action === ACTION_ENTER || action === ACTION_TRADE;
+      }),
     );
   }
 
@@ -1532,8 +1590,9 @@ export class UnitLayer {
     // other flashes); a move ends them (`reset_display_object_selection(2)`).
     this.flashes.clear();
     const enemy = this.attackTarget(x, y);
-    // A priest's heal or convert target is a `work` order on it (support-actions.md §4.7).
-    const target = enemy ?? this.workTarget(x, y) ?? this.priestOrderTarget(x, y);
+    // A priest's heal or convert target is a `work` order on it (support-actions.md §4.7), and so is a transport to board
+    // or a Dock to trade with.
+    const target = enemy ?? this.workTarget(x, y) ?? this.priestOrderTarget(x, y) ?? this.taskTarget(x, y);
     if (target) this.flashes.set(target.id, performance.now());
     if (enemy) return this.o.issue({ type: 'attack', units, target: enemy.id });
     if (target) this.o.issue({ type: 'work', units, target: target.id, x: col, y: row });

@@ -184,8 +184,11 @@ export class GameSounds {
         return;
       }
       case 'stand-ground':
-      case 'attack-ground': {
-        // `command_attack_ground` plays the first unit's command sound (src/tplayer.cpp:968).
+      case 'attack-ground':
+      case 'unload':
+      case 'trade-attribute': {
+        // `command_attack_ground`, `command_make_unload` and `command_trade_attribute` play the first unit's command sound
+        // (src/tplayer.cpp:968, :1023, :947).
         const e = first(c.units);
         if (e) this.unit('command', e, UnitSound.Command);
         return;

@@ -1,7 +1,8 @@
 // What the command button grid holds, from TRIBE_Screen_Game::setup_buttons (src/scr_game.cpp:2409) and
 // TRIBE_Player::interface_item_avail (src/tplayer.cpp:731), for the commands the sim has: the villager's build menu and
 // repair, the buildings' train and research buttons with their queue counts, stop, stand ground, attack ground, the
-// priest's heal and convert, and cancelling a foundation (docs/spec/hud.md).
+// priest's heal and convert, a transport's unload, a trade boat's trade goods, and cancelling a foundation
+// (docs/spec/hud.md).
 // Every master is the player's own (`player->master_objects`), so ages and techs change what the grid offers.
 import {
   ACTION_BUILD,
@@ -17,6 +18,8 @@ import {
   TECHS,
   TOWN_CENTER,
   typeOf,
+  UNIT_LEVEL_TRADE,
+  UNIT_LEVEL_TRANSPORT,
   UNIT_TYPES,
   unitType,
   type Entity,
@@ -26,7 +29,7 @@ import {
 
 /**
  * `game_mode`: normal, the villager's build menu (`TRIBE_GAME_MODE_BUILD_MENU`), placing a building, or an order mode
- * waiting for its click on the map (move, repair, attack ground, heal, convert: `RGE_GAME_MODE_COMMAND_MOVE`,
+ * waiting for its click on the map (move, repair, attack ground, heal, convert, unload: `RGE_GAME_MODE_COMMAND_MOVE`,
  * `TRIBE_GAME_MODE_COMMAND_*`).
  */
 export type CommandMode = 'normal' | 'build-menu' | 'place' | 'command';
@@ -54,6 +57,13 @@ export type CommandButton =
   /** `TRIBE_UI_COMMAND_HEAL`, `_CONVERT`: the next click on the map names the unit the selected priests heal or convert. */
   | { kind: 'heal'; slot: number }
   | { kind: 'convert'; slot: number }
+  /** `TRIBE_UI_COMMAND_UNLOAD`: the next click on the map names the shore the selected transports unload on. */
+  | { kind: 'unload'; slot: number }
+  /**
+   * `TRIBE_UI_COMMAND_TRADE_FOOD_FOR_GOLD`, `_WOOD_`, `_STONE_`: the selected trade boats carry `attribute` (0 food, 1 wood,
+   * 2 stone) to trade for gold.
+   */
+  | { kind: 'trade'; slot: number; attribute: number }
   /** `TRIBE_UI_COMMAND_CANCEL_CONSTRUCTION`. */
   | { kind: 'cancel-construction'; slot: number }
   /** `TRIBE_UI_COMMAND_MORE`: the build menu's other page. */
@@ -79,10 +89,16 @@ export const COMMAND_FRAME = {
   cancel: 10,
   unselect: 10,
   more: 11,
+  unload: 5,
   'attack-ground': 12,
   heal: 13,
   convert: 14,
 } as const;
+
+/** btntech.shp (interface SLP 50729) frames of the trade buttons by attribute: food 87, wood 86, stone 88. */
+export const TRADE_FRAME: Record<number, number> = { 0: 0x57, 1: 0x56, 2: 0x58 };
+/** The trade buttons' slots by attribute: food 1, wood 2, stone 3. */
+const TRADE_SLOT: Record<number, number> = { 0: 1, 1: 2, 2: 3 };
 
 /** The grid's last slot: cancel or unselect (hotkey Esc). */
 export const FINAL_SLOT = 11;
@@ -237,7 +253,21 @@ export function commandButtons(c: CommandContext): CommandButton[] {
   if (level === LEVEL_PRIEST) {
     return [{ kind: 'heal', slot: 0 }, { kind: 'convert', slot: 1 }, ...(busy ? [{ kind: 'stop', slot: 2 } as const] : []), ...grouping, unselect];
   }
-  // A transport's Unload and the trade boats' buttons are not ported; their Stop and the rest's is in slot 0.
+  if (level === UNIT_LEVEL_TRANSPORT) {
+    // Unload (slot 0, Stop then in 1) while one of the selected transports carries something (`objects->number_of_objects`).
+    const loaded = selected.some((e) => (e.cargo?.length ?? 0) > 0);
+    return [
+      ...(loaded ? [{ kind: 'unload', slot: 0 } as const] : []),
+      ...(busy ? [{ kind: 'stop', slot: loaded ? 1 : 0 } as const] : []),
+      ...grouping,
+      unselect,
+    ];
+  }
+  if (level === UNIT_LEVEL_TRADE) {
+    const trade = [0, 1, 2].map((attribute): CommandButton => ({ kind: 'trade', slot: TRADE_SLOT[attribute]!, attribute }));
+    return [...trade, ...(busy ? [{ kind: 'stop', slot: 0 } as const] : []), ...grouping, unselect];
+  }
+  // The rest's Stop is in slot 0.
   if (UNIT_LEVELS.has(level)) return [...(busy ? [{ kind: 'stop', slot: 0 } as const] : []), ...grouping, unselect];
   if (level === LEVEL_BUILDING && t.masterType === MASTER_TYPE_BUILDING) {
     if (object.state < ObjectState.Active) return [{ kind: 'cancel-construction', slot: 0 }, unselect];
@@ -281,11 +311,12 @@ export function commandButtons(c: CommandContext): CommandButton[] {
   return [...build, ...stop, ...grouping, units ? unselect : { kind: 'cancel', slot: FINAL_SLOT }];
 }
 
-/** A master's `unit_level`, from the pack or, without one, guessed from the sim's table. */
+/** A master's `unit_level`, from the pack or, without one, guessed from the sim's table (which has the boats' own). */
 export function levelOf(unit: number, from?: (unit: number) => number | null): number {
   const known = from?.(unit);
   if (known !== null && known !== undefined) return known;
   const t = unitType(unit);
+  if (t.unitLevel === UNIT_LEVEL_TRANSPORT || t.unitLevel === UNIT_LEVEL_TRADE) return t.unitLevel;
   if (t.masterType === MASTER_TYPE_BUILDING) return LEVEL_BUILDING;
   if (t.group === GROUP_PRIEST) return LEVEL_PRIEST;
   return canBuild(t) ? LEVEL_VILLAGER : LEVEL_SOLDIER;

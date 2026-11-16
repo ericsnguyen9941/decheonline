@@ -80,6 +80,7 @@ async function main(): Promise<void> {
     wonder: params.get('wonder') === '1',
     buildings: ids('buildings'),
     units: ids('units'),
+    naval: params.get('naval') === '1',
     testMap: params.get('map') === 'test',
     seed: params.has('seed') && Number.isInteger(Number(params.get('seed'))) ? Number(params.get('seed')) : undefined,
     perturb: params.has('perturb') && Number.isInteger(Number(params.get('perturb'))) ? Number(params.get('perturb')) : undefined,

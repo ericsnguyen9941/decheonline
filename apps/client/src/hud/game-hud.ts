@@ -1,9 +1,25 @@
 import type { Application, Ticker } from 'pixi.js';
-import { ATTR_FOOD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, FARM, HOUSE, ObjectState, processCheatCode, STATUS_LOST, typeOf, type Command, type Entity, type World } from '@aoe/sim';
+import {
+  ATTR_FOOD,
+  ATTR_HEADROOM,
+  ATTR_POPULATION,
+  ATTR_POPULATION_LIMIT,
+  FARM,
+  HOUSE,
+  ObjectState,
+  processCheatCode,
+  STATUS_LOST,
+  typeOf,
+  UNIT_LEVEL_TRADE,
+  UNIT_LEVEL_TRANSPORT,
+  type Command,
+  type Entity,
+  type World,
+} from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import type { MapView } from '../map/map-view';
 import { CommandPanel } from './command-panel';
-import { constructionProgress, researchStatus, trainingStatus } from './commands';
+import { constructionProgress, levelOf, researchStatus, trainingStatus } from './commands';
 import { applyCursors, clearCursors } from './cursors';
 import { frameDataUrl, paintFrame } from './frame-image';
 import { BOTTOM_HEIGHT, cultureSlp, hudLayout, SLP, TOP_HEIGHT, type HudLayout, type Rect } from './layout';
@@ -35,6 +51,7 @@ const STRIP_TILE = { x: 300, w: 200 };
 /** itemicon.shp frames of the object panel's rows (`TRIBE_Panel_Object::draw_item`). */
 const ITEM_POPULATION = 4;
 const ITEM_PROGRESS = 9;
+const ITEM_GOLD = 3;
 /**
  * The itemicon frame of a held resource by `attribute_type_held` (tpnl_obj.cpp:365-388): food (0, 15-17) 2, wood (1) 0,
  * stone (2) 1, gold (3) 3, trade goods (9) 5.
@@ -67,13 +84,16 @@ export interface HudSelection {
   group(): void;
   ungroup(): void;
   unselect(): void;
-  /** `get_selected_objects_to_command(minLevel)`: the selected own active objects of that select level or more. */
-  commandObjects(minLevel: number): number[];
   /**
-   * `command_repair`, `command_attack_ground`, `command_heal`, `command_convert`: the next click on the map names the
-   * target.
+   * `get_selected_objects_to_command(minLevel, group, unitLevel)`: the selected own active objects of that select level or
+   * more, of object group `group` and `unit_level` `unitLevel` (-1 any).
    */
-  armCommand(mode: 'repair' | 'attack-ground' | 'heal' | 'convert'): void;
+  commandObjects(minLevel: number, group?: number, unitLevel?: number): number[];
+  /**
+   * `command_repair`, `command_attack_ground`, `command_heal`, `command_convert`, `command_unload`: the next click on the
+   * map names the target.
+   */
+  armCommand(mode: 'repair' | 'attack-ground' | 'heal' | 'convert' | 'unload'): void;
   /** The order mode waiting for its click (the Move key's too), or null. */
   readonly commandMode: string | null;
   /** `command_cancel` in an order mode. */
@@ -220,7 +240,7 @@ export class GameHud {
       group: () => o.selection.group(),
       ungroup: () => o.selection.ungroup(),
       onButton: () => o.sounds?.button(),
-      commandObjects: (minLevel) => o.selection.commandObjects(minLevel),
+      commandObjects: (minLevel, unitLevel) => o.selection.commandObjects(minLevel, -1, unitLevel),
       armCommand: (mode) => o.selection.armCommand(mode),
       commandMode: () => o.selection.commandMode,
       cancelCommand: () => o.selection.cancelCommand(),
@@ -591,7 +611,23 @@ export class GameHud {
     if (item) rows.push({ kind: 'item', ...item });
     const held = this.heldRow(e);
     if (held) rows.push({ kind: 'held', ...held });
+    const boat = this.boatRow(e);
+    if (boat) rows.push(boat);
     return rows;
+  }
+
+  /**
+   * An own boat's row (tpnl_obj.cpp:310-361): a transport's passengers over its room (`obj_max`) as `cargo`; a trade
+   * boat's gold once it holds some, else the icon alone of the good it carries to trade, as `held`.
+   */
+  private boatRow(e: Entity): PanelRow | null {
+    if (e.owner !== this.o.player) return null;
+    const level = levelOf(e.type, (unit) => this.o.provider.unitInfo(unit)?.level ?? null);
+    if (level === UNIT_LEVEL_TRANSPORT) return { kind: 'cargo', icon: ITEM_POPULATION, text: `${e.cargo?.length ?? 0}/${typeOf(this.o.world, e).objMax}` };
+    if (level !== UNIT_LEVEL_TRADE) return null;
+    if (e.heldAmount > 0) return { kind: 'held', icon: ITEM_GOLD, text: String(Math.trunc(Math.fround(e.heldAmount + 0.5))) };
+    const icon = ITEM_HELD[e.heldType];
+    return icon === undefined ? null : { kind: 'held', icon, text: '' };
   }
 
   /**

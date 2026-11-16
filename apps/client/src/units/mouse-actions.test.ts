@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { ObjectState, unitType } from '@aoe/sim';
-import { canAttack, isAttackable, priestCursor, type CursorTarget, type PriestSelection } from './mouse-actions';
+import { boardCursor, canAttack, canBoard, isAttackable, priestCursor, type CursorTarget, type PriestSelection } from './mouse-actions';
 
 // Master ids (empires.dat): Bowman, Clubman, Villager, Barracks, Town Center, the Bowman's arrow, Dead_Man, Flare.
 test('Villagers, Clubmen and Bowmen can attack; a Barracks cannot', () => {
@@ -40,4 +40,21 @@ test('over an enemy the ring needs full faith; priests and buildings need Monoth
   for (const type of [109, 276]) expect(priestCursor(sel({ buildingConversion: true }), target({ type, group: 3 }), 'enemy')).toBe(false);
   // Walls (27) are only attacked.
   expect(priestCursor(sel({ buildingConversion: true }), target({ type: 72, group: 27 }), 'enemy')).toBe(false);
+});
+
+// Transport Boat 17 (group 20), Trade Boat 15 (group 2), Dock 45 (group 3).
+test('Villagers, Clubmen and Priests can board; boats cannot, so a trade boat keeps the normal cursor', () => {
+  for (const id of [83, 73, 125]) expect(canBoard(unitType(id))).toBe(true);
+  for (const id of [15, 17]) expect(canBoard(unitType(id))).toBe(false);
+});
+
+test('the ring over an own or allied transport for a selection that can board, nowhere else', () => {
+  const boat = target({ type: 17, group: 20, hp: 150, maxHp: 150 });
+  expect(boardCursor(true, boat, 'self')).toBe(true);
+  expect(boardCursor(true, boat, 'ally')).toBe(true);
+  expect(boardCursor(true, boat, 'neutral')).toBe(false);
+  expect(boardCursor(true, boat, 'enemy')).toBe(false);
+  expect(boardCursor(false, boat, 'self')).toBe(false);
+  expect(boardCursor(true, target({ type: 15, group: 2 }), 'self')).toBe(false);
+  expect(boardCursor(true, target({ type: 45, group: 3 }), 'neutral')).toBe(false);
 });

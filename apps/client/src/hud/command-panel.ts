@@ -1,7 +1,7 @@
 import { BUILDER, buildingFacet, checkObjCost, checkTechCost, master, TECHS, type Command, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, ImageFrame } from '../assets';
 import { paintFrame } from './frame-image';
-import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, itemsMadeAt, type CommandButton, type CommandMode } from './commands';
+import { bySlot, COMMAND_FRAME, commandButtons, FINAL_SLOT, itemsMadeAt, TRADE_FRAME, type CommandButton, type CommandMode } from './commands';
 import { buttonLetter, pressedLetter, unitLetter } from './hotkeys';
 import { cultureSlp, SLP } from './layout';
 import { infoOf } from './records';
@@ -20,6 +20,8 @@ const ATTR_POPULATION_LIMIT = 32;
 /** The least `select_level` Stop sends to (buildings are 3), and the default the other commands use (units, 4). */
 const SELECT_LEVEL_STOP = 3;
 const SELECT_LEVEL_UNIT = 4;
+/** `unit_level` of the trade boats, the units `command_trade_attribute` sends to. */
+const LEVEL_TRADE = 5;
 
 export interface CommandPanelOptions {
   /** The 12 grid slots, row by row, placed by the HUD. */
@@ -44,14 +46,15 @@ export interface CommandPanelOptions {
   /** A button was pressed (mouse down or its key): its click sound. */
   onButton?: () => void;
   /**
-   * `get_selected_objects_to_command(minLevel)`: the selected objects a command goes to (own, active, of that select level
-   * or more); the panel's object alone when not given.
+   * `get_selected_objects_to_command(minLevel, -1, -1, unitLevel)`: the selected objects a command goes to (own, active,
+   * of that select level or more, of `unit_level` `unitLevel` unless -1); the panel's object alone when not given.
    */
-  commandObjects?: (minLevel: number) => number[];
+  commandObjects?: (minLevel: number, unitLevel?: number) => number[];
   /**
-   * The Repair, Attack Ground, Heal and Convert buttons: arm the order mode whose next click on the map names the target.
+   * The Repair, Attack Ground, Heal, Convert and Unload buttons: arm the order mode whose next click on the map names the
+   * target.
    */
-  armCommand?: (mode: 'repair' | 'attack-ground' | 'heal' | 'convert') => void;
+  armCommand?: (mode: 'repair' | 'attack-ground' | 'heal' | 'convert' | 'unload') => void;
   /** The order mode armed now (the Move key's too), or null; the grid shows only Cancel while there is one. */
   commandMode?: () => string | null;
   /** Cancel (or Esc) in an order mode: back to the normal mode. */
@@ -243,6 +246,9 @@ export class CommandPanel {
     } else if (b.kind === 'research') {
       const info = provider.techInfo(b.tech);
       frame = info && info.icon >= 0 ? provider.interfaceFrame(SLP.techIcons, info.icon, player) : null;
+    } else if (b.kind === 'trade') {
+      // btntech pictures without a colour table, as the command ones.
+      frame = provider.interfaceFrame(SLP.techIcons, TRADE_FRAME[b.attribute]!, 1);
     } else {
       // Command pictures carry no colour table: their player-colour pixels stay the base (player 1) ramp.
       frame = provider.interfaceFrame(SLP.commands, COMMAND_FRAME[b.kind], 1);
@@ -320,8 +326,15 @@ export class CommandPanel {
       case 'attack-ground':
       case 'heal':
       case 'convert':
+      case 'unload':
         this.o.armCommand?.(b.kind);
         break;
+      case 'trade': {
+        // `command_trade_attribute` (src/tplayer.cpp:942): the selected trade boats (select level 4, `unit_level` 5).
+        const units = this.o.commandObjects?.(SELECT_LEVEL_UNIT, LEVEL_TRADE) ?? [object.id];
+        if (units.length > 0) issue({ type: 'trade-attribute', units, attribute: b.attribute });
+        return;
+      }
       case 'cancel-construction':
         issue({ type: 'cancel', target: object.id });
         return;

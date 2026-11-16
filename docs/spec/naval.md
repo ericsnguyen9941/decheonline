@@ -455,6 +455,12 @@ determinism e2e).
 Not ported: the slope check (placement return 3, no Dock needs it),
 computer-player branches (the Enter constructor's
 computer branch, unload without the stop), the passengers'
-own actions' pending-removal target clearing while inside. The client (C5)
-does not yet hide passengers (`Entity.inside`), send `unload`, or show cargo;
-nor show the trade buttons or send `trade-attribute`.
+own actions' pending-removal target clearing while inside.
+
+Client (hud.md "Boats: transports and trade"): passengers are neither drawn,
+picked nor shown on the minimap; a right click on an own or ally transport
+sends the `work` order (Enter) with the ring cursor; a loaded transport's
+Unload button arms the unload click, which sends `unload` at the clicked map
+point; the panel counts the cargo against `obj_max`; the Dock's ghost uses
+`checkPlacement` (the shore rule). e2e `naval.spec.ts`, real art
+`real/real-naval.spec.ts`.

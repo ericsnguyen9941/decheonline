@@ -528,9 +528,11 @@ the default task (`objects.ts`), orders (`gather.ts`: `startTask`,
 `{ type: 'trade-attribute', units, attribute }` (`commands.ts`, `world.ts`
 `doCommandTradeAttribute`, hash id 19; port-side guards: the sender's
 active objects of `unit_level` 5, `attribute` 0-2). Tests `trade.test.ts`;
-replay `sampleTradeReplay` in the determinism e2e. Not ported: the work
-and deposit sounds (the client's), the computer-player branches, the trade
-panel's buttons and cursor in the client (C5).
+replay `sampleTradeReplay` in the determinism e2e. Client (hud.md "Boats:
+transports and trade"): the three trade buttons send `trade-attribute`, a right
+click on another player's Dock sends the `work` order (with the normal cursor,
+as the original), the panel shows the good or the gold. Not ported: the work
+and deposit sounds (the client's), the computer-player branches.
 
 ## 8. RNG calls, in order
 

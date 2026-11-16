@@ -12,6 +12,7 @@ import { GameHud } from './hud/game-hud';
 import { resourcesOf, type Resources } from './hud/resource-bar';
 import { connect, type Link } from './net/link';
 import { isBuildingObject, isUnit, UnitLayer, type Ghost } from './units/unit-layer';
+import { placeNavalStart } from './naval-start';
 
 /** What `?debug=net` exposes as `window.__game`, for tests and manual poking. */
 export interface NetDebug {
@@ -159,6 +160,11 @@ export interface DebugObject {
   /** Dat graphic of the active sprite and its frame in the sim. */
   graphic: number;
   frame: number;
+  /** The transport the object is aboard (`inside_obj`), or null; a transport's passengers, the last to board first. */
+  inside: number | null;
+  cargo: number[];
+  /** Action type of the object's work action (gather, build, enter 3, trade 111, ...), or -1 without one. */
+  work: number;
 }
 
 export interface DebugUnit {
@@ -232,6 +238,11 @@ export interface MultiplayerOptions {
    * its building or techs. Placed without a placement check: for the test map. Both clients must ask for the same list.
    */
   units?: number[];
+  /**
+   * Debug only (`?debug=net&naval=1`): every player starts with a built Dock on the shore nearest its Town Center and a
+   * Transport Boat and a Trade Boat on the water near it (`placeNavalStart`), for a water map. Both clients must ask for it.
+   */
+  naval?: boolean;
   /** Debug only (`?debug=net&map=test`): play on the fixed test map (`createTestMap`, `startingObjects`). */
   testMap?: boolean;
   /** Debug only (`?debug=net&seed=N`): play the random map seed N instead of the server's. Both clients must pass the same N. */
@@ -256,7 +267,7 @@ const RUIN = 158;
 const ATTR_CURRENT_AGE = 6;
 
 /** Connects to the relay, shows the lobby in `host`, and runs lockstep once the game starts, drawing the map in `app`. */
-export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, wonder, buildings, units: startUnits, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
+export async function startMultiplayer(host: HTMLElement, app: Application, { debug, speed, resources, bowmen, market, houses, relics, ruins, wonder, buildings, units: startUnits, naval, testMap, seed, perturb, setGameVisible }: MultiplayerOptions): Promise<void> {
   const link = await connect();
   const session = new Session(link);
   const view = new LobbyView(session);
@@ -372,6 +383,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         startUnits.forEach((type, i) => game.world.createUnit({ owner: p, type, x: villager.x - 4 + 2 * (i % 7), y: villager.y - 2 - 2 * Math.floor(i / 7) }));
       }
     }
+    if (debug && naval) placeNavalStart(game.world);
     if (debug && wonder) {
       const tc = [...game.world.entities.ofPlayer(1)].find((e) => e.type === TOWN_CENTER);
       if (tc) game.world.createUnit({ owner: 1, type: WONDER, x: Math.floor(tc.x) - 4.5, y: tc.y });
@@ -559,6 +571,9 @@ function debugPanel(
           hp: e.hp,
           graphic: e.sprite!.graphic,
           frame: e.sprite!.frame,
+          inside: e.inside ?? null,
+          cargo: [...(e.cargo ?? [])],
+          work: e.work?.type ?? -1,
         })),
     issueWork: (units, target, x, y) => game.issue({ type: 'work', units, target, x, y }),
     objectScreenPos: (id) => layer()?.objectCentre(id) ?? null,
