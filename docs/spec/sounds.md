@@ -136,8 +136,10 @@ area of the canvas (not under the top strip or the bottom panel).
   src/tribegam.cpp:930-965): land 0xBBF, unload space 0xBC0, no room for the unit 0xBC2 (the unit's id is not read), trade with
   an enemy 0xBC3, repair 0xBCA; the conversions' by `get_string` 0xBE7-0xBEB (no faith, Priest and building without
   Monotheism, Town Center, Wonder). Only the player told sees it. Ours: `hud/text.ts` `cantDoMessages` (read each frame from the
-  log by `game-hud.ts` `readLog`), `CommandPanel.warn`. The refusals `CommandPanel.say` shows (not enough food, ...) still
-  stay 4 s; the original's `show_message` for them is also a `BadMessage` of 8 s (unverified, left as it was).
+  log by `game-hud.ts` `readLog`), `CommandPanel.warn`. The refusals (not enough food, ... from `command_building`,
+  `command_research`, `command_building_make_obj`/`_tech`, src/scr_game.cpp:3765, 4157, 4270) are also a `BadMessage` of
+  8 s, in palette index 0x56 (`CommandPanel.refuse`, `warn` with that colour); `say` (an order mode's prompt) stays 4 s.
+  With the real pack 0x55 is (239, 99, 7) and 0x56 (207, 67, 0); `real-refusal-messages.spec.ts` shows both.
 - A unit trained or a building finished has no game sound, only its own master sound (§3).
 - `RGE_Base_Game::play_sound` (src/basegame.cpp:3894) leaves a game sound alone while it is still playing. A
   button restarts its sound.

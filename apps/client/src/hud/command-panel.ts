@@ -11,12 +11,14 @@ import { commandMessage, objectName, shortMessage, techName } from './text';
 const ICON_SIZE = 50;
 /** button_border_a frames of a research button (`border_frame` 2, pressed 3); the others use 0 and 1. */
 const RESEARCH_BORDER = 2;
-/** How long a refusal stays on screen. */
+/** How long a message that is not a `BadMessage` stays on screen. */
 const MESSAGE_MS = 4000;
 /** `TMessagePanel::show_message_interval`: a `BadMessage` stays 8 s (src/Pnl_msg.cpp:12, :308-312). */
 const BAD_MESSAGE_MS = 8000;
 /** `TMessagePanel::ErrorColor`, the palette index a can't-do message is drawn in (include/pnl_msg.h:20). */
 const ERROR_COLOR = 0x55;
+/** The palette index `command_building`, `command_research` and `command_building_make_*` show their "not enough" refusal in (src/scr_game.cpp:3765, 4157, 4270). */
+const REFUSAL_COLOR = 0x56;
 /** `PLAYER_ATTRIBUTE_POPULATION`, `_POPULATION_HEADROOM` and `_POPULATION_LIMIT`. */
 const ATTR_POPULATION = 11;
 const ATTR_HEADROOM = 4;
@@ -372,9 +374,9 @@ export class CommandPanel {
   /**
    * The message `command_building` (and `command_research`) shows when a cost cannot be paid: the attribute
    * `check_obj_cost` (`check_tech_cost`) stops at (the population limit when headroom is asked for and the population is
-   * at it, else the first used cost that falls short).
+   * at it, else the first used cost that falls short). A `BadMessage` of 8 s in palette index 0x56, as the original shows it.
    */
-  private refuse(slots: readonly { type: number; amount: number }[]): void {
+  refuse(slots: readonly { type: number; amount: number }[]): void {
     const a = this.o.world.attributes[this.o.player]!;
     const costs = slots.filter((c) => c.type >= 0);
     let short = -1;
@@ -383,7 +385,7 @@ export class CommandPanel {
       else if ((a[c.type] ?? 0) < c.amount) short = c.type;
       if (short >= 0) break;
     }
-    this.say(shortMessage(this.o.provider, short));
+    this.warn(shortMessage(this.o.provider, short), REFUSAL_COLOR);
   }
 
   /** `TMessagePanel::show_message`: `text` on the message line for a few seconds. */
@@ -393,12 +395,13 @@ export class CommandPanel {
 
   /**
    * A can't-do message (`show_message(BadMessage, ..., ErrorColor)`, `TRIBE_Game::notification`): `text` in the palette's
-   * error colour for 8 s. The panel keeps the clock of the same text it is already showing (`show_message` returns early).
+   * error colour (`colour`, a palette index) for 8 s. The panel keeps the clock of the same text it is already showing
+   * (`show_message` returns early).
    */
-  warn(text: string): void {
+  warn(text: string, colour = ERROR_COLOR): void {
     const { message } = this.o;
     if (!message.hidden && message.dataset.bad && message.textContent === text) return;
-    const rgb = this.o.provider.mapArt()?.rgb(ERROR_COLOR);
+    const rgb = this.o.provider.mapArt()?.rgb(colour);
     this.show(text, BAD_MESSAGE_MS, rgb === undefined ? '' : `#${rgb.toString(16).padStart(6, '0')}`, true);
   }
 
