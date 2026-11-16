@@ -351,6 +351,17 @@ describe('unit-ai.md §7 Example 2(a): idle target choice', () => {
     seeAll(w);
     expect(bestUnitToAttack(w.gameContext(), w.entities.get(1)!, true, false)).toBe(3);
   });
+
+  test('an object aboard a transport is skipped (`inside_obj`, src/aiuaimod.cpp:1248, :1357): the Villager wins', () => {
+    const w = world(
+      { owner: 1, type: CLUBMAN, x: 10.5, y: 10.5 },
+      { owner: 2, type: VILLAGER, x: 13.5, y: 10.5 },
+      { owner: 2, type: BOWMAN, x: 10.5, y: 8 },
+    );
+    seeAll(w);
+    w.entities.get(3)!.inside = 2;
+    expect(bestUnitToAttack(w.gameContext(), w.entities.get(1)!, true, false)).toBe(2);
+  });
 });
 
 describe('unit-ai.md §7 Example 3: idle Clubman hit by a Bowman', () => {

@@ -154,6 +154,40 @@ describe('naval.md §7: transports', () => {
     expect(units[0]!.hp).toBe(hp);
   });
 
+  test('a queued ENTER order (0x2cd) runs as `enterObject(target, 1)`: the idle Villager boards (src/aiuaimod.cpp:2666)', () => {
+    const { w, boat, units } = boarding(1);
+    const v = units[0]!;
+    w.runTurn();
+    expect([v.ai!.action, v.work ?? null]).toEqual([-1, null]);
+    v.ai!.orders.push({ issuer: v.id, type: 0x2cd, target: boat.id, targetOwner: 1, x: -1, y: -1, z: -1, range: 0, priority: 100 });
+    w.runTurn();
+    expect([v.work?.type, v.ai!.orders]).toEqual([ACTION_ENTER, []]);
+    runUntil(w, () => v.inside === boat.id, 2000);
+  });
+
+  test('a queued TRANSPORT order (0x2ca) runs as `transportObject(x, y, z, 1)`: the boat’s Transport action sails to the point with its passengers (src/aiuaimod.cpp:2670)', () => {
+    const { w, boat, units } = boarding(2);
+    board(w, boat, units);
+    runUntil(w, () => boat.ai!.action === -1 && boat.mover?.action == null, 2000);
+    boat.ai!.orders.push({ issuer: boat.id, type: 0x2ca, target: -1, targetOwner: -1, x: 24.5, y: 30.5, z: 0, range: 0, priority: 100 });
+    w.runTurn();
+    expect([boat.work?.type, boat.work?.state, boat.ai!.orders]).toEqual([ACTION_TRANSPORT, 11, []]);
+    runUntil(w, () => Math.abs(boat.x - 24.5) < 1.5 && Math.abs(boat.y - 30.5) < 1.5, 2000);
+    expect(boat.cargo).toHaveLength(2);
+  });
+
+  test('a targetless work on open water is the current action’s `move_to` (src/act_obj.cpp:111): the boat keeps its Transport action (state 11, a move order)', () => {
+    const { w, boat, units } = boarding(2);
+    board(w, boat, units);
+    runUntil(w, () => boat.mover?.action == null, 2000);
+    const action = boat.work;
+    order(w, 1, { type: 'work', units: [boat.id], target: 0, x: 24.5, y: 10.5 });
+    runUntil(w, () => boat.work?.state === 11, 10);
+    expect([boat.work === action, boat.work?.type, boat.work?.target2]).toEqual([true, ACTION_TRANSPORT, 0]);
+    runUntil(w, () => Math.abs(boat.x - 24.5) < 1.5 && Math.abs(boat.y - 10.5) < 1.5, 2000);
+    expect(boat.cargo).toHaveLength(2);
+  });
+
   test('the unload command: the boat sails towards the clicked point and drops its passengers on that shore (the order stops it first)', () => {
     const { w, boat, units } = boarding(3);
     board(w, boat, units);

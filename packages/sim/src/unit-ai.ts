@@ -11,14 +11,24 @@ import { combatAttack, distanceToObject } from './combat';
 import type { GameContext } from './context';
 import { isAlly, unitDiplomacy, UNIT_DIPLOMACY_ALLY, UNIT_DIPLOMACY_ENEMY, UNIT_DIPLOMACY_NEUTRAL, UNIT_DIPLOMACY_SELF } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
-import { aiWork, deleteActions, workMoveTo, ACTION_ATTACK, ACTION_GATHER, ACTION_HUNT, ACTION_MOVE } from './gather';
+import { aiWork, deleteActions, getTask, workMoveTo, ACTION_ATTACK, ACTION_GATHER, ACTION_HUNT, ACTION_MOVE } from './gather';
 import { ACTION_BUILD } from './build';
 import { typeOf, type PlayerMasters } from './masters';
 import { maximumSpeed, startMoveTo } from './movement';
 import { add32, div32, f32, mul32, sqrt32, sub32, toInt, u32 } from './num';
 import { ACTION_REPAIR, aiRepair } from './repair';
 import { ACTION_CONVERT, ACTION_HEAL, aiPriestAction, FAITH_MAX, GROUP_PRIEST } from './priest';
-import { ACTION_ENTER, ACTION_TRANSPORT, AI_ACTION_ENTER, AI_ACTION_TRANSPORT, AI_ACTION_UNLOAD, unload } from './transport';
+import {
+  ACTION_ENTER,
+  ACTION_TRANSPORT,
+  AI_ACTION_ENTER,
+  AI_ACTION_TRANSPORT,
+  AI_ACTION_UNLOAD,
+  startEnter,
+  startTransport,
+  transportWork,
+  unload,
+} from './transport';
 import { ACTION_TRADE, AI_ACTION_TRADE, AI_ORDER_TRADE, aiTrade } from './trade';
 import { newSprite } from './sprites';
 import { FARM, type UnitType } from './units';
@@ -725,7 +735,8 @@ function baseDamageAbility(ctx: PlayerMasters, target: Entity, attacker: Entity)
 /**
  * `bestUnitToAttack(allowWalls, quickCheck)` (src/aiuaimod.cpp:1177, unit-ai.md §3.3) for a human or Gaia searcher
  * with no single-player difficulty: the enemy, neutral and ally buckets, skipping the objects of any player the
- * searcher's owner calls an ally, itself included (`isAlly`, :1248, :1304, :1357). Returns an object id or -1.
+ * searcher's owner calls an ally, itself included (`isAlly`, :1248, :1304, :1357), and any object aboard a transport
+ * (`inside_obj`, :1248, :1357). Returns an object id or -1.
  */
 export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolean, quickCheck: boolean): number {
   const ai = e.ai!;
@@ -737,7 +748,7 @@ export function bestUnitToAttack(ctx: GameContext, e: Entity, allowWalls: boolea
   const wallOk = !!current && typeOf(ctx, current).group === GROUP_WALL;
   const passes = (o: Entity | undefined, bucket: number): o is Entity => {
     if (!o || o.state > ObjectState.Active) return false;
-    if (isAlly(ctx, e.owner, o.owner)) return false;
+    if (isAlly(ctx, e.owner, o.owner) || o.inside != null) return false;
     const g = typeOf(ctx, o).group;
     if (!(allowWalls && wallOk) && g === GROUP_WALL) return false;
     if (g === GROUP_BUILDING && o.hp <= 1 && CATAPULTS.includes(t.id)) return false;
@@ -1521,6 +1532,12 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
     case AI_ORDER_CONVERT:
       ok = priestObject(ctx, e, o.target, ACTION_CONVERT, true);
       break;
+    case AI_ORDER_ENTER:
+      ok = enterObject(ctx, e, o.target);
+      break;
+    case AI_ORDER_TRANSPORT:
+      ok = transportObject(ctx, e, o.x, o.y, o.z);
+      break;
     case AI_ORDER_UNLOAD:
       ok = unloadObject(ctx, e, o.x, o.y);
       break;
@@ -1569,6 +1586,37 @@ function unloadObject(ctx: GameContext, e: Entity, x: number, y: number): boolea
   if (!unload(ctx, e, x, y)) return false;
   setAction(e.ai!, AI_ACTION_UNLOAD);
   setTarget(e.ai!, e.id, typeOf(ctx, e).group, e.x, e.y, e.z);
+  return true;
+}
+
+/**
+ * `UnitAIModule::enterObject(target, 1)` (src/aiuaimod.cpp:1956) over `RGE_Combat_Object::enter` (src/com_obj.cpp:767,
+ * naval.md §7.2): the unit's task for the target (`getTask`, whatever its action type), a new Enter action on it in
+ * place of every action, then the action (0x269) and the target recorded with the point (-1, -1, -1).
+ */
+function enterObject(ctx: GameContext, e: Entity, targetId: number): boolean {
+  const target = ctx.entities.get(targetId);
+  if (!target) return false;
+  const task = getTask(ctx, e, target);
+  if (task === -1) return false;
+  startEnter(ctx, e, task, target);
+  setAction(e.ai!, AI_ACTION_ENTER);
+  setTarget(e.ai!, targetId, typeOf(ctx, target).group, -1, -1, -1);
+  return true;
+}
+
+/**
+ * `UnitAIModule::transportObject(x, y, z, 1)` (src/aiuaimod.cpp:1967) over `RGE_Combat_Object::transport`
+ * (src/com_obj.cpp:800, naval.md §7.4): a top Transport action takes `work(none, x, y)`; otherwise a new Transport action
+ * without a task replaces every action and takes `work(boat, x, y)`. Then the action (0x266) and the point recorded, the
+ * target type kept.
+ */
+function transportObject(ctx: GameContext, e: Entity, x: number, y: number, z: number): boolean {
+  if (e.work?.type === ACTION_TRANSPORT) transportWork(ctx, e, e.work, undefined, x, y);
+  else transportWork(ctx, e, startTransport(ctx, e, -1, x, y), e, x, y);
+  const ai = e.ai!;
+  setAction(ai, AI_ACTION_TRANSPORT);
+  setTarget(ai, -1, ai.targetType, x, y, z);
   return true;
 }
 

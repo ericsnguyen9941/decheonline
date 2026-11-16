@@ -312,6 +312,10 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
     startTrade(ctx, e, task, target, x, y);
     return kind;
   }
+  // No task and no target: `move_to` the point (src/act_obj.cpp:111), which the current action takes first
+  // (`action_move_to`, support-actions.md §7.5): a boat clicked onto open water keeps its Transport or Trade action, a
+  // Villager its gather.
+  if (kind === -1 && !target && workMoveTo(ctx, e, x, y)) return ACTION_MOVE;
   deleteActions(ctx, e);
   if (kind === ACTION_BUILD || kind === ACTION_GATHER || kind === ACTION_HUNT) {
     const a: WorkAction = { type: kind, task, state: 0, timer: 0, target: target ? target.id : -1, target2: -1, x, y, z: 0 };
@@ -327,7 +331,6 @@ function startTask(ctx: GameContext, e: Entity, t: UnitType, task: number, targe
     startAttack(ctx, e, target, k.moving, k.proceeding, k.workRange, false);
     return ACTION_ATTACK;
   }
-  // No task, or one this port does not run yet: `move_to` the target or the point.
   startMoveTo(e, target ?? null, x, y, 0, MOVE_RANGE, null, false, ctx);
   return ACTION_MOVE;
 }
