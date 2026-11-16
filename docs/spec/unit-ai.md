@@ -562,6 +562,48 @@ Base idle: `bestUnitToAttack` every 2.25..3.75 s; they consider bucket 3
 units of any group (`canAttackUnitAtNeutrality` returns 1,
 `src/taiuaimd.cpp:136-138`). Base reaction when attacked.
 
+### 5.5 Wander (`RGE_Action_Bird`, action 6, `src/act_bird.cpp`, all M)
+
+Not unit AI but the action list: the wander is the **default task** of the
+Gazelle 65, Elephant 48, Alligator 1 and the King variants Elephant_King 90,
+Alligator_King 362, Gazelle_King 384 (their task with `action_type` 6 has
+`is_default`; Lion 126 and Horse 157 have the task but not as default:
+1.0a dat). An active object with an empty action list starts its default task
+(`src/act_obj.cpp:403-407`), so these animals wander from the first update,
+and again whenever another action (fleeing, fighting back) has ended. The unit
+AI's idle check reads its own current action, not the action list
+(`src/aiuaimod.cpp:563-572`), so a wandering Gazelle still runs from what it
+sees (§5.1) and a hunted animal still reacts (§5.1-§5.4); a new action from
+the AI replaces the wander.
+
+- `first_in_stack(1)` (`:31-41`): `teleport(x, y, 6.0)` (only a flyer keeps
+  the height; every other object lands on the ground's z), then state 3.
+- `set_state` (`:43-69`): states 4 and 6 draw a timer,
+  `(float)(rand() * 10 / 0x7FFF + 5)`, whole seconds 5..15, and show the
+  task's `move_sprite` (4) or `work_sprite` (6), the master's `sprite` when
+  that is null. Any other state deletes the sub-action list (the walk).
+- `update` (`:73-126`):
+  1. The timer counts down by `world_time_delta_seconds` while it is > 0.
+  2. States 4 and 6: when the timer is ≤ 0, swap to the other state (a new
+     draw). Then update the sub-list; when it reports REMOVE (the walk ended,
+     arrived or failed, or the list is empty), state 3.
+  3. State 3: `target_x = rand() * map_width / 0x7FFF`, then
+     `target_y = rand() * map_height / 0x7FFF` (integer division, so a whole
+     tile corner), `target_z = world_z`; a sub `Move_To` to that point with the
+     task's `work_range` and the object's current sprite, then state 4.
+  4. State 1 returns REMOVE; nothing sets it.
+
+So a wandering animal draws 2 + 1 per point and 1 per sprite swap. The draws
+happen from the first object update: `new_game` runs three rounds of every
+player's update before play (random-maps.md §12.9), so the animals already draw there, which moves
+everything drawn after them, the relics and ruins included (victory.md §3).
+The 1.0a exe has the same code at 0x402090-0x402330 (`objdump`, the
+`* 10 / 0x7FFF + 5` timer and the `6.0` height).
+
+**Port**: `packages/sim/src/bird.ts` (`startBird`, `updateBird`; started by
+the default-task chain in `objects.ts`, dropped by `deleteActions`); tests
+`packages/sim/src/bird.test.ts`.
+
 ## 6. Random draws in order
 
 All draws are `debug_rand` → the C runtime `rand()` (`core.md` §4.1). A
@@ -579,6 +621,8 @@ All draws are `debug_rand` → the C runtime `rand()` (`core.md` §4.1). A
 | lion idle check | 1 `rand()` (new adjusted timeout) | `src/taiuaimd.cpp:321-322` |
 | lion kill | 1 `rand()` | `src/taiuaimd.cpp:302` |
 | explore re-task | 1 `rand() % 3` per tile search | `src/aiuaimod.cpp:1643` |
+| animal wander: new point | 2 `rand()` (x, y), then 1 (timer) | §5.5, `src/act_bird.cpp:131-133`, `:68` |
+| animal wander: sprite swap | 1 `rand()` (timer) | §5.5, `src/act_bird.cpp:68`, `:76` |
 | ATTACKED forwarded straight to the owner because the AI refused it (object not active) | 1 fence | `src/com_obj.cpp:514-516` |
 | computer only (dead in 2-human games) | `lookAround` timeout `rand() % 1000 + 4000`; soldier `0x20F` two `rand() % 8`; priest `rand() % (n + 2)` | `src/aiuaimod.cpp:2473`, `src/taiuaimd.cpp:1721`, `:1730`, `:1138` |
 

@@ -182,6 +182,10 @@ export interface UnitType {
   objMax: number;
   /** `unit_level` (the dat's interface kind): 7 marks a transport, the target of the enter task (naval.md §8). */
   unitLevel: number;
+  /** `track_as_resource`: an explored one joins the player's visible resources (`resources.ts`, economy.md §10). */
+  trackAsResource: number;
+  /** `resource_group`: which of the five visible-resource lists (0 wood, 1 forage, 2 fish, 3 stone, 4 gold). */
+  resourceGroup: number;
   /** `elevation_flag` (the dat's hill mode): 1 allows flat and some slope tiles, 2 flat tiles only. */
   elevationMode: number;
   /** `center_tile_req1/2` (the dat's placement terrain), -1 none. */
@@ -341,6 +345,8 @@ export function toUnitType(r: SimUnitRecord): UnitType {
     canBeBuiltOn: r.canBeBuiltOn,
     objMax: r.objMax,
     unitLevel: r.unitLevel,
+    trackAsResource: r.trackAsResource,
+    resourceGroup: r.resourceGroup,
     elevationMode: r.elevationMode,
     placementTerrain: r.placementTerrain,
     placementSideTerrain: r.placementSideTerrain,

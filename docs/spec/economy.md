@@ -976,12 +976,9 @@ Kept as behaviour (the target is the original game):
 
 ## 10. Undocumented or not ported
 
-- **Animal wander (action 6).** Gaia animals (gazelles, elephants, …) wander
-  when idle, but neither `unit-ai.md` §5 nor any other spec describes the
-  action's states or RNG draws, so the sim does not port it. Whether idle
-  animals move, and what they draw from the RNG, is **unknown**; in the sim they
-  stand still until hunted or until they flee. Of the default tasks only the
-  make action (21, the Farm's) is started (§4.7).
+- **Animal wander (action 6).** Specified in `unit-ai.md` §5.5 and ported
+  (`bird.ts`): the second default task the sim starts after the make action
+  (21, the Farm's, §4.7).
 - **Task requests of gatherers.** A waiting gather or hunt action notifies its
   unit AI `REQUEST_TASK` (§4.7); of the civilian AI's answer only the Farm
   branch and the builder's (§4.8.3) are ported. Other gatherers stay waiting where the original looks for

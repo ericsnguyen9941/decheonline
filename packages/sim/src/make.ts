@@ -21,8 +21,8 @@ export interface MakeAction {
 }
 
 /**
- * `default_task` (src/m_ac_obj.cpp:130-140): the first task flagged default, if it is a make task. The other default
- * tasks (the animals' wander, action 6) are not ported (economy.md §10).
+ * `default_task` (src/m_ac_obj.cpp:130-140): the first task flagged default, if it is a make task (the animals' wander,
+ * action 6, is `bird.ts`).
  */
 export function defaultMakeTask(t: UnitType): number {
   const tasks = t.action?.tasks ?? [];

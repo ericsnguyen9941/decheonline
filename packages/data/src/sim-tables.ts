@@ -62,6 +62,8 @@ export function simUnitRecord(rules: RuleSet, civ: number, id: number): SimUnitR
     canBeBuiltOn: u.canBeBuiltOn,
     objMax: u.garrisonCapacity,
     unitLevel: u.interfaceKind,
+    trackAsResource: u.enableAutoGather,
+    resourceGroup: u.resourceGatherGroup,
     elevationMode: u.hillMode,
     placementTerrain: [u.placementTerrain[0]!, u.placementTerrain[1]!],
     placementSideTerrain: [u.placementSideTerrain[0]!, u.placementSideTerrain[1]!],

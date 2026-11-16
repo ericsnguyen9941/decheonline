@@ -1,4 +1,5 @@
 import type { QueueRecord, TrainAction } from './buildings';
+import type { BirdAction } from './bird';
 import type { AttackAction, MissileAction } from './combat';
 import type { WorkAction } from './gather';
 import { copyMover, type Mover } from './movement';
@@ -65,6 +66,8 @@ export interface Entity {
   research?: ResearchAction | null;
   /** A Farm's food production (`RGE_Action_Make`), its default task while it is active. */
   make?: MakeAction | null;
+  /** A Gaia animal's wander (`RGE_Action_Bird`, `bird.ts`), its default task while it is active. */
+  bird?: BirdAction | null;
   /** The Wonder's countdown (`TRIBE_Action_Wonder`, `wonder.ts`), from its creation. */
   wonder?: WonderAction | null;
   /** Combat objects: the unified visibility cell of its tile at its last update (`Unified_Map_Value`, visibility.md §4.1). */
@@ -166,6 +169,7 @@ function copyEntity(e: Entity): Entity {
   if (e.research) copy.research = { ...e.research };
   if (e.make) copy.make = { ...e.make };
   if (e.wonder) copy.wonder = { ...e.wonder };
+  if (e.bird) copy.bird = { ...e.bird };
   if (e.cargo) copy.cargo = [...e.cargo];
   if (e.ownMaster) copy.ownMaster = copyUnitType(e.ownMaster);
   if (e.ai) {

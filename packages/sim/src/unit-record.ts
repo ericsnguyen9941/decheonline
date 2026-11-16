@@ -32,6 +32,10 @@ export interface SimUnitRecord {
   objMax: number;
   /** `unit_level` (the dat's interface kind): 7 is a transport the task list sends units into. */
   unitLevel: number;
+  /** `track_as_resource` (the dat's enable-auto-gather byte): an explored one joins the player's visible resources. */
+  trackAsResource: number;
+  /** `resource_group` (the dat's resource gather group): its visible-resource list, 0 wood to 4 gold. */
+  resourceGroup: number;
   elevationMode: number;
   placementTerrain: [number, number];
   placementSideTerrain: [number, number];

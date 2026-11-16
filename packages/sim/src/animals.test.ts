@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { Command } from './commands';
 import { ObjectState, type Entity } from './entities';
-import { add32, mul32 } from './num';
+import { mul32 } from './num';
 import { AiClass } from './unit-ai';
 import { ALLIGATOR, BOWMAN, CLUBMAN, ELEPHANT, GAZELLE, HUNTER, LION, TOWN_CENTER, VILLAGER } from './units';
 import { VICTORY_SPECIAL } from './victory';
@@ -51,11 +51,15 @@ describe('unit-ai.md §5.2: a hunted elephant fights back', () => {
     expect(elephant.state).toBe(ObjectState.Active);
   });
 
-  test('an idle Elephant ignores a Villager in view', () => {
+  test('an idle Elephant ignores a Villager in view and wanders on', () => {
     const w = world({ owner: 1, type: VILLAGER, x: 12.5, y: 10.5 }, { owner: 0, type: ELEPHANT, x: 14.5, y: 10.5 });
-    const elephant = w.entities.get(2)!;
-    for (let i = 0; i < 100; i++) w.runTurn();
-    expect([elephant.x, elephant.y, elephant.ai!.action]).toEqual([14.5, 10.5, -1]);
+    const [villager, elephant] = [w.entities.get(1)!, w.entities.get(2)!];
+    for (let i = 0; i < 100; i++) {
+      w.runTurn();
+      expect(elephant.attack).toBeFalsy();
+    }
+    expect([elephant.ai!.action, elephant.ai!.target, villager.hp]).toEqual([-1, -1, 25]);
+    expect(elephant.bird).toBeTruthy();
   });
 });
 
@@ -112,20 +116,25 @@ describe('unit-ai.md §5.1: a gazelle runs', () => {
     const gazelle = w.entities.get(2)!;
     expect(gazelle.ai!.kind).toBe(AiClass.Hunted);
     order(w, 1, { type: 'work', units: [1], target: 2, x: gazelle.x, y: gazelle.y });
-    runUntil(w, () => gazelle.ai!.attackers.length > 0);
+    // The Gazelle wanders (unit-ai.md §5.5), so step by step: the spear lands after the Gazelle's own update of that step.
+    for (let i = 0; i < 20000 && gazelle.ai!.attackers.length === 0; i++) w.runStep();
     expect(gazelle.ai!.attackers).toEqual([1]);
-    const move = gazelle.mover!.action!;
-    // From where it stood when hit: the hunter is due west, so it runs due east.
-    expect([move.x, move.y]).toEqual([add32(16.5, mul32(4, 1.100000023841858)), 10.5]);
+    const [hunter, move] = [w.entities.get(1)!, gazelle.mover!.action!];
+    const run = { x: move.x - gazelle.x, y: move.y - gazelle.y };
+    const away = { x: gazelle.x - hunter.x, y: gazelle.y - hunter.y };
+    expect(Math.sqrt((run.x) ** 2 + (run.y) ** 2)).toBeCloseTo(mul32(4, 1.100000023841858), 4);
+    expect((run.x * away.x + run.y * away.y) / (Math.sqrt((run.x) ** 2 + (run.y) ** 2) * Math.sqrt((away.x) ** 2 + (away.y) ** 2))).toBeCloseTo(1, 4);
     expect(gazelle.hp).toBeGreaterThan(0);
   });
 
   test('an idle Gazelle runs from a Villager in its view and never attacks', () => {
-    const w = world({ owner: 1, type: VILLAGER, x: 14.5, y: 10.5 }, { owner: 0, type: GAZELLE, x: 15.5, y: 10.5 });
+    // The Gazelle wanders from the start (unit-ai.md §5.5) and checks its view after 4.2 s: the Villager stands on its way.
+    const w = world({ owner: 1, type: VILLAGER, x: 19.5, y: 9.5 }, { owner: 0, type: GAZELLE, x: 15.5, y: 10.5 });
     const [villager, gazelle] = [w.entities.get(1)!, w.entities.get(2)!];
-    runUntil(w, () => !!gazelle.mover!.action, 200);
-    expect(gazelle.mover!.action!.x).toBeGreaterThan(15.5);
-    runUntil(w, () => !gazelle.mover!.action, 200);
+    runUntil(w, () => gazelle.ai!.action !== -1, 200);
+    expect(gazelle.bird).toBeFalsy();
+    expect(distance(villager, gazelle.mover!.action!)).toBeGreaterThan(distance(villager, gazelle));
+    runUntil(w, () => gazelle.ai!.action === -1, 200);
     expect(distance(gazelle, villager)).toBeGreaterThan(3);
     expect(villager.hp).toBe(25);
   });

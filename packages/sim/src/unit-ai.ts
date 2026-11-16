@@ -356,7 +356,7 @@ function removeCurrentTarget(ai: UnitAI): void {
 
 /** The object has a game action at the top of its list (`have_action`). */
 export function hasAction(e: Entity): boolean {
-  return !!(e.work || e.attack || e.mover?.action || e.research || e.make);
+  return !!(e.work || e.attack || e.mover?.action || e.research || e.make || e.bird);
 }
 
 /**
