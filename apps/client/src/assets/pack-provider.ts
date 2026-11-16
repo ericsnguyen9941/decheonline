@@ -1,5 +1,5 @@
 import { Assets, Rectangle, Texture } from 'pixi.js';
-import { slpImagePath, slpKey, soundPath, tauntPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
+import { musicPath, slpImagePath, slpKey, soundFilePath, soundPath, tauntPath, PACK_VERSION, type PackManifest, type PackScreen } from '@aoe/assets-import/manifest';
 import type { AssetProvider, BorderLayout, GraphicInfo, ImageFrame, MapArt, SoundTable, SpriteFrame, TechInfo, TerrainLayout, TerrainRules, UnitInfo } from './provider';
 
 export const DEFAULT_PACK_URL = '/assets';
@@ -109,6 +109,9 @@ class PackProvider implements AssetProvider {
     const { manifest, baseUrl } = this;
     const wavs = new Set(manifest.wavs);
     const taunts = new Set(manifest.taunts);
+    const files = new Set(manifest.soundFiles);
+    const { music } = manifest;
+    const midis = new Set([...(music?.files ?? []), ...Array.from({ length: music?.tracks ?? 0 }, (_, i) => `music${i + 1}.mid`)]);
     return (this.sounds ??= {
       sound: (id) => manifest.sounds[id]?.items ?? null,
       unitSounds: (id) => manifest.unitSounds[id] ?? null,
@@ -118,6 +121,14 @@ class PackProvider implements AssetProvider {
       },
       wavUrl: (id) => (wavs.has(id) ? `${baseUrl}/${soundPath(id)}` : null),
       tauntUrl: (n) => (taunts.has(n) ? `${baseUrl}/${tauntPath(n)}` : null),
+      soundFiles: (id) => manifest.sounds[id]?.files ?? null,
+      fileUrl: (name) => (files.has(name) ? `${baseUrl}/${soundFilePath(name)}` : null),
+      terrainSound: (id) => manifest.terrains[id]?.sound ?? -1,
+      music: music && {
+        tracks: music.tracks,
+        url: (name) => (midis.has(name) ? `${baseUrl}/${musicPath(name)}` : null),
+        bankUrl: `${baseUrl}/${music.bank}`,
+      },
     });
   }
 

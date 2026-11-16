@@ -67,6 +67,10 @@ export const SYNTHETIC = {
   overriddenWav: 5001,
   /** The loose taunt wavs in `sound/`, file names in the install's mixed case. */
   taunts: { 1: 'Taunt001.wav', 12: 'taunt012.wav' } as Record<number, string>,
+  /** Dat sound 1, terrain 0's ambient sound: a loose `sound/` wav the install has and one it lacks. */
+  ambient: { sound: 1, file: 'Grass2.WAV', missing: 'owl.wav' },
+  /** The music in `sound/`: two numbered tracks (music4 is past the gap, not counted) and the named files. */
+  midis: ['Music1.mid', 'MUSIC2.MID', 'music4.mid', 'Open.mid', 'Won.mid', 'lost.mid'],
   /**
    * The won achievements screen's info file (`scr7`, bina 50057): background SLP 50131 at 640 wide, palette 50505 (index c
    * is grey 255 - c), bevel colours 100-105.
@@ -192,6 +196,8 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   await writeFile(join(dir, 'data2', 'sounds.drs'), sounds2);
   await mkdir(join(dir, 'sound'), { recursive: true });
   for (const name of Object.values(SYNTHETIC.taunts)) await writeFile(join(dir, 'sound', name), buildWav());
+  await writeFile(join(dir, 'sound', SYNTHETIC.ambient.file), buildWav());
+  for (const name of SYNTHETIC.midis) await writeFile(join(dir, 'sound', name), new TextEncoder().encode(`MThd ${name}`));
   const none = Array.from({ length: EDGE_COUNT }, (): TileSpan[] => []);
   await writeFile(join(dir, 'data2', 'TileEdge.Dat'), buildTileEdgeFile([none.map(() => WHOLE_TILE), none]));
   await writeFile(join(dir, 'data2', 'BlkEdge.Dat'), buildTileEdgeFile([none.map((_, e) => (e === 1 ? [SYNTHETIC.blackSpan] : []))]));
@@ -204,6 +210,14 @@ export async function writeSyntheticInstall(dir: string): Promise<void> {
   dat.terrainBlock.terrains[1]!.terrainToDraw = 1;
   dat.terrainBlock.terrains[0]!.borders[1] = 3;
   dat.terrainBlock.borders[3]!.borderStyle = 1;
+  const { ambient } = SYNTHETIC;
+  dat.sounds.push({
+    id: ambient.sound,
+    playDelay: 0,
+    cacheTime: 300000,
+    items: [ambient.file, ambient.missing].map((fileName) => ({ fileName, resourceId: -1, probability: 50 })),
+  });
+  dat.terrainBlock.terrains[0]!.soundId = ambient.sound;
   for (const civ of dat.civs) {
     // The trailing null stays last; the Villager sits at its real id.
     const villager = Object.assign(syntheticUnit(UnitType.Creatable, SYNTHETIC.villager, 'Man'), {

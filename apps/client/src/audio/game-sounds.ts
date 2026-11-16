@@ -3,7 +3,7 @@
 // keeps no event list. Only what the player may know plays: own objects' sounds, and sprite sounds of what is drawn on
 // screen outside the fog.
 import { GAME_SOUND_IDS } from '@aoe/assets-import/manifest';
-import { BUILDER, master, ObjectState, TECH_DONE, TECH_RESEARCHING, typeOf, workTaskType, type Command, type Entity, type World } from '@aoe/sim';
+import { BUILDER, CANT_DO_NOTIFICATIONS, master, ObjectState, TECH_DONE, TECH_RESEARCHING, typeOf, workTaskType, type Command, type Entity, type World } from '@aoe/sim';
 import type { SoundTable } from '../assets';
 import { sourceId } from '../hud/records';
 import type { SoundPlayer } from './sound-player';
@@ -11,11 +11,16 @@ import {
   ATTR_ATTACK_WARNING_SOUND,
   GameSound,
   hasSpriteSounds,
+  pickItem,
   pickWav,
   researchSound,
   selectSound,
   spriteSounds,
   tauntNumber,
+  TERRAIN_SOUND_CHECK,
+  TERRAIN_SOUND_INTERVAL,
+  TERRAIN_SOUND_LENGTH,
+  terrainSound,
   unitSound,
   UnitSound,
 } from './sound-rules';
@@ -37,7 +42,8 @@ export type SoundEvent =
   | 'message'
   | 'game-over'
   | 'cant-do'
-  | 'taunt';
+  | 'taunt'
+  | 'terrain';
 
 /** One sound played (or that would have played before audio started), for tests (`window.__game.sounds()`). */
 export interface SoundTrigger {
@@ -50,6 +56,8 @@ export interface SoundTrigger {
   wav: number | null;
   /** The master, graphic or tech it is for; -1 for none. */
   source: number;
+  /** A loose `sound/` file played (a terrain sound), lower case. */
+  file?: string;
 }
 
 /** `OBJECT_GROUP_ARTIFACT`: relics and ruins change hands without a conversion. */
@@ -78,8 +86,14 @@ export class GameSounds {
   private alert: number;
   private depleted: number;
   private seenStep = -1;
+  /** How many of the sim's notifications (`World.log`) were read. */
+  private logRead: number;
   /** `TTaunt::Mute`: "!MUTE" typed here. */
   private tauntsMuted = false;
+  /** `handle_terrain_sound`'s `last_terrain_sound_time` (null until the first frame), `terrain_playing`, `terrain_sound_start_time`. */
+  private terrainCheck: number | null = null;
+  private terrainPlaying = false;
+  private terrainStart = 0;
 
   constructor(private readonly o: GameSoundsOptions) {
     const { world, player } = o;
@@ -91,6 +105,7 @@ export class GameSounds {
     this.techs = [...world.techs[player]!];
     this.alert = world.alertCooldown[player]!;
     this.depleted = world.depleted[player]!;
+    this.logRead = world.log.notifications.length;
     this.seenStep = this.stepOf();
   }
 
@@ -142,6 +157,47 @@ export class GameSounds {
     const depleted = world.depleted[player]!;
     if (depleted > this.depleted) this.game('farm-died', GameSound.FarmDied, -1);
     this.depleted = depleted;
+    // A refusal the game tells this player of (no room for a unit, cannot repair, a conversion refused, ...): cantdo.wav.
+    const notes = world.log.notifications;
+    for (let i = this.logRead; i < notes.length; i++) {
+      const n = notes[i]!;
+      if (CANT_DO_NOTIFICATIONS.has(n.type) && n.args[0] === player) this.game('cant-do', GameSound.CantDo, n.type);
+    }
+    this.logRead = notes.length;
+  }
+
+  /**
+   * Once a frame while the game is on (`TRIBE_Screen_Game::handle_terrain_sound`, src/scr_game.cpp:3571): every 20 s
+   * the sound of the terrain `drawn` (explored tiles on screen by terrain) has most of streams for at most 6 s.
+   * The clock starts at the first call, as the game screen is made.
+   */
+  terrain(now: number, drawn: () => ReadonlyMap<number, number>): void {
+    const { audio, table } = this.o;
+    if (this.terrainCheck === null) this.terrainCheck = now;
+    if (this.terrainPlaying) {
+      if (now - this.terrainCheck < TERRAIN_SOUND_CHECK) return;
+      this.terrainCheck = now;
+      if (audio.streaming) {
+        if (now - this.terrainStart < TERRAIN_SOUND_LENGTH) return;
+        audio.stopStream();
+      }
+      this.terrainPlaying = false;
+      return;
+    }
+    if (now - this.terrainCheck < TERRAIN_SOUND_INTERVAL) return;
+    this.terrainCheck = now;
+    const sound = table ? terrainSound(table, drawn()) : -1;
+    if (sound < 0) return;
+    // `RGE_Sound::get_file_name`: one of its files, picked as a wav is.
+    const items = table!.sound(sound) ?? [];
+    const i = pickItem(items, Math.floor(Math.random() * 0x8000));
+    const file = i === null ? undefined : table!.soundFiles(sound)?.[i];
+    if (!file) return;
+    const url = table!.fileUrl(file);
+    this.record({ event: 'terrain', sound, game: -1, wav: url ? items[i!]![0] : null, source: -1, file });
+    if (url) audio.playStream(url);
+    this.terrainPlaying = true;
+    this.terrainStart = now;
   }
 
   /** The player clicked `e` into the selection (`select_one_object` with play_sound). */

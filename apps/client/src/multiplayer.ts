@@ -2,6 +2,7 @@ import type { Application } from 'pixi.js';
 import { ATTR_FOOD, ATTR_GOLD, ATTR_HEADROOM, ATTR_POPULATION, ATTR_POPULATION_LIMIT, ATTR_STONE, ATTR_WOOD, HOUSE, MARKET, TECH_DONE, TOWN_CENTER, WONDER, type Command, type GameResult, type Score, type World } from '@aoe/sim';
 import { createAssetProvider } from './assets';
 import { GameSounds, type SoundTrigger } from './audio/game-sounds';
+import { MusicPlayer } from './audio/music-player';
 import { SoundPlayer } from './audio/sound-player';
 import { Lockstep, showEndDialog } from './lockstep';
 import { FrameClock } from './lockstep/frame-clock';
@@ -95,6 +96,13 @@ export interface NetDebug {
   minimapPoint(col: number, row: number): { x: number; y: number } | null;
   /** Every sound triggered so far, oldest first (whether or not audio has started); empty before the HUD is up. */
   sounds(): SoundTrigger[];
+  /**
+   * The audio heard: is the context running, and the peak level (0-1) the sounds and the music put out since the last
+   * call, measured on their outputs (docs/spec/sounds.md §8).
+   */
+  audioLevels(): { running: boolean; sound: number; music: number };
+  /** The music file playing (null when none), whether the music is on, its volume slider position and track count. */
+  music(): DebugMusic;
   /** How the game ended and who won (`World.gameResult`); null while it goes on. */
   gameResult(): GameResult | null;
   /** Victory points of `player` (default: this client's) by achievements group (`World.score`). */
@@ -109,6 +117,19 @@ export interface NetDebug {
   baseTime(): number;
   /** The relay's report that the two games' hashes differ at `turn`; null while they agree. `hashes` is by slot. */
   desync(): { turn: number; hashes: number[] } | null;
+}
+
+export interface DebugMusic {
+  playing: string | null;
+  on: boolean;
+  volume: number;
+  tracks: number;
+}
+
+/** What the debug hook reads of the audio. */
+interface AudioDebug {
+  levels(): { running: boolean; sound: number; music: number };
+  music(): DebugMusic;
 }
 
 export interface DebugNet {
@@ -279,7 +300,15 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   const view = new LobbyView(session);
   host.append(view.root);
   // The setup screen's names (civs, maps, victory) from the pack's language strings once it loads.
-  void createAssetProvider().then((provider) => view.setText((id, fallback) => provider.string(id) ?? fallback));
+  // Made before the lobby so its clicks start the audio (browsers allow it only after a gesture).
+  const audio = new SoundPlayer();
+  const music = new MusicPlayer(audio);
+  void createAssetProvider().then((provider) => {
+    view.setText((id, fallback) => provider.string(id) ?? fallback);
+    // `start_menu`: open.mid once as the menu opens (src/tribegam.cpp:1360-1368).
+    music.setTable(provider.soundTable()?.music ?? null);
+    music.playFile('open.mid', false);
+  });
 
   let lockstep: Lockstep | undefined;
   let panel: HTMLElement | undefined;
@@ -287,9 +316,13 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
   let units: UnitLayer | undefined;
   let hud: GameHud | undefined;
   let sounds: GameSounds | undefined;
-  // Made before the lobby so its clicks start the audio (browsers allow it only after a gesture).
-  const audio = new SoundPlayer();
-  const soundTick = () => sounds?.update();
+  const soundTick = () => {
+    sounds?.update();
+    // `handle_terrain_sound` runs in the game, not in its game over mode.
+    if (sounds && mapView && !hud?.gameOver.over) sounds.terrain(performance.now(), () => mapView!.drawnTerrains());
+    audio.sample();
+    music.sample();
+  };
   app.ticker.add(soundTick);
   // The game screen's chat: a message from another player, outside the turns (docs/spec/chat.md §3). The lobby's
   // goes to the session.
@@ -307,6 +340,9 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
     hud?.destroy();
     hud = undefined;
     sounds = undefined;
+    audio.stopStream();
+    // Back at the menu, which plays open.mid again (`started_menu_music` was reset as the game started).
+    music.playFile('open.mid', false);
     mapView?.destroy();
     mapView = undefined;
     window.__game = undefined;
@@ -406,7 +442,11 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       }
       // After the end of the game the other player leaving changes nothing: this one stays until Menu/Quit Game.
     };
-    if (debug) panel = debugPanel(host, game, link, player, () => units, () => hud, () => sounds, frames);
+    const audioDebug: AudioDebug = {
+      levels: () => ({ running: audio.running, sound: audio.level(), music: music.level() }),
+      music: () => ({ playing: music.playing, on: music.on, volume: music.volume, tracks: music.tracks }),
+    };
+    if (debug) panel = debugPanel(host, game, link, player, () => units, () => hud, () => sounds, frames, audioDebug);
     if (debug && perturb !== undefined) {
       const shown = game.onTurn;
       game.onTurn = (turn, hash) => {
@@ -422,6 +462,8 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
       view.setMapFlags(() => game.world.cheats);
       const gameSounds = new GameSounds({ world: game.world, player, table: provider.soundTable(), audio });
       sounds = gameSounds;
+      // `start_game`: every track in order, looped (src/tribegam.cpp:3469-3478).
+      music.playTracks(1, music.tracks, true);
       // An order acknowledges itself with the unit's sound as the player gives it (`command_make_*`); none in the game
       // over mode.
       const order = (c: Command) => {
@@ -456,6 +498,7 @@ export async function startMultiplayer(host: HTMLElement, app: Application, { de
         cancelPlacement: () => layer.cancelPlacement(),
         map: { view, units: layer },
         sounds: gameSounds,
+        music,
         game: {
           names,
           resign: () => game.issue({ type: 'resign' }),
@@ -491,6 +534,7 @@ function debugPanel(
   hud: () => GameHud | undefined,
   sounds: () => GameSounds | undefined,
   frames: FrameClock,
+  audio: AudioDebug,
 ): HTMLElement {
   const panel = document.createElement('div');
   panel.dataset.testid = 'net-debug';
@@ -623,6 +667,8 @@ function debugPanel(
     alliedVictory: (p) => game.world.diplomacy.alliedVictory[p] ?? false,
     minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,
     sounds: () => [...(sounds()?.log ?? [])],
+    audioLevels: () => audio.levels(),
+    music: () => audio.music(),
     gameResult: () => game.world.gameResult(),
     score: (p = player) => game.world.score(p),
     dropLink: (ms) => link.drop?.(ms),

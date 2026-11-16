@@ -713,6 +713,7 @@ export class World {
         this.mastersDigest[player] = undefined;
       },
       techDone: (player, id) => historyTech(this.log, player, id, this.worldTime),
+      notify: (type, p1, p2, p3, p4) => notify(this.log, this.worldTime, type, p1, p2, p3, p4),
       alliedLosOn: (player) => {
         this.diplomacy.alliedLos[player] = true;
         updateMutualAllies(this.diplomacy, this.visibility);

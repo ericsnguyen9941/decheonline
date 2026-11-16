@@ -30,6 +30,7 @@ import {
   unload,
 } from './transport';
 import { ACTION_TRADE, AI_ACTION_TRADE, AI_ORDER_TRADE, aiTrade } from './trade';
+import { NOTIFY_CANNOT_TRADE_WITH_ENEMY, NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND, NOTIFY_NOT_ENOUGH_UNLOAD_SPACE } from './game-log';
 import { newSprite } from './sprites';
 import { FARM, type UnitType } from './units';
 import { TILE_VISIBLE } from './visibility';
@@ -75,6 +76,10 @@ export const NOTIFY_TARGET_INVALID = 0x1fb;
 const NOTIFY_UNDER_ATTACK = 0x201;
 export const NOTIFY_REQUEST_TASK = 0x202;
 const NOTIFY_KILLED = 0x209;
+/** The owner notifications `TRIBE_Player::notify` turns into the game's: unload space, landing, trade (`transport.ts`). */
+const NOTIFY_NO_ROOM = 0x206;
+const NOTIFY_NOT_CLOSE = 0x207;
+const NOTIFY_TRADE_REFUSED = 0x20c;
 /** The object changed hands (`change_ownership`'s notify to itself, src/t_c_obj.cpp:284). */
 export const NOTIFY_OWNER_CHANGED = 0x20b;
 const NOTIFY_STOPPED_WORKING = 0x2bb;
@@ -401,6 +406,10 @@ export function playerNotify(ctx: GameContext, player: number, type: number, p1:
     ctx.alertCooldown[player] = 20;
     if (ctx.entities.get(p1)) rng.srand(rng.rand());
   }
+  // The transport's and trade's refusals go on to the game's notification (src/tplayer.cpp:1765-1774).
+  if (type === NOTIFY_TRADE_REFUSED && p1 === AI_ACTION_TRADE) ctx.notify(NOTIFY_CANNOT_TRADE_WITH_ENEMY, player);
+  else if (type === NOTIFY_NOT_CLOSE) ctx.notify(NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND, player);
+  else if (type === NOTIFY_NO_ROOM) ctx.notify(NOTIFY_NOT_ENOUGH_UNLOAD_SPACE, player);
   rng.srand(rng.rand());
 }
 

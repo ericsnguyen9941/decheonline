@@ -8,6 +8,13 @@ import { distanceToObject, turnTowards } from './combat';
 import type { GameContext } from './context';
 import { isAlly } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
+import {
+  NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_NO_FAITH,
+  NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_TOWN_CENTER,
+  NOTIFY_CONVERSION_WONDER,
+} from './game-log';
 import { deleteActions, getTask, type WorkAction } from './gather';
 import { typeOf, type PlayerMasters } from './masters';
 import { ActionResult, endAction, startMoveTo, updateMover } from './movement';
@@ -130,14 +137,29 @@ function convertFirstInStack(ctx: GameContext, e: Entity, a: WorkAction, firstTi
   if (target) {
     const tt = typeOf(ctx, target);
     const group = tt.group;
-    if (tt.id === TOWN_CENTER || group === GROUP_WALL || tt.id === ARTIFACT || RUINS.includes(tt.id) || tt.id === WONDER) return convertState(ctx, e, a, FAILED);
+    // Each refusal but a wall's, an artifact's or a flag's tells the priest's owner (cantdo.wav, sounds.md §5).
+    if (tt.id === TOWN_CENTER || group === GROUP_WALL || tt.id === ARTIFACT || RUINS.includes(tt.id) || tt.id === WONDER) {
+      convertState(ctx, e, a, FAILED);
+      if (tt.id === TOWN_CENTER) ctx.notify(NOTIFY_CONVERSION_TOWN_CENTER, e.owner);
+      else if (tt.id === WONDER) ctx.notify(NOTIFY_CONVERSION_WONDER, e.owner);
+      return;
+    }
     // The only faith check: once under way, a later attempt needs none.
-    if (e.heldAmount < 100) return convertState(ctx, e, a, FAILED);
+    if (e.heldAmount < 100) {
+      convertState(ctx, e, a, FAILED);
+      return ctx.notify(NOTIFY_CONVERSION_NO_FAITH, e.owner);
+    }
     a.range = group === GROUP_BUILDING ? f32(1) : (typeOf(ctx, e).combat?.range ?? 0);
     if (group === GROUP_FLAG) return convertState(ctx, e, a, FAILED);
     const attributes = ctx.attributes[e.owner]!;
-    if (group === GROUP_PRIEST && attributes[ATTR_PRIEST_CONVERSION]! <= 0) return convertState(ctx, e, a, FAILED);
-    if (group === GROUP_BUILDING && attributes[ATTR_BUILDING_CONVERSION]! <= 0) return convertState(ctx, e, a, FAILED);
+    if (group === GROUP_PRIEST && attributes[ATTR_PRIEST_CONVERSION]! <= 0) {
+      convertState(ctx, e, a, FAILED);
+      return ctx.notify(NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM, e.owner);
+    }
+    if (group === GROUP_BUILDING && attributes[ATTR_BUILDING_CONVERSION]! <= 0) {
+      convertState(ctx, e, a, FAILED);
+      return ctx.notify(NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM, e.owner);
+    }
   }
   convertState(ctx, e, a, firstTime && target ? TO_TARGET : WAITING);
 }

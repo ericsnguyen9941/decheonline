@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importAssets } from './import';
@@ -10,10 +11,14 @@ if (!installDir) {
 }
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const outDir = resolve(process.env.ASSETS_DIR ?? join(repoRoot, 'assets-local', 'pack'));
+// The music's General MIDI sound bank (docs/spec/sounds.md §7): env MUSIC_BANK (a .dls or .sf2), else the system's own
+// Roland GS set where there is one (macOS CoreAudio's, Windows' gm.dls, the bank the original's MIDI played through).
+const SYSTEM_BANKS = ['/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls', 'C:\\Windows\\System32\\drivers\\gm.dls'];
+const musicBank = process.env.MUSIC_BANK ?? SYSTEM_BANKS.find((path) => existsSync(path)) ?? null;
 
 const started = Date.now();
 try {
-  const { slpCount, imageCount, wavCount } = await importAssets({ installDir, outDir, log: (line) => console.log(line) });
+  const { slpCount, imageCount, wavCount } = await importAssets({ installDir, outDir, musicBank, log: (line) => console.log(line) });
   const took = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`assets:import: pack version ${PACK_VERSION}: ${slpCount} slp -> ${imageCount} images, ${wavCount} wav in ${outDir} (${took}s)`);
 } catch (error) {

@@ -1,7 +1,7 @@
 // The asset pack written by `npm run assets:import` and read by the client. Types only plus
 // the path helper both sides share, so the client can import this file without Node.
 
-export const PACK_VERSION = 15;
+export const PACK_VERSION = 16;
 
 /** Which DRS archive an SLP came from. `data2` archives (Rise of Rome) merge into the same name. */
 export type SlpSource = 'graphics' | 'terrain' | 'border' | 'interface';
@@ -74,6 +74,8 @@ export interface PackTerrain {
   borders: number[];
   /** `map_hi_color`, `map_med_color`, `map_low_color`: the minimap's palette indices (a flat tile uses the middle one). */
   minimap: [number, number, number];
+  /** The dat sound of the terrain's ambient sound (`RGE_Tile_Set::sound`, docs/spec/sounds.md §6); -1 none (pack version 16). */
+  sound: number;
 }
 
 /** A border between terrains (`RGE_Border_Set`, the dat's terrain block; pack version 13). */
@@ -157,6 +159,11 @@ export interface PackMinimap {
 export interface PackSound {
   /** `[resource id, percent]` per wav; the wav is `soundPath(id)` when `PackManifest.wavs` has the id, else silent. */
   items: [number, number][];
+  /**
+   * Each wav's file name, lower case (pack version 16): an item of resource id -1 is the loose file `sound/<name>`
+   * (`TDigital`), `soundFilePath(name)` when `PackManifest.soundFiles` has it, else silent.
+   */
+  files: string[];
 }
 
 /**
@@ -227,6 +234,24 @@ export interface PackManifest {
   screens: Record<string, PackScreen>;
   /** The taunt numbers the install has a `sound/TauntNNN.wav` for, at `tauntPath(n)` (`TTaunt::PlayTauntNo`; pack version 15). */
   taunts: number[];
+  /** The loose `sound/*.wav` files the dat's sounds name (the terrains' ambient sounds), lower case, at `soundFilePath` (pack version 16). */
+  soundFiles: string[];
+  /** The music (pack version 16); null when the install has no `sound/music1.mid` or the import found no sound bank. */
+  music: PackMusic | null;
+}
+
+/**
+ * The original's MIDI music (`TMusic_System`, src/music.cpp; docs/spec/sounds.md §7): `sound/musicN.mid` and the named
+ * files, played here through a General MIDI sound bank the import copies from the machine (the original played them on
+ * Windows' synthesizer).
+ */
+export interface PackMusic {
+  /** How many `music<n>.mid` there are, counted up from 1 to the first missing one (`open_device`), at `musicPath`. */
+  tracks: number;
+  /** The other `.mid` files of `sound/`, lower case (open.mid, won.mid, lost.mid, ...), at `musicPath`. */
+  files: string[];
+  /** Pack-relative path of the sound bank (DLS or SF2). */
+  bank: string;
 }
 
 /** Pack-relative path of wav resource `id`. */
@@ -234,6 +259,12 @@ export const soundPath = (id: number): string => `sounds/${id}.wav`;
 
 /** Pack-relative path of taunt `n`'s wav. */
 export const tauntPath = (n: number): string => `sounds/taunt${n}.wav`;
+
+/** Pack-relative path of the loose sound file `name` (lower case). */
+export const soundFilePath = (name: string): string => `sounds/file/${name}`;
+
+/** Pack-relative path of the music file `name` (lower case: `music1.mid`, `won.mid`). */
+export const musicPath = (name: string): string => `music/${name}`;
 
 export const slpKey = (source: SlpSource, id: number): string => `${source}/${id}`;
 

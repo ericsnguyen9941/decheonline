@@ -1,6 +1,7 @@
 // Plays the pack's wavs through Web Audio as DirectSound played them for the original (docs/spec/sounds.md "Playback"):
 // one buffer per wav, so playing a wav again restarts it; no panning or distance, every sound at full level under the
 // player's sound volume. Browsers start audio only after a user gesture: the context is made on the first click or key.
+// The music (`MusicPlayer`) plays through the same context.
 
 /** The original's sound volume slider (`TRIBE_Dialog_Config`, src/dlg_conf.cpp:131): 0 at "High" (top), 99 at "Off". */
 export const VOLUME_STOPS = 99;
@@ -15,9 +16,40 @@ export function volumeGain(position: number): number {
   return position >= VOLUME_STOPS ? 0 : 1 - position / 100;
 }
 
+/** The peak level a node puts out, sampled once a frame: what the test hook reads to tell that audio is heard. */
+export class Meter {
+  private readonly analyser: AnalyserNode;
+  private readonly data: Float32Array<ArrayBuffer>;
+  private peak = 0;
+
+  constructor(context: AudioContext, source: AudioNode) {
+    this.analyser = context.createAnalyser();
+    this.analyser.fftSize = 2048;
+    this.data = new Float32Array(this.analyser.fftSize);
+    source.connect(this.analyser);
+  }
+
+  /** Reads the last `fftSize` samples (about 40 ms, more than a frame) into the peak. */
+  sample(): void {
+    this.analyser.getFloatTimeDomainData(this.data);
+    for (const v of this.data) this.peak = Math.max(this.peak, Math.abs(v));
+  }
+
+  /** The peak since the last call. */
+  take(): number {
+    const peak = this.peak;
+    this.peak = 0;
+    return peak;
+  }
+}
+
 export class SoundPlayer {
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
+  private meter: Meter | null = null;
+  private readonly started: ((context: AudioContext) => void)[] = [];
+  /** The one streamed sound (`TSound_Driver::stream_file`: the terrain sounds): its url and source. */
+  private stream: { url: string; source: AudioBufferSourceNode | null } | null = null;
   private readonly buffers = new Map<string, Promise<AudioBuffer | null>>();
   /** What each wav is playing now: playing it again stops this first. */
   private readonly playing = new Map<string, AudioBufferSourceNode>();
@@ -32,6 +64,12 @@ export class SoundPlayer {
       window.addEventListener(type, unlock, { capture: true });
       this.cleanup.push(() => window.removeEventListener(type, unlock, { capture: true }));
     }
+  }
+
+  /** Runs `fn` with the audio context once it exists (at once if it does). */
+  onStart(fn: (context: AudioContext) => void): void {
+    if (this.context) fn(this.context);
+    else this.started.push(fn);
   }
 
   /** The sound volume slider's position: 0 loudest, `VOLUME_STOPS` off. */
@@ -70,6 +108,47 @@ export class SoundPlayer {
     });
   }
 
+  /**
+   * Streams the wav at `url` from its start (`TSound_Driver::stream_file`), stopping the stream before it
+   * (`stop_stream`). One stream plays at a time.
+   */
+  playStream(url: string): void {
+    this.stopStream();
+    const context = this.context;
+    if (!context || context.state !== 'running' || volumeGain(this.position) === 0) return;
+    const stream: { url: string; source: AudioBufferSourceNode | null } = { url, source: null };
+    this.stream = stream;
+    void this.buffer(url).then((buffer) => {
+      if (!buffer || !this.gain || this.stream !== stream) return;
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.gain);
+      source.onended = () => this.stream === stream && (this.stream = null);
+      stream.source = source;
+      source.start();
+    });
+  }
+
+  /** Is a stream playing (`_bPlaying`)? */
+  get streaming(): boolean {
+    return this.stream !== null;
+  }
+
+  stopStream(): void {
+    this.stream?.source?.stop();
+    this.stream = null;
+  }
+
+  /** Once a frame: samples the output for `level`. */
+  sample(): void {
+    this.meter?.sample();
+  }
+
+  /** The peak level of the sounds put out since the last call (0 silent, 1 full scale). */
+  level(): number {
+    return this.meter?.take() ?? 0;
+  }
+
   destroy(): void {
     for (const fn of this.cleanup) fn();
     void this.context?.close().catch(() => undefined);
@@ -84,6 +163,8 @@ export class SoundPlayer {
       this.gain = this.context.createGain();
       this.gain.gain.value = volumeGain(this.position);
       this.gain.connect(this.context.destination);
+      this.meter = new Meter(this.context, this.gain);
+      for (const fn of this.started.splice(0)) fn(this.context);
     }
     if (this.context.state === 'suspended') void this.context.resume().catch(() => undefined);
   }

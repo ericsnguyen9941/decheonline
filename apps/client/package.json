@@ -14,7 +14,8 @@
     "@aoe/assets-import": "*",
     "@aoe/protocol": "*",
     "@aoe/sim": "*",
-    "pixi.js": "^8.23.0"
+    "pixi.js": "^8.23.0",
+    "spessasynth_lib": "^4.4.8"
   },
   "devDependencies": {
     "vite": "^8.3.8"

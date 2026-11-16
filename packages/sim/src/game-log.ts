@@ -4,10 +4,37 @@
  * src/t_histry.cpp): its population every 15 game seconds and the ages it reached, which the timeline draws.
  */
 
+export const NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND = 1;
+export const NOTIFY_NOT_ENOUGH_UNLOAD_SPACE = 2;
+export const NOTIFY_CANNOT_TRADE_WITH_ENEMY = 3;
 export const NOTIFY_PLAYER_RESIGNED = 5;
 export const NOTIFY_PLAYER_DEFEATED = 6;
 export const NOTIFY_TRIBUTE_PAID = 7;
 export const NOTIFY_DIPLOMACY_CHANGED = 8;
+export const NOTIFY_NO_ROOM_FOR_UNIT = 0x68;
+export const NOTIFY_CANNOT_REPAIR = 0x6b;
+export const NOTIFY_CONVERSION_NO_FAITH = 0x76;
+export const NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM = 0x77;
+export const NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM = 0x78;
+export const NOTIFY_CONVERSION_TOWN_CENTER = 0x79;
+export const NOTIFY_CONVERSION_WONDER = 0x7a;
+
+/**
+ * The notifications whose first value is the player told and that play game sound 3, cantdo.wav, on its screen
+ * (`TRIBE_Game::notification`, src/tribegam.cpp:1773-1817, 2090-2134; docs/spec/sounds.md §5).
+ */
+export const CANT_DO_NOTIFICATIONS: ReadonlySet<number> = new Set([
+  NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND,
+  NOTIFY_NOT_ENOUGH_UNLOAD_SPACE,
+  NOTIFY_CANNOT_TRADE_WITH_ENEMY,
+  NOTIFY_NO_ROOM_FOR_UNIT,
+  NOTIFY_CANNOT_REPAIR,
+  NOTIFY_CONVERSION_NO_FAITH,
+  NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_TOWN_CENTER,
+  NOTIFY_CONVERSION_WONDER,
+]);
 
 /** Seconds between two history entries (`TRIBE_Player::update`, src/tplayer.cpp:355-363). */
 export const HISTORY_INTERVAL = 15;

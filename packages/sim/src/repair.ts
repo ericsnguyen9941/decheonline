@@ -9,6 +9,7 @@ import { distanceToObject, turnTowards } from './combat';
 import type { GameContext } from './context';
 import { isAlly, type DiplomacyContext } from './diplomacy';
 import { ObjectState, type Entity } from './entities';
+import { NOTIFY_CANNOT_REPAIR } from './game-log';
 import { deleteActions, getTask, transform, type WorkAction } from './gather';
 import { master, typeOf, type PlayerMasters } from './masters';
 import { ActionResult, endAction, firstTileAlongLine, startMoveTo, updateMover } from './movement';
@@ -280,6 +281,7 @@ export function updateRepair(ctx: GameContext, e: Entity, a: WorkAction): Action
       else if (result === HEAL_UNPAID) {
         // `GAME_NOTIFY_CANNOT_REPAIR` tells the owner's screen; the action idles.
         notifyObject(ctx, e, e.id, NOTIFY_TARGET_INVALID, AI_ACTION_REPAIR);
+        ctx.notify(NOTIFY_CANNOT_REPAIR, e.owner, target.id);
         setState(ctx, e, a, REPAIR_IDLE);
       }
       return ActionResult.Continue;

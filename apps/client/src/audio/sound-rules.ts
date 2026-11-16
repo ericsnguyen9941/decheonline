@@ -23,7 +23,7 @@ export type UnitSound = (typeof UnitSound)[keyof typeof UnitSound];
 export const GameSound = {
   /** button2.wav: the game screen's buttons (`TRIBE_Screen_Game` makes them with `get_sound(1)`, src/scr_game.cpp:227). */
   Button: 1,
-  /** cantdo.wav: an order mode's click on nothing it can take (`error_a`, src/tvw_main.cpp:420). */
+  /** cantdo.wav: an order mode's click on nothing it can take (`error_a`, src/tvw_main.cpp:420), and a refusal the game tells (`CANT_DO_NOTIFICATIONS`). */
   CantDo: 3,
   /**
    * convwarn.wav: one of the player's objects was converted by another player (`GAME_NOTIFY_CONVERSION_SUCCEEDED`,
@@ -48,12 +48,45 @@ export const ATTR_ATTACK_WARNING_SOUND = 26;
  * turn; the first that takes it to 0 or below plays. Null when the percents run out first (nothing plays).
  */
 export function pickWav(items: readonly (readonly [number, number])[], rand: number): number | null {
+  const i = pickItem(items, rand);
+  return i === null ? null : items[i]![0];
+}
+
+/** `pickWav`'s pick as an index into `items` (`RGE_Sound::get_file_name` picks a file name the same way, src/Sound.cpp:192). */
+export function pickItem(items: readonly (readonly [number, number])[], rand: number): number | null {
   let r = Math.trunc((rand * 100) / 0x7fff);
-  for (const [wav, percent] of items) {
-    r -= percent;
-    if (r <= 0) return wav;
+  for (let i = 0; i < items.length; i++) {
+    r -= items[i]![1];
+    if (r <= 0) return i;
   }
   return null;
+}
+
+/**
+ * `TRIBE_Screen_Game::handle_terrain_sound` (src/scr_game.cpp:3571-3633): every `TERRAIN_SOUND_INTERVAL` ms, the sound of
+ * the terrain with the most tiles drawn plays as a stream; it is checked every `TERRAIN_SOUND_CHECK` ms and cut once
+ * it has played `TERRAIN_SOUND_LENGTH` ms. The interval counts from the last check.
+ */
+export const TERRAIN_SOUND_INTERVAL = 20000;
+export const TERRAIN_SOUND_CHECK = 1000;
+export const TERRAIN_SOUND_LENGTH = 6000;
+
+/**
+ * The terrain sound of the view (`handle_terrain_sound`): of the terrains with a sound, the one with the most tiles
+ * drawn (`drawn`, by terrain id), the lowest id on a tie; -1 when no drawn terrain has one.
+ */
+export function terrainSound(table: SoundTable, drawn: ReadonlyMap<number, number>): number {
+  let best = -1;
+  let bestDrawn = 0;
+  for (const id of [...drawn.keys()].sort((a, b) => a - b)) {
+    const count = drawn.get(id)!;
+    const sound = table.terrainSound(id);
+    if (count > bestDrawn && sound >= 0) {
+      best = sound;
+      bestDrawn = count;
+    }
+  }
+  return best;
 }
 
 /** Dat sound id in slot `slot` of master `unit`'s sounds, or -1. */

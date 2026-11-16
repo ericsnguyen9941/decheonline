@@ -124,6 +124,24 @@ export interface SoundTable {
   wavUrl(id: number): string | null;
   /** URL of taunt `n`'s wav (`sound/TauntNNN.wav`); null when the pack does not have it. */
   tauntUrl(n: number): string | null;
+  /** File names (lower case) of dat sound `id`'s wavs, in `sound(id)`'s order; null when unknown (pack version 16). */
+  soundFiles(id: number): readonly string[] | null;
+  /** URL of the loose `sound/` wav `name` (lower case); null when the pack does not have it. */
+  fileUrl(name: string): string | null;
+  /** The ambient dat sound of terrain `id` (`RGE_Tile_Set::sound`); -1 none. */
+  terrainSound(id: number): number;
+  /** The music; null when the pack has none. */
+  music: MusicTable | null;
+}
+
+/** The music the pack has (pack version 16; docs/spec/sounds.md §7). */
+export interface MusicTable {
+  /** How many `music<n>.mid` tracks, from 1. */
+  tracks: number;
+  /** URL of music file `name` (`music3.mid`, `won.mid`); null when the pack does not have it. */
+  url(name: string): string | null;
+  /** URL of the General MIDI sound bank. */
+  bankUrl: string;
 }
 
 /**

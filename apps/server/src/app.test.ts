@@ -28,6 +28,7 @@ describe('GET /assets', () => {
     await mkdir(join(dir, 'pack'));
     await writeFile(join(dir, 'pack', 'manifest.json'), '{"version":1}');
     await writeFile(join(dir, 'pack', 'x.exe'), 'nope');
+    for (const name of ['5000.wav', 'music1.mid', 'bank.dls']) await writeFile(join(dir, 'pack', name), 'RIFF');
     await writeFile(join(dir, 'secret.json'), '{}');
     server = createApp({ assetsDir: join(dir, 'pack') });
     await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -43,6 +44,14 @@ describe('GET /assets', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/json');
     expect(await res.json()).toEqual({ version: 1 });
+  });
+
+  test('serves the sounds, the music and its sound bank', async () => {
+    for (const [name, type] of [['5000.wav', 'audio/wav'], ['music1.mid', 'audio/midi'], ['bank.dls', 'application/octet-stream']]) {
+      const res = await fetch(`${base}/assets/${name}`);
+      expect(res.status, name).toBe(200);
+      expect(res.headers.get('content-type'), name).toBe(type);
+    }
   });
 
   test('404s for a missing file, an unknown type and a path outside the pack', async () => {

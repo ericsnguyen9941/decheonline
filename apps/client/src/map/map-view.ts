@@ -147,6 +147,21 @@ export class MapView {
     return this.active.size;
   }
 
+  /**
+   * The tiles drawn now that are not black, counted by terrain (`RGE_View::view_function_terrain`'s `drawn`, src/view.cpp:1962):
+   * which terrain's ambient sound plays (docs/spec/sounds.md §6).
+   */
+  drawnTerrains(): Map<number, number> {
+    const counts = new Map<number, number>();
+    const width = this.map.width;
+    for (const index of this.active.keys()) {
+      if (this.fogState(index % width, Math.floor(index / width)) === TILE_BLACK) continue;
+      const terrain = this.map.terrain[index]!;
+      counts.set(terrain, (counts.get(terrain) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   /** Draw the fog of `source` from now on (null: the whole map, as the scenario editor shows it). */
   setFog(source: FogSource | null): void {
     this.fog = source;

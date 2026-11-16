@@ -3,7 +3,7 @@ import { BUILDER, HOUSE, LUMBERJACK, ObjectState, startingObjects, TECH_DONE, TE
 import type { SoundTable } from '../assets';
 import { GameSounds } from './game-sounds';
 import type { SoundPlayer } from './sound-player';
-import { GameSound, pickWav, researchSound, selectSound, spriteSounds, tauntNumber, UnitSound } from './sound-rules';
+import { GameSound, pickWav, researchSound, selectSound, spriteSounds, tauntNumber, terrainSound, UnitSound } from './sound-rules';
 
 // `[selected, created, death, command, move, construction]` of these masters in data2/empires.dat
 // (npm run dat:dump -- unit <id>).
@@ -29,14 +29,36 @@ const table: SoundTable = {
   graphicSounds: (id) => GRAPHIC_SOUNDS[id] ?? null,
   wavUrl: (id) => `/assets/sounds/${id}.wav`,
   tauntUrl: (n) => (n >= 1 && n <= 50 ? `/assets/sounds/taunt${n}.wav` : null),
+  // Dat sound 95 (Grass, 0 and 12): 7 loose files, the first at 10%; 142 (Water, 1): lake1.wav at 100%. The install has
+  // no owl.wav.
+  soundFiles: (id) => AMBIENT[id]?.files ?? null,
+  fileUrl: (name) => (name === 'owl.wav' ? null : `/assets/sounds/file/${name}`),
+  terrainSound: (id) => TERRAIN_SOUNDS[id] ?? -1,
+  music: null,
 };
+const AMBIENT: Record<number, { items: [number, number][]; files: string[] }> = {
+  95: { items: [[-1, 10], ...Array.from({ length: 6 }, (): [number, number] => [-1, 15])], files: ['bird.wav', 'birds1.wav', 'forest4.wav', 'grass2.wav', 'grass3.wav', 'wind1.wav', 'wind2.wav'] },
+  142: { items: [[-1, 100]], files: ['lake1.wav'] },
+  80: { items: [[-1, 100]], files: ['owl.wav'] },
+};
+const TERRAIN_SOUNDS: Record<number, number> = { 0: 95, 1: 142, 2: -1, 10: 80, 12: 95 };
+const ambientTable: SoundTable = { ...table, sound: (id) => AMBIENT[id]?.items ?? table.sound(id) };
 
-function game() {
+function game(t = table) {
   const world = new World({ players: 3, units: startingObjects(3) });
   const played: [string, boolean][] = [];
-  const audio = { volume: 0, play: (url: string, restart = true) => played.push([url, restart]) } as unknown as SoundPlayer;
-  const sounds = new GameSounds({ world, player: 1, table, audio });
-  return { world, sounds, played };
+  const stream: { url: string | null } = { url: null };
+  const audio = {
+    volume: 0,
+    play: (url: string, restart = true) => played.push([url, restart]),
+    playStream: (url: string) => (stream.url = url),
+    stopStream: () => (stream.url = null),
+    get streaming() {
+      return stream.url !== null;
+    },
+  } as unknown as SoundPlayer;
+  const sounds = new GameSounds({ world, player: 1, table: t, audio });
+  return { world, sounds, played, stream };
 }
 
 const own = (world: World, player: number, type: number) => [...world.entities.ofPlayer(player)].find((e) => e.type === type)!;
@@ -202,4 +224,46 @@ test('a numeric chat line plays its taunt; "!MUTE" typed here stops them until "
   sounds.chatLine('!NOMUTE', true);
   sounds.chatLine('!4', true);
   expect(played.at(-1)![0]).toBe('/assets/sounds/taunt4.wav');
+});
+
+describe('terrain sounds', () => {
+  test('the terrain with a sound that has the most tiles drawn, the lowest id on a tie', () => {
+    expect(terrainSound(table, new Map([[0, 10], [1, 30], [2, 50]]))).toBe(142);
+    expect(terrainSound(table, new Map([[1, 10], [0, 10]]))).toBe(95);
+    expect(terrainSound(table, new Map([[2, 50]]))).toBe(-1);
+    expect(terrainSound(table, new Map())).toBe(-1);
+  });
+
+  test('every 20 s one file of the sound streams, cut after 6 s; the next counts from the cut', () => {
+    const { sounds, stream } = game(ambientTable);
+    const water = () => new Map([[1, 40], [0, 5]]);
+    sounds.terrain(0, water);
+    sounds.terrain(19_999, water);
+    expect(stream.url).toBeNull();
+    sounds.terrain(20_000, water);
+    expect(stream.url).toBe('/assets/sounds/file/lake1.wav');
+    expect(sounds.log.at(-1)).toEqual({ event: 'terrain', sound: 142, game: -1, wav: -1, source: -1, file: 'lake1.wav' });
+    // Checked every second: still on at 25 s, cut at the 26 s check.
+    for (const t of [21_000, 22_000, 23_000, 24_000, 25_000]) sounds.terrain(t, water);
+    expect(stream.url).not.toBeNull();
+    sounds.terrain(26_000, water);
+    expect(stream.url).toBeNull();
+    sounds.terrain(45_999, water);
+    expect(sounds.log).toHaveLength(1);
+    sounds.terrain(46_000, water);
+    expect(sounds.log).toHaveLength(2);
+  });
+
+  test('a stream that ends early is noticed at the next check; a file the pack lacks plays nothing', () => {
+    const { sounds, stream } = game(ambientTable);
+    sounds.terrain(0, () => new Map([[1, 1]]));
+    sounds.terrain(20_000, () => new Map([[1, 1]]));
+    stream.url = null;
+    sounds.terrain(21_000, () => new Map([[1, 1]]));
+    sounds.terrain(40_999, () => new Map([[1, 1]]));
+    expect(sounds.log).toHaveLength(1);
+    sounds.terrain(41_000, () => new Map([[10, 1]]));
+    expect(sounds.log.at(-1)).toMatchObject({ sound: 80, wav: null, file: 'owl.wav' });
+    expect(stream.url).toBeNull();
+  });
 });

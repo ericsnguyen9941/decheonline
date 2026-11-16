@@ -64,7 +64,9 @@ interface Window {
     relation(player: number, other: number): number;
     alliedVictory(player: number): boolean;
     minimapPoint(col: number, row: number): { x: number; y: number } | null;
-    sounds(): { event: string; sound: number; game: number; wav: number | null; source: number }[];
+    sounds(): { event: string; sound: number; game: number; wav: number | null; source: number; file?: string }[];
+    audioLevels(): { running: boolean; sound: number; music: number };
+    music(): { playing: string | null; on: boolean; volume: number; tracks: number };
     gameResult(): { endCondition: number; winners: number[]; status: number[] } | null;
     score(player?: number): { total: number; military: number; economy: number; religion: number; technology: number; survival: number; wonder: number };
     dropLink(holdMs: number): void;

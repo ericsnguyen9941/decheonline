@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { importAssets } from './import';
-import { slpImagePath, slpKey, soundPath, tauntPath, type PackManifest } from './manifest';
+import { musicPath, slpImagePath, slpKey, soundFilePath, soundPath, tauntPath, type PackManifest } from './manifest';
 import { SYNTHETIC, WHOLE_TILE, writeSyntheticInstall } from './synthetic';
 
 let root: string;
@@ -16,7 +16,8 @@ beforeAll(async () => {
   install = join(root, 'install');
   pack = join(root, 'pack');
   await writeSyntheticInstall(install);
-  manifest = (await importAssets({ installDir: install, outDir: pack })).manifest;
+  await writeFile(join(root, 'Bank.DLS'), 'RIFF bank');
+  manifest = (await importAssets({ installDir: install, outDir: pack, musicBank: join(root, 'Bank.DLS') })).manifest;
 });
 afterAll(() => rm(root, { recursive: true, force: true }));
 
@@ -143,12 +144,28 @@ test('imports the loose taunt wavs of sound/, whatever their case', async () => 
   for (const n of manifest.taunts) expect((await readFile(join(pack, tauntPath(n)))).subarray(0, 4).toString()).toBe('RIFF');
 });
 
+test("imports the loose sound/ wavs the dat's sounds name, each sound's file names and each terrain's sound", async () => {
+  const { ambient } = SYNTHETIC;
+  expect(manifest.soundFiles).toEqual(['grass2.wav']);
+  expect((await readFile(join(pack, soundFilePath('grass2.wav')))).subarray(0, 4).toString()).toBe('RIFF');
+  expect(manifest.sounds[ambient.sound]).toEqual({ items: [[-1, 50], [-1, 50]], files: ['grass2.wav', 'owl.wav'] });
+  expect(manifest.terrains[0]?.sound).toBe(ambient.sound);
+});
+
+test('imports the music: music1.mid up to the first gap, the named .mid files and the sound bank', async () => {
+  expect(manifest.music).toEqual({ tracks: 2, files: ['lost.mid', 'open.mid', 'won.mid'], bank: musicPath('bank.dls') });
+  for (const name of ['music1.mid', 'music2.mid', 'open.mid', 'won.mid', 'lost.mid']) expect((await readFile(join(pack, musicPath(name)))).toString()).toMatch(/^MThd /);
+  expect((await readFile(join(pack, musicPath('bank.dls')))).toString()).toBe('RIFF bank');
+  const bare = join(root, 'no-bank');
+  expect((await importAssets({ installDir: install, outDir: bare })).manifest.music).toBeNull();
+});
+
 test("imports sounds.drs's wavs (data2 overriding data) and interfac.drs's, the dat's sounds and each unit's and graphic's sound ids", async () => {
   const ids = [...new Set([...SYNTHETIC.wavs.data, ...SYNTHETIC.wavs.data2, ...SYNTHETIC.wavs.interface])].sort((a, b) => a - b);
   expect(manifest.wavs).toEqual(ids);
   for (const id of ids) expect((await readFile(join(pack, soundPath(id)))).subarray(0, 4).toString()).toBe('RIFF');
   expect((await stat(join(pack, soundPath(SYNTHETIC.overriddenWav)))).size).toBe(44 + 128);
-  expect(manifest.sounds[0]).toEqual({ items: [[5000, 100]] });
+  expect(manifest.sounds[0]).toEqual({ items: [[5000, 100]], files: ['click.wav'] });
   expect(manifest.unitSounds[SYNTHETIC.unitId]).toHaveLength(6);
   // Graphic 0 has a frame sound per facet (frame i, sound 0); graphic 2 none.
   expect(manifest.graphics[SYNTHETIC.standingGraphic]).toMatchObject({ sound: -1, frameSounds: [[[0, 0]], [[1, 0]]] });

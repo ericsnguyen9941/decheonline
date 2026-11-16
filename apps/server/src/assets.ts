@@ -11,6 +11,11 @@ const TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.json': 'application/json',
   '.dat': 'application/octet-stream',
+  // The sounds and the music with its sound bank (docs/spec/sounds.md).
+  '.wav': 'audio/wav',
+  '.mid': 'audio/midi',
+  '.dls': 'application/octet-stream',
+  '.sf2': 'application/octet-stream',
 };
 
 /**

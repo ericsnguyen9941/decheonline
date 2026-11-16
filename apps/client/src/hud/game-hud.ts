@@ -10,6 +10,7 @@ import {
   ObjectState,
   processCheatCode,
   STATUS_LOST,
+  STATUS_WON,
   typeOf,
   UNIT_LEVEL_TRADE,
   UNIT_LEVEL_TRANSPORT,
@@ -33,7 +34,7 @@ import { HeldDisplay } from './relics';
 import { ChatLines, formatName, GameOver, MESSAGE_NOT_RESPONDING, SOUND_CHAT, type GameOverSounds } from './game-over';
 import { MenuDialog, okPopup } from './menu';
 import { ScoreDisplay } from './score-display';
-import { OptionsDialog, type OptionsSounds } from './options';
+import { OptionsDialog, type OptionsMusic, type OptionsSounds } from './options';
 import { ClockOverlay, TimingsPanel } from './overlays';
 import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
@@ -125,6 +126,8 @@ export interface GameHudOptions {
   map?: { view: MapView; units: MinimapUnits };
   /** The buttons' click and the sound volume the Menu button's settings change; without it, no click and no settings. */
   sounds?: OptionsSounds & GameOverSounds & { chatLine(text: string, local: boolean): void };
+  /** The music: the settings' music volume and the end of the game's won.mid or lost.mid; without it, no music slider. */
+  music?: OptionsMusic & { playFile(name: string, loop: boolean): void };
   /** The multiplayer game around the screen: the menu's resign and quit, and the end of the game. */
   game: HudGame;
 }
@@ -290,7 +293,7 @@ export class GameHud {
     const sounds = o.sounds;
     const click = () => sounds?.button();
     const speed = { current: () => o.world.gameSpeed, disabled: () => this.gameOver.over, change: (s: number) => this.changeGameSpeed(s) };
-    this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds, speed) : null;
+    this.options = sounds ? new OptionsDialog(this.root, o.provider, sounds, speed, o.music ?? null) : null;
     this.chat = new ChatLines(this.view);
     this.scores = new ScoreDisplay(this.view, o.world, o.game.names);
     this.gameOver = new GameOver({
@@ -588,6 +591,8 @@ export class GameHud {
   /** `TribeAchievementsScreen`: at the end of the game (`do_game_over`), Close leaves; else back to the game. */
   showAchievements(end: boolean): void {
     if (this.achievements) return;
+    // The end of the game's achievements play won.mid for a winner, else lost.mid, once (src/tribegam.cpp:1256-1278).
+    if (end) this.o.music?.playFile(this.o.world.playerStatus(this.o.player) === STATUS_WON ? 'won.mid' : 'lost.mid', false);
     this.achievements = new AchievementsScreen({
       parent: this.root,
       provider: this.o.provider,

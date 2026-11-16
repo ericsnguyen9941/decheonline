@@ -5,6 +5,7 @@
  */
 import type { GameContext } from './context';
 import { ObjectState, type Entity } from './entities';
+import { NOTIFY_NO_ROOM_FOR_UNIT } from './game-log';
 import { ActionResult, facetOf } from './movement';
 import { add32, div32, f32, mul32, sub32 } from './num';
 import { newSprite } from './sprites';
@@ -508,7 +509,10 @@ function updateTrain(ctx: GameContext, e: Entity, a: TrainAction): ActionResult 
   a.workDone = ctx.quickBuild ? f32(1000) : add32(mul32(typeOf(ctx, e).action!.workRate, ctx.deltaSeconds), a.workDone);
   if (f32(master(ctx, e.owner, a.unit).creatable!.trainTime) <= a.workDone) {
     a.state = TRAIN_DONE;
-    if (!placeUnit(ctx, e, a.unit)) reimburseObjCost(ctx, e.owner, a.unit);
+    if (!placeUnit(ctx, e, a.unit)) {
+      reimburseObjCost(ctx, e.owner, a.unit);
+      ctx.notify(NOTIFY_NO_ROOM_FOR_UNIT, e.owner, a.unit);
+    }
     return ActionResult.Remove;
   }
   return ActionResult.Continue;

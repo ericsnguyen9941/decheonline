@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { parseDat, type DatFile } from '@aoe/data';
 import { DrsArchive, mergeStrings, parsePalette, readPeStrings, parseSlp, slpFrameToRgba, SlpPixelKind, type Palette } from '@aoe/formats';
 import { blit, packShelves } from './atlas';
@@ -8,12 +8,15 @@ import {
   PACK_VERSION,
   PLAYER_OWNERS,
   slpImagePath,
+  musicPath,
   slpKey,
+  soundFilePath,
   soundPath,
   tauntPath,
   type PackFrame,
   type PackManifest,
   type PackMinimap,
+  type PackMusic,
   type PackScreen,
   type PackSlp,
   type PackTileEdges,
@@ -29,6 +32,8 @@ export interface ImportOptions {
   installDir: string;
   /** Pack folder; replaced entirely. */
   outDir: string;
+  /** A General MIDI sound bank (DLS or SF2) for the music; null or absent: the pack has no music. Only read. */
+  musicBank?: string | null;
   log?: (line: string) => void;
 }
 
@@ -63,7 +68,7 @@ async function openDrs(root: string, rel: string, required: boolean): Promise<Dr
 }
 
 /** Reads the install and writes the pack. Throws on a missing required file, before touching outDir. */
-export async function importAssets({ installDir, outDir, log = () => {} }: ImportOptions): Promise<ImportResult> {
+export async function importAssets({ installDir, outDir, musicBank = null, log = () => {} }: ImportOptions): Promise<ImportResult> {
   const datPath = await require(installDir, 'data2/empires.dat');
   const interfac = (await openDrs(installDir, 'data/Interfac.drs', true)) as DrsArchive;
   const sources: Record<SlpSource, DrsArchive[]> = {
@@ -169,11 +174,46 @@ export async function importAssets({ installDir, outDir, log = () => {} }: Impor
   }
   taunts.sort((a, b) => a - b);
   log(`taunts: ${taunts.length} wav`);
+  // The dat's sounds that name a loose file (resource id -1: the terrains' ambient sounds, `TDigital` from `sound/`).
+  const looseNames = new Set(dat.sounds.flatMap((s) => s.items.filter((i) => i.resourceId < 0).map((i) => i.fileName.toLowerCase())));
+  const soundFiles: string[] = [];
+  const midis = new Map<string, string>();
+  for (const name of soundDir ? await readdir(soundDir) : []) {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.mid')) midis.set(lower, name);
+    if (!looseNames.has(lower)) continue;
+    if (soundFiles.length === 0) await mkdir(join(outDir, 'sounds', 'file'), { recursive: true });
+    soundFiles.push(lower);
+    await copyFile(join(soundDir!, name), join(outDir, soundFilePath(lower)));
+  }
+  soundFiles.sort();
+  log(`sound files: ${soundFiles.length} wav`);
+  const music = await importMusic(soundDir, midis, musicBank, outDir);
+  log(music ? `music: ${music.tracks} tracks, ${music.files.join(', ')}, bank ${musicBank}` : 'music: none (no sound/music1.mid or no sound bank)');
 
-  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b), screens, taunts);
+  const manifest = buildManifest(dat, slps, strings, minimap, tileEdges, [...wavs.keys()].sort((a, b) => a - b), screens, taunts, soundFiles, music);
   log(`strings: ${strings.size}`);
   await writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest));
   return { manifest, slpCount: Object.keys(slps).length, imageCount, wavCount: wavs.size };
+}
+
+/**
+ * Copies the music: `music1.mid` up to the first missing number (`TMusic_System::open_device`, src/music.cpp:111-120),
+ * the other `.mid` files, and the sound bank. Null without a `music1.mid` or a bank.
+ */
+async function importMusic(soundDir: string | null, midis: Map<string, string>, bank: string | null, outDir: string): Promise<PackMusic | null> {
+  if (!soundDir || !bank || !midis.has('music1.mid')) return null;
+  await mkdir(join(outDir, 'music'), { recursive: true });
+  let tracks = 0;
+  while (midis.has(`music${tracks + 1}.mid`)) tracks++;
+  const files: string[] = [];
+  for (const [lower, name] of midis) {
+    await copyFile(join(soundDir, name), join(outDir, musicPath(lower)));
+    if (!/^music\d+\.mid$/.test(lower)) files.push(lower);
+  }
+  const bankName = `bank${extname(bank).toLowerCase()}`;
+  await copyFile(bank, join(outDir, musicPath(bankName)));
+  return { tracks, files: files.sort(), bank: musicPath(bankName) };
 }
 
 async function writeSlp(
@@ -214,6 +254,8 @@ function buildManifest(
   wavs: number[],
   screens: Record<string, PackScreen>,
   taunts: number[],
+  soundFiles: string[],
+  music: PackMusic | null,
 ): PackManifest {
   const graphicSlp = (slp: number): string | null => {
     const key = slpKey('graphics', slp);
@@ -239,9 +281,11 @@ function buildManifest(
     wavs,
     screens,
     taunts,
+    soundFiles,
+    music,
   };
   dat.sounds.forEach((s, id) => {
-    manifest.sounds[id] = { items: s.items.map((i) => [i.resourceId, i.probability]) };
+    manifest.sounds[id] = { items: s.items.map((i) => [i.resourceId, i.probability]), files: s.items.map((i) => i.fileName.toLowerCase()) };
   });
   dat.graphics.forEach((g, id) => {
     if (!g) return;
@@ -275,6 +319,7 @@ function buildManifest(
       draw: t.terrainToDraw,
       borders: [...t.borders],
       minimap: [t.colours[0] ?? 0, t.colours[1] ?? 0, t.colours[2] ?? 0],
+      sound: t.soundId,
     };
   });
   // `load_border_types` (src/map.cpp:1460): a border is loaded when the dat enables it and its SLP opens.
