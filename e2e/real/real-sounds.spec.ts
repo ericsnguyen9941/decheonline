@@ -86,9 +86,12 @@ test('sound and music are heard: button clicks, the terrain sound, music1.mid on
     const tc = window.__game!.objects().find((o) => o.owner === 1 && o.type === 109)!;
     window.__map!.centerOnTile(Math.floor(tc.x), Math.floor(tc.y));
   });
-  await expect.poll(() => host.evaluate(() => window.__game!.sounds().filter((s) => s.event === 'terrain').length), { timeout: 60_000 }).toBeGreaterThan(0);
-  const terrain = (await host.evaluate(() => window.__game!.sounds().filter((s) => s.event === 'terrain')))[0]!;
-  const level = await peak(host, 'sound', 1000);
+  const terrains = () => host.evaluate(() => window.__game!.sounds().filter((s) => s.event === 'terrain'));
+  const before = (await terrains()).length;
+  await expect.poll(async () => (await terrains()).length, { timeout: 60_000 }).toBeGreaterThan(before);
+  const terrain = (await terrains())[before]!;
+  let level = 0;
+  await expect.poll(async () => (level = Math.max(level, await peak(host, 'sound', 500))), { timeout: 8000 }).toBeGreaterThan(0.001);
   console.log(`terrain sound ${terrain.sound} ${terrain.file}: peak ${level.toFixed(3)}`);
   expect(terrain.wav).toBe(-1);
   expect(level).toBeGreaterThan(0.001);
