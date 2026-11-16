@@ -97,6 +97,15 @@ test('Ctrl+digit assigns a group, a digit recalls it, Shift adds, Alt centres, a
   expect(await selection(host)).toEqual([v1]);
   await expect.poll(async () => (await fromCentre()) ?? Infinity).toBeLessThan(40);
 
+  // A bare 2 leaves the view where it is; Space then scrolls it to the group (`command_view_selected`).
+  await host.evaluate(() => window.__map!.centerOnTile(30, 30));
+  await expect.poll(async () => (await fromCentre()) ?? Infinity).toBeGreaterThan(400);
+  await host.keyboard.press('Digit2');
+  expect(await selection(host)).toEqual([v1]);
+  expect((await fromCentre()) ?? Infinity).toBeGreaterThan(400);
+  await host.keyboard.press('Space');
+  await expect.poll(async () => (await fromCentre()) ?? Infinity).toBeLessThan(40);
+
   // The other player's Bowman kills v3: it leaves the selection and, recalled later, the group.
   await host.keyboard.press('Digit1');
   expect(await selection(host)).toEqual([v2, v3]);

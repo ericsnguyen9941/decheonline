@@ -358,10 +358,10 @@ export class UnitLayer {
     if (sword) void frameCursor(sword, 'crosshair').then((c) => (this.attackCursor = c)).catch(() => undefined);
   }
 
-  /** Loads groupnum.shp's frames 1-9 from the pack (`get_shape(0)`); without them no number is drawn. */
+  /** Loads groupnum.shp's digits 1-9 (frames 0-8) from the pack (`get_shape(0)`); without them no number is drawn. */
   private loadGroupDigits(): void {
     for (let n = 1; n <= 9; n++) {
-      const frame = this.o.provider.interfaceFrame(SLP.groupNumbers, n);
+      const frame = this.o.provider.interfaceFrame(SLP.groupNumbers, n - 1);
       if (!frame) continue;
       void Assets.load<Texture>(frame.url)
         .then((atlas) => {
@@ -456,10 +456,13 @@ export class UnitLayer {
       if (first) this.o.sounds?.selected(e);
       first = false;
     }
+    if (centre) this.viewSelected();
+  }
+
+  /** `command_view_selected` (Space, src/scr_game.cpp:4298): the view scrolls to `selected_obj`; nothing selected, nothing happens. */
+  viewSelected(): void {
     const at = this.primary === null ? undefined : this.o.world.entities.get(this.primary);
-    if (centre && at) {
-      this.o.view.lookAt(at.x, at.y);
-    }
+    if (at) this.o.view.lookAt(at.x, at.y);
   }
 
   /** Own units, for centring the view at the start. */
@@ -1162,14 +1165,14 @@ export class UnitLayer {
 
   /**
    * The number of a selected own object's group 1-9, drawn over the diamond (`RGE_Static_Object::draw`,
-   * src/stat_obj.cpp:707): frame `selected_group` of groupnum.shp at the diamond's fourth corner, 6 px left and 8 up, at
-   * draw level 30.
+   * src/stat_obj.cpp:707): `FShape + selected_group` read as shape infos skips the file header, so frame
+   * `selected_group - 1` of groupnum.shp, at the diamond's fourth corner, 6 px left and 8 up, at draw level 30.
    */
   private drawGroupNumber(id: number, e: Entity, corner: { x: number; y: number }): void {
     const group = this.groups.get(id);
     if (group === undefined || group < 1 || group > 9 || e.owner !== this.o.player) return;
     const texture = this.groupDigits[group];
-    const frame = this.o.provider.interfaceFrame(SLP.groupNumbers, group);
+    const frame = this.o.provider.interfaceFrame(SLP.groupNumbers, group - 1);
     if (!texture || !frame) return;
     let sprite = this.groupSprites.get(id);
     if (!sprite) {
@@ -1254,6 +1257,12 @@ export class UnitLayer {
         e.preventDefault();
         if (k.action === 'assign') this.assignGroup(k.id);
         else this.recallGroup(k.id, k.add, k.centre);
+        return;
+      }
+      // Space (src/scr_game.cpp:1835; with Ctrl or Alt it does nothing, :1621, :1580); a focused dialog button keeps its own Space.
+      if (e.code === 'Space' && !e.ctrlKey && !e.altKey && target?.tagName !== 'BUTTON') {
+        e.preventDefault();
+        this.viewSelected();
         return;
       }
       if (e.repeat) return;
