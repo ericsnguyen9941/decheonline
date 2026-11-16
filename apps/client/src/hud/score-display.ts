@@ -94,6 +94,8 @@ export class ScoreDisplay {
   private readonly lines: HTMLDivElement[];
   private shown = false;
   private refreshedAt = -Infinity;
+  /** The icons and struck-out lines drawn at the last refresh, to see a change in between. */
+  private netKey = '';
   private readonly onKey = (e: KeyboardEvent) => {
     // Unmodified F4 (Shift+F4 is a formation, `GameHud.commandFormation`).
     if (e.key !== 'F4' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
@@ -137,8 +139,13 @@ export class ScoreDisplay {
     else for (const el of this.lines) el.hidden = true;
   }
 
+  /**
+   * Every 3 s (`score_interval`); also at once when a player's icons or struck-out line change, so a player that slows
+   * down or drops shows within a turn or two of the server's news rather than up to 3 s later (the port's addition).
+   */
   update(now = performance.now()): void {
-    if (this.shown && now - this.refreshedAt >= REFRESH_MS) this.refresh(now);
+    if (!this.shown) return;
+    if (now - this.refreshedAt >= REFRESH_MS || this.netKey !== this.netState(scoreLines(this.world, this.names)).key) this.refresh(now);
   }
 
   /** The lines shown now, top first (for the tests). */
@@ -153,9 +160,8 @@ export class ScoreDisplay {
   private refresh(now = performance.now()): void {
     this.refreshedAt = now;
     const lines = scoreLines(this.world, this.names);
-    const net = this.net;
-    const status = net?.status();
-    const icons = net && status ? netIcons(lines.map((l) => l.player), net.player, status.rtt, status.frameMs, (p) => !net.dropped(p)) : null;
+    const { icons, key } = this.netState(lines);
+    this.netKey = key;
     this.lines.forEach((el, i) => {
       const line = lines[i];
       el.hidden = !line;
@@ -165,10 +171,20 @@ export class ScoreDisplay {
       const [latencyFrame, slowFrame] = icons?.get(line.player) ?? [0, 0];
       this.paintIcon(latency, latencyFrame);
       this.paintIcon(slow, slowFrame);
-      el.className = `aoe-text hud-score-line ${line.struck ? FONT.strikeout : FONT.standard}`;
+      el.className = `aoe-text hud-score-line ${line.struck || this.net?.dropped(line.player) ? FONT.strikeout : FONT.standard}`;
       const [c1, c2] = COLOURS[line.player - 1] ?? [0xffffff, 0];
       textColours(el, [colorref(c1), colorref(c2)]);
     });
+  }
+
+  /** The icons of `lines`' players and a key of them with the dropped players. */
+  private netState(lines: readonly ScoreLine[]): { icons: Map<number, [number, number]> | null; key: string } {
+    const net = this.net;
+    const status = net?.status();
+    if (!net || !status) return { icons: null, key: '' };
+    const icons = netIcons(lines.map((l) => l.player), net.player, status.rtt, status.frameMs, (p) => !net.dropped(p));
+    const key = lines.map((l) => `${l.player}:${icons.get(l.player)?.join(',') ?? ''}:${net.dropped(l.player) ? 1 : 0}`).join(' ');
+    return { icons, key };
   }
 
   /** `show_message2`'s icon: its frame `shape_draw`n 6 px below the line's top (pnl_msg.cpp:467-487). */

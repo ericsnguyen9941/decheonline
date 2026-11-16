@@ -16,11 +16,13 @@ export interface AppOptions {
 
 /**
  * Env `LOBBY_CIV` (1-17): every player starts the lobby with that civ instead of a random one, so the e2e games that do
- * not pick a civ play the same civ every run.
+ * not pick a civ play the same civ every run. Env `DROP_AFTER_MS`: how long a broken socket keeps its slot (default the
+ * original's 120.5 s), shortened by the e2e that watches a dropped player's score line.
  */
 function roomOptionsFromEnv(): RoomRegistryOptions {
   const civ = Number(process.env.LOBBY_CIV);
-  return isLobbyCiv(civ) ? { generateCiv: () => civ } : {};
+  const dropAfterMs = Number(process.env.DROP_AFTER_MS);
+  return { ...(isLobbyCiv(civ) ? { generateCiv: () => civ } : {}), ...(dropAfterMs > 0 ? { dropAfterMs } : {}) };
 }
 
 /** HTTP server with `/health`, `/assets/*`, the built client at `/` and the game relay on WebSocket path `/ws`. */

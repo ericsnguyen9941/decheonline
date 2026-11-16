@@ -89,6 +89,10 @@ test('the original hotkeys: Tab, Ctrl+N and H select, a grid key trains, M moves
   const box = await canvasBox(host);
   await host.keyboard.press('m');
   await expect(host.getByTestId('hud-message')).toHaveText('Click an area to move there.');
+  // Any mouse move takes the message line's text away (`handle_mouse_move`); the armed move stays.
+  await host.mouse.move(box.x + 20, box.y + 20);
+  await host.mouse.move(box.x + 30, box.y + 30);
+  await expect(host.getByTestId('hud-message')).toBeHidden();
   const before = (await units(host)).find((u) => u.id === v1)!;
   const target = { col: Math.round(before.x) + 4, row: Math.round(before.y) + 4 };
   const spot = await host.evaluate(([c, r]) => window.__map!.tileScreenPos(c, r), [target.col, target.row] as const);

@@ -239,6 +239,8 @@ export class GameHud {
     if (e.key === '+' || e.key === '=') this.commandGameSpeed(true);
     else if (e.key === '-') this.commandGameSpeed(false);
   };
+  /** Capture phase, so the message line is clear before a button or the score button shows its own text. */
+  private readonly onMouseMove = () => this.commands.clearMessage();
   /** Enter opens the chat bar (`key_down_action`'s `VK_RETURN`, src/scr_game.cpp:1838; not with Ctrl or Alt). */
   private readonly onKey = (e: KeyboardEvent) => {
     if (e.key !== 'Enter' || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
@@ -360,6 +362,7 @@ export class GameHud {
       click,
     });
     window.addEventListener('keydown', this.onKey);
+    window.addEventListener('mousemove', this.onMouseMove, true);
     window.addEventListener('keydown', this.onFunctionKey);
     window.addEventListener('keydown', this.onSpeedKey);
     this.menu = new MenuDialog(this.root, o.provider, {
@@ -424,6 +427,7 @@ export class GameHud {
     this.chatEntry.close();
     this.diplomacy.close();
     window.removeEventListener('keydown', this.onKey);
+    window.removeEventListener('mousemove', this.onMouseMove, true);
     window.removeEventListener('keydown', this.onFunctionKey);
     window.removeEventListener('keydown', this.onSpeedKey);
     this.chat.destroy();

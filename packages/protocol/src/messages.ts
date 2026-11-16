@@ -109,14 +109,16 @@ export type ServerMessage =
   /**
    * Both batches issued during `turn`, ordered by slot. Released strictly in turn order. `speed`: the step size and
    * buffer frames the server agreed for turn `speed.turn` (later than `turn + COMMAND_DELAY_TURNS`); give it to the
-   * sim when this batch is.
+   * sim when this batch is. `frameMs`: each slot's last reported mean frame time, ms (0 before the first), on every
+   * live release as the original carries it on each turn's done message (absent on the turns a rejoin replays).
    */
-  | { t: 'turn'; turn: number; batches: TurnBatch[]; speed?: SpeedChange }
+  | { t: 'turn'; turn: number; batches: TurnBatch[]; speed?: SpeedChange; frameMs?: number[] }
   /** Round-trip probe; answer with `pong` (docs/spec/turn-timing.md §8.3). */
   | { t: 'ping'; n: number }
   /**
    * The server's latest round trip to each slot, ms (0 before the first), and each slot's last reported mean frame
-   * time `frameMs`, ms (0 before the first): the score display's latency and slow-player icons (docs/spec/hud.md).
+   * time `frameMs`, ms (0 before the first): the score display's latency and slow-player icons (docs/spec/hud.md). The
+   * frame times also ride on every `turn`, so they follow within a turn; this message is sent after each pong.
    */
   | { t: 'rtt'; rtt: number[]; frameMs: number[] }
   /** State hashes for `turn` disagreed. `hashes` is indexed by slot. */

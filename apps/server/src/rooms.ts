@@ -113,6 +113,8 @@ export interface RoomRegistryOptions {
   schedule?: (fn: () => void, ms: number) => () => void;
   /** A new player's civ before it picks one; default a random civ, as the host rolls it (docs/spec/lobby.md §3). */
   generateCiv?: () => number;
+  /** How long a broken socket keeps its slot before the player is dropped, ms; default `DROP_AFTER_MS`. */
+  dropAfterMs?: number;
 }
 
 function schedule(fn: () => void, ms: number): () => void {
@@ -136,6 +138,7 @@ export class RoomRegistry {
   private readonly generateToken: () => string;
   private readonly schedule: (fn: () => void, ms: number) => () => void;
   private readonly generateCiv: () => number;
+  private readonly dropAfterMs: number;
 
   constructor(options: RoomRegistryOptions = {}) {
     this.generateCode = options.generateCode ?? randomCode;
@@ -144,6 +147,7 @@ export class RoomRegistry {
     this.generateToken = options.generateToken ?? (() => randomBytes(16).toString('hex'));
     this.schedule = options.schedule ?? schedule;
     this.generateCiv = options.generateCiv ?? (() => randomInt(CIV_COUNT) + 1);
+    this.dropAfterMs = options.dropAfterMs ?? DROP_AFTER_MS;
   }
 
   roomOf(peer: Peer): Room | undefined {
@@ -246,7 +250,7 @@ export class RoomRegistry {
   /** `member`'s socket broke: hold its slot, and drop it once it stayed away `DROP_AFTER_MS`. */
   private away(room: Room, member: Member): void {
     member.peer = null;
-    const wait = Math.max(0, DROP_AFTER_MS - (this.now() - member.heardAt));
+    const wait = Math.max(0, this.dropAfterMs - (this.now() - member.heardAt));
     member.cancelDrop = this.schedule(() => this.drop(room, member), wait);
   }
 
@@ -395,7 +399,7 @@ export class RoomRegistry {
       const speed = room.speed.boundary(turn + 1, frameMs, latency);
       const record: TurnRecord = speed ? { turn, batches, speed } : { turn, batches };
       room.log.push(record);
-      room.broadcast({ t: 'turn', ...record });
+      room.broadcast({ t: 'turn', ...record, frameMs: room.members.map((m) => m.frameMs) });
     }
   }
 

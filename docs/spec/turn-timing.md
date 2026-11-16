@@ -299,7 +299,9 @@ to reproduce §§2–6; they are not decomp behaviour.
 - Wire (`packages/protocol`): a client sends the batch of commands issued
   during turn `N` once it has run `N` (they execute on `N + 2`), with its
   `frameMs`; the boundary step of `N + 2` waits for the server's release of
-  `N`. The server pings (`ping` / `pong`) and reports round trips (`rtt`).
+  `N`. The server pings (`ping` / `pong`) and reports round trips (`rtt`);
+  every released `turn` carries each slot's last `frameMs` (the score
+  display's slow icon, hud.md).
 - Server (`apps/server/src/speed.ts`, `rooms.ts`): releasing turn `N` means
   every client has run it, which is the host's boundary `T = N + 1`;
   `SpeedHost.boundary` runs §4 there and the change for `E = T + 2` rides on

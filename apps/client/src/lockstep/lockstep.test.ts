@@ -219,6 +219,12 @@ describe('lockstep', () => {
     expect(lockstep.frameTimes).toEqual([17, 120]);
   });
 
+  test("a released turn updates every player's frame time", () => {
+    const { link, lockstep } = setup();
+    link.receive({ t: 'turn', turn: 0, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [] }], frameMs: [17, 150] });
+    expect(lockstep.frameTimes).toEqual([17, 150]);
+  });
+
   test('waiting on a turn warns after 25 s and every 25 s after, until the turn comes', () => {
     const { link, timers, lockstep } = setup();
     let warnings = 0;

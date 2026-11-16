@@ -115,6 +115,8 @@ export class CommandPanel {
         this.hovered = i;
         this.showHover();
       });
+      // After the screen's move took the message line's text away (`clearMessage`), a move over a button shows its own.
+      on('mousemove', () => this.showHover());
       on('pointerleave', () => {
         this.hovered = -1;
         this.showHover();
@@ -209,6 +211,19 @@ export class CommandPanel {
   private showHover(): void {
     const b = this.buttons[this.hovered];
     this.hover(b ? commandMessage(this.o.provider, b, this.o.world, this.o.player) : null);
+  }
+
+  /**
+   * Every mouse move anywhere takes the message line's text away, refusals included, unless the pointer is on an object
+   * with a rollover text (`handle_mouse_move`: `UC_ObjectTouched`, src/scr_game.cpp:3650-3660).
+   */
+  clearMessage(): void {
+    const { message } = this.o;
+    if (message.hidden || message.dataset.rollover) return;
+    clearTimeout(this.messageTimer);
+    delete message.dataset.hover;
+    delete message.dataset.bad;
+    message.hidden = true;
   }
 
   /** A button's `text_msg` on the message line while the mouse is on it (white, `InfoMessage`), or null to take it away. */

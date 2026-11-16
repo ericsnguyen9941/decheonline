@@ -35,25 +35,31 @@ const icons = (l: Locator) => l.locator('[data-testid^="score-"]:visible').evalu
 test("a slow player's and a lagging player's score lines show the original's icons on the other client", async ({ browser }) => {
   const [host, guest] = await startGame(browser);
   for (const page of [host, guest]) await page.keyboard.press('F4');
-  // Normal play: both round trips measured (the pings at start), no icon on either screen.
+  // Normal play: both round trips measured (the pings at start), no icon on either screen. Both clients report a fixed
+  // 30 ms frame time: the icons follow the frame times within a turn now, so a loaded machine's real ones would show.
+  for (const page of [host, guest]) await page.evaluate(() => window.__game!.forceFrameMs(30));
   await host.waitForFunction(() => window.__game!.net().rtt.length === 2);
   for (const page of [host, guest]) {
+    await page.waitForFunction(() => window.__game!.net().frameTimes.join() === '30,30');
     await expect(page.getByTestId('score-line').filter({ visible: true })).toHaveCount(2);
-    for (const name of ['Alice', 'Bob']) expect(await icons(line(page, name))).toEqual([]);
+    for (const name of ['Alice', 'Bob']) await expect.poll(() => icons(line(page, name))).toEqual([]);
   }
 
-  // The guest reports 150 ms frames (6 fps): with the next round trips (8 s pings) and the next refresh (3 s) Bob's
-  // line shows the slow icon on both screens, Alice's none.
+  // The guest reports 150 ms frames (6 fps) with each turn: within 2 s Bob's line shows the slow icon on both screens,
+  // Alice's none (the frame times ride on every released turn, not only on the 8 s round-trip message).
+  const slowedAt = Date.now();
   await guest.evaluate(() => window.__game!.forceFrameMs(150));
-  await host.waitForFunction(() => window.__game!.net().frameTimes[1] === 150);
-  await expect.poll(() => icons(line(host, 'Bob')), { timeout: 30_000 }).toEqual(['score-slow 17']);
+  await expect.poll(() => icons(line(host, 'Bob')), { timeout: 2000, intervals: [50] }).toEqual(['score-slow 17']);
+  const delay = Date.now() - slowedAt;
+  console.log(`slow icon shown on the host ${delay} ms after the guest's frames slowed`);
+  expect(delay).toBeLessThan(2000);
   expect(await icons(line(host, 'Alice'))).toEqual([]);
-  await expect.poll(() => icons(line(guest, 'Bob')), { timeout: 30_000 }).toEqual(['score-slow 17']);
+  await expect.poll(() => icons(line(guest, 'Bob')), { timeout: 2000, intervals: [50] }).toEqual(['score-slow 17']);
 
-  // Back to its own frame time, and every pong held 1.2 s: the round trip between the two is past 1000 ms, so on the
+  // Back to a normal frame time, and every pong held 1.2 s: the round trip between the two is past 1000 ms, so on the
   // host Bob's line shows frame 20, and the slow icon goes.
   await guest.evaluate(() => {
-    window.__game!.forceFrameMs(0);
+    window.__game!.forceFrameMs(30);
     window.__game!.delayPongs(1200);
   });
   await expect.poll(() => icons(line(host, 'Bob')), { timeout: 40_000 }).toEqual(['score-latency 20']);
@@ -75,4 +81,17 @@ test("the score button's rollover text shows on the message line and goes when t
   const box = (await host.getByTestId('score-button').boundingBox())!;
   await host.mouse.move(box.x - 200, box.y - 200);
   await expect(message).toBeHidden();
+});
+
+test("a dropped player's score line is struck out", async ({ browser }) => {
+  const [host, guest] = await startGame(browser);
+  await host.keyboard.press('F4');
+  const bob = line(host, 'Bob').first();
+  const decoration = () => bob.evaluate((el) => getComputedStyle(el).textDecorationLine);
+  await expect(bob).toBeVisible();
+  expect(await decoration()).not.toContain('line-through');
+  // The guest's socket breaks and stays away past the server's drop time (DROP_AFTER_MS, 40 s in the e2e server).
+  await guest.evaluate(() => window.__game!.dropLink(90_000));
+  await expect.poll(decoration, { timeout: 90_000 }).toContain('line-through');
+  expect(await line(host, 'Alice').first().evaluate((el) => getComputedStyle(el).textDecorationLine)).not.toContain('line-through');
 });

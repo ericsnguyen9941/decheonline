@@ -288,6 +288,7 @@ describe('turn relay', () => {
           { slot: 0, commands: [] },
           { slot: 1, commands: [{ type: 'noop' }] },
         ],
+        frameMs: [0, 0],
       },
       {
         t: 'turn',
@@ -296,6 +297,7 @@ describe('turn relay', () => {
           { slot: 0, commands: [{ type: 'test', x: 3, y: 4 }] },
           { slot: 1, commands: [] },
         ],
+        frameMs: [0, 0],
       },
     ];
     for (const c of [host, guest]) {
@@ -390,9 +392,9 @@ describe('turn relay', () => {
     guest.send({ t: 'turn', turn: 0, commands: [{ type: 'resign' }] });
     guest.send({ t: 'leave' });
     host.send({ t: 'turn', turn: 0, commands: [] });
-    expect(await host.expect('turn')).toEqual({ t: 'turn', turn: 0, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [{ type: 'resign' }] }] });
+    expect(await host.expect('turn')).toEqual({ t: 'turn', turn: 0, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [{ type: 'resign' }] }], frameMs: [0, 0] });
     host.send({ t: 'turn', turn: 1, commands: [] });
-    expect(await host.expect('turn')).toEqual({ t: 'turn', turn: 1, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [] }] });
+    expect(await host.expect('turn')).toEqual({ t: 'turn', turn: 1, batches: [{ slot: 0, commands: [] }, { slot: 1, commands: [] }], frameMs: [0, 0] });
     expect(rooms.rooms.get(code)?.members.map((m) => m.dropped)).toEqual([false, true]);
     host.close();
     await guest.expectSilence();
@@ -479,6 +481,16 @@ describe('speed control', () => {
     clock += 25;
     registry.handle(peers[1]!, { t: 'pong', n: 1 });
     expect(peers[0]!.take('rtt')).toEqual([{ t: 'rtt', rtt: [0, 25], frameMs: [17, 120] }]);
+  });
+
+  test("each released turn carries every player's last reported frame time", () => {
+    const { registry, peers } = started(() => 1000);
+    registry.handle(peers[0]!, { t: 'turn', turn: 0, commands: [], frameMs: 17 });
+    registry.handle(peers[1]!, { t: 'turn', turn: 0, commands: [], frameMs: 120 });
+    expect(peers[0]!.take('turn').map((m) => (m.t === 'turn' ? m.frameMs : null))).toEqual([[17, 120]]);
+    registry.handle(peers[0]!, { t: 'turn', turn: 1, commands: [], frameMs: 17 });
+    registry.handle(peers[1]!, { t: 'turn', turn: 1, commands: [], frameMs: 150 });
+    expect(peers[1]!.take('turn').map((m) => (m.t === 'turn' ? m.frameMs : null))).toEqual([[17, 120], [17, 150]]);
   });
 
   test('a player away DROP_AFTER_MS after it was last heard is dropped: its next batch resigns it, then empty ones', () => {

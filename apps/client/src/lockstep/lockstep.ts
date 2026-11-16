@@ -132,6 +132,7 @@ export class Lockstep {
         if (m.turn < this.taken || this.released.has(m.turn)) return;
         this.received = Math.max(this.received, m.turn + 1);
         this.unreleased.delete(m.turn);
+        if (m.frameMs) this.frameTimes = m.frameMs;
         this.released.set(m.turn, m.speed ? { batches: m.batches, speed: m.speed } : { batches: m.batches });
         for (const batch of m.batches) (this.applied[batch.slot] ??= []).push(...batch.commands);
         this.pump();

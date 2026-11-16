@@ -30,7 +30,7 @@ export const shared: PlaywrightTestConfig = {
     cwd: '..',
     url: baseURL,
     // Every player starts the lobby Egyptian, not a random civ, so a test that does not pick one plays the same civ.
-    env: { NO_GTM: '1', CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir, LOBBY_CIV: '1' },
+    env: { NO_GTM: '1', CLIENT_PORT: String(clientPort), PORT: String(serverPort), ASSETS_DIR: syntheticPackDir, LOBBY_CIV: '1', DROP_AFTER_MS: '40000' },
     reuseExistingServer: false,
     timeout: 300_000,
   },

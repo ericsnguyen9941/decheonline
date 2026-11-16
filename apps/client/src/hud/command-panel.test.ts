@@ -72,3 +72,23 @@ test('a plain message (an order mode’s prompt) still stays 4 s', () => {
   vi.advanceTimersByTime(1);
   expect(message.hidden).toBe(true);
 });
+
+test('a mouse move takes a refusal or a plain message away, but not an object’s rollover text', () => {
+  const message = line();
+  const p = panel(message);
+  p.refuse([{ type: 0, amount: 1e6 }]);
+  expect(message.hidden).toBe(false);
+  p.clearMessage();
+  expect(message.hidden).toBe(true);
+  expect(message.dataset.bad).toBeUndefined();
+  p.say('Click an area to move there.');
+  p.clearMessage();
+  expect(message.hidden).toBe(true);
+  // The timer of the cleared message does not hide a later one early.
+  p.warn('Not close enough');
+  vi.advanceTimersByTime(7999);
+  expect(message.hidden).toBe(false);
+  message.dataset.rollover = 'true';
+  p.clearMessage();
+  expect(message.hidden).toBe(false);
+});
