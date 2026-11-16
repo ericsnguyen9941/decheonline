@@ -26,8 +26,8 @@ async function open(browser: Browser, url: string): Promise<Page> {
 test('a House burns with the original flames past 25, 50 and 75% damage', async ({ browser }) => {
   test.setTimeout(600_000);
   mkdirSync(shots, { recursive: true });
-  // Each player has a built House right of its Town Center and Bowmen above its Villagers.
-  const url = '/?debug=net&map=test&speed=4&buildings=70&bowmen=4';
+  // Each player has a built House right of its Town Center and one Bowman above its Villagers: more overshoot a threshold before the stop lands.
+  const url = '/?debug=net&map=test&speed=4&buildings=70&bowmen=1';
   const host = await open(browser, url);
   const guest = await open(browser, url);
   await host.getByTestId('name').fill('Alice');
