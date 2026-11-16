@@ -77,5 +77,6 @@ describe('a random map game (World option randomMap; random-maps.md)', () => {
     runReplay({ ...log, turns: 20 }, world);
     const restored = World.restore(JSON.parse(JSON.stringify(world.snapshot())));
     expect(runReplay(log, restored)).toEqual(first.slice(20));
-  });
+    // About 3 s alone; on a loaded host it passes the 5 s default.
+  }, 30_000);
 });
