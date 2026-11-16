@@ -13,6 +13,10 @@ const ICON_SIZE = 50;
 const RESEARCH_BORDER = 2;
 /** How long a refusal stays on screen. */
 const MESSAGE_MS = 4000;
+/** `TMessagePanel::show_message_interval`: a `BadMessage` stays 8 s (src/Pnl_msg.cpp:12, :308-312). */
+const BAD_MESSAGE_MS = 8000;
+/** `TMessagePanel::ErrorColor`, the palette index a can't-do message is drawn in (include/pnl_msg.h:20). */
+const ERROR_COLOR = 0x55;
 /** `PLAYER_ATTRIBUTE_POPULATION`, `_POPULATION_HEADROOM` and `_POPULATION_LIMIT`. */
 const ATTR_POPULATION = 11;
 const ATTR_HEADROOM = 4;
@@ -211,7 +215,9 @@ export class CommandPanel {
     if (text !== null) {
       clearTimeout(this.messageTimer);
       message.textContent = text;
+      message.style.color = '';
       message.hidden = false;
+      delete message.dataset.bad;
       message.dataset.hover = 'true';
     } else if (message.dataset.hover) {
       delete message.dataset.hover;
@@ -382,10 +388,31 @@ export class CommandPanel {
 
   /** `TMessagePanel::show_message`: `text` on the message line for a few seconds. */
   say(text: string): void {
-    this.o.message.textContent = text;
-    this.o.message.hidden = false;
-    delete this.o.message.dataset.hover;
+    this.show(text, MESSAGE_MS, '', false);
+  }
+
+  /**
+   * A can't-do message (`show_message(BadMessage, ..., ErrorColor)`, `TRIBE_Game::notification`): `text` in the palette's
+   * error colour for 8 s. The panel keeps the clock of the same text it is already showing (`show_message` returns early).
+   */
+  warn(text: string): void {
+    const { message } = this.o;
+    if (!message.hidden && message.dataset.bad && message.textContent === text) return;
+    const rgb = this.o.provider.mapArt()?.rgb(ERROR_COLOR);
+    this.show(text, BAD_MESSAGE_MS, rgb === undefined ? '' : `#${rgb.toString(16).padStart(6, '0')}`, true);
+  }
+
+  private show(text: string, ms: number, colour: string, bad: boolean): void {
+    const { message } = this.o;
+    message.textContent = text;
+    message.style.color = colour;
+    message.hidden = false;
+    delete message.dataset.hover;
+    if (bad) {
+      delete message.dataset.rollover;
+      message.dataset.bad = 'true';
+    } else delete message.dataset.bad;
     clearTimeout(this.messageTimer);
-    this.messageTimer = setTimeout(() => (this.o.message.hidden = true), MESSAGE_MS);
+    this.messageTimer = setTimeout(() => (message.hidden = true), ms);
   }
 }

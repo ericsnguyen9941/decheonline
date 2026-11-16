@@ -38,7 +38,7 @@ import { OptionsDialog, type OptionsMusic, type OptionsSounds } from './options'
 import { ClockOverlay, TimingsPanel } from './overlays';
 import { infoOf } from './records';
 import { ResourceBar } from './resource-bar';
-import { ageName, civilizationName, objectName, statRows, topButtonLabels } from './text';
+import { ageName, cantDoMessages, civilizationName, objectName, statRows, topButtonLabels } from './text';
 
 /** Shift with these sends formations 0-5 (`command_formation`). */
 const FORMATION_KEYS = ['F2', 'F3', 'F4', 'F5', 'F6', 'F7'];
@@ -559,7 +559,8 @@ export class GameHud {
 
   /**
    * The sim's notifications since the last frame: another player's stance towards this one and its tribute to this one
-   * on the chat lines (`display_system_message`), a tribute with tribute.wav (diplomacy.md §7).
+   * on the chat lines (`display_system_message`), a tribute with tribute.wav (diplomacy.md §7), and a refusal told to
+   * this player on the message line in the error colour (`show_message`, sounds.md §5; cantdo.wav is `GameSounds`').
    */
   private readLog(): void {
     const { world, player, provider, game } = this.o;
@@ -569,6 +570,7 @@ export class GameHud {
       if (n.tribute) this.o.sounds?.message(SOUND_TRIBUTE);
       this.chat.show(n.text);
     }
+    for (const text of cantDoMessages(world, player, this.logRead, provider)) this.commands.warn(text);
     this.logRead = count;
   }
 
@@ -637,7 +639,9 @@ export class GameHud {
     if (m.dataset.hover) return;
     if (text) {
       m.textContent = text;
+      m.style.color = '';
       m.hidden = false;
+      delete m.dataset.bad;
       m.dataset.rollover = 'true';
     } else if (m.dataset.rollover) {
       delete m.dataset.rollover;

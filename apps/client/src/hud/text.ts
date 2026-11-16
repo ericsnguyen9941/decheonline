@@ -3,7 +3,25 @@
 // buttons' messages (TRIBE_Screen_Game::set_button, calc_text_msg), the age, the top strip's buttons, refusals and the
 // attack rollover. Without strings the dat's names and English stand in for names and commands; the rest is left empty,
 // as `get_string` leaves it for an id it does not have.
-import { master, TECHS, unitType, type CombatInfo, type Storage, type UnitType, type World } from '@aoe/sim';
+import {
+  master,
+  NOTIFY_CANNOT_REPAIR,
+  NOTIFY_CANNOT_TRADE_WITH_ENEMY,
+  NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_NO_FAITH,
+  NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_TOWN_CENTER,
+  NOTIFY_CONVERSION_WONDER,
+  NOTIFY_NO_ROOM_FOR_UNIT,
+  NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND,
+  NOTIFY_NOT_ENOUGH_UNLOAD_SPACE,
+  TECHS,
+  unitType,
+  type CombatInfo,
+  type Storage,
+  type UnitType,
+  type World,
+} from '@aoe/sim';
 import type { AssetProvider } from '../assets';
 import type { CommandButton } from './commands';
 import { infoOf } from './records';
@@ -156,6 +174,41 @@ export function topButtonLabels(provider: AssetProvider): string[] {
 export function shortMessage(provider: AssetProvider, attribute: number): string {
   const id = STRING_SHORT[attribute];
   return (id !== undefined && provider.string(id)) || '';
+}
+
+/**
+ * The string `TRIBE_Game::notification` puts on the message line for each can't-do notification (src/tribegam.cpp:1773-1817,
+ * 2090-2134): `get_string2(RGE_STRING_TYPE_ATTRIBUTE, ...)` (:930-965) maps the first five to `STRING_ID_ERROR_NOT_CLOSE_ENOUGH_TO_LAND`
+ * 0xBBF, `_NOT_ENOUGH_UNLOAD_SPACE` 0xBC0, `_NOT_ENOUGH_ROOM_FOR_UNIT` 0xBC2 (the unit's id, val2, is not read),
+ * `_CANNOT_TRADE_WITH_ENEMY` 0xBC3, `_CANNOT_REPAIR` 0xBCA; the conversions' are `get_string` of 0xBE7-0xBEB.
+ */
+const STRING_CANT_DO: Record<number, number> = {
+  [NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND]: 0xbbf,
+  [NOTIFY_NOT_ENOUGH_UNLOAD_SPACE]: 0xbc0,
+  [NOTIFY_NO_ROOM_FOR_UNIT]: 0xbc2,
+  [NOTIFY_CANNOT_TRADE_WITH_ENEMY]: 0xbc3,
+  [NOTIFY_CANNOT_REPAIR]: 0xbca,
+  [NOTIFY_CONVERSION_NO_FAITH]: 0xbe7,
+  [NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM]: 0xbe8,
+  [NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM]: 0xbe9,
+  [NOTIFY_CONVERSION_TOWN_CENTER]: 0xbea,
+  [NOTIFY_CONVERSION_WONDER]: 0xbeb,
+};
+
+/**
+ * The can't-do messages for `me` in the sim's log from entry `from` on, in order: the notifications of `CANT_DO_NOTIFICATIONS`
+ * whose first value is `me` (the original tells no one else). A string the pack does not have is left out, as `get_string`
+ * would give an empty line.
+ */
+export function cantDoMessages(world: World, me: number, from: number, provider: AssetProvider): string[] {
+  const lines: string[] = [];
+  for (const { type, args } of world.log.notifications.slice(from)) {
+    const id = STRING_CANT_DO[type];
+    if (id === undefined || args[0] !== me) continue;
+    const text = provider.string(id);
+    if (text) lines.push(text);
+  }
+  return lines;
 }
 
 /** The rollover text with the attack cursor over an enemy object of `group` (`get_mouse_pointer_action_vars`). */

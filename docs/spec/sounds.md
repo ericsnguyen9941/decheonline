@@ -128,8 +128,16 @@ area of the canvas (not under the top strip or the bottom panel).
   (0x79), a Wonder (0x7A) (`priest.ts`; a wall, artifact or flag is refused silently). The sim logs them through
   `ctx.notify` in `World.log.notifications` (hashed, so both clients log alike; `game-log.ts`
   `CANT_DO_NOTIFICATIONS`); `GameSounds.update` plays the sound for each new one whose first value is its player. An
-  order the player gives where it cannot go plays it from the client (order modes, event `cant-do`). The message text
-  of these notifications is not shown.
+  order the player gives where it cannot go plays it from the client (order modes, event `cant-do`).
+  The same notifications put their text on the message line: `show_message(BadMessage, text, ErrorColor)` (src/tribegam.cpp
+  :1773-1817, 2090-2134), so the line is centred, in palette index 0x55 (`TMessagePanel::ErrorColor`, include/pnl_msg.h:20),
+  and goes after `show_message_interval` 8000 ms (src/Pnl_msg.cpp:12, :308-312); a second message replaces it, the same
+  text while it shows leaves the clock alone (:83-90). The string ids (`get_string2(RGE_STRING_TYPE_ATTRIBUTE)`,
+  src/tribegam.cpp:930-965): land 0xBBF, unload space 0xBC0, no room for the unit 0xBC2 (the unit's id is not read), trade with
+  an enemy 0xBC3, repair 0xBCA; the conversions' by `get_string` 0xBE7-0xBEB (no faith, Priest and building without
+  Monotheism, Town Center, Wonder). Only the player told sees it. Ours: `hud/text.ts` `cantDoMessages` (read each frame from the
+  log by `game-hud.ts` `readLog`), `CommandPanel.warn`. The refusals `CommandPanel.say` shows (not enough food, ...) still
+  stay 4 s; the original's `show_message` for them is also a `BadMessage` of 8 s (unverified, left as it was).
 - A unit trained or a building finished has no game sound, only its own master sound (§3).
 - `RGE_Base_Game::play_sound` (src/basegame.cpp:3894) leaves a game sound alone while it is still playing. A
   button restarts its sound.

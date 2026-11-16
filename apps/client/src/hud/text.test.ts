@@ -1,9 +1,28 @@
 import { expect, test } from 'vitest';
-import { CLUBMAN, HOUSE, startingObjects, TOOL_AGE, TOWN_CENTER, unitType, VILLAGER, World } from '@aoe/sim';
+import {
+  CLUBMAN,
+  HOUSE,
+  NOTIFY_CANNOT_REPAIR,
+  NOTIFY_CANNOT_TRADE_WITH_ENEMY,
+  NOTIFY_CONVERSION_NO_FAITH,
+  NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM,
+  NOTIFY_CONVERSION_TOWN_CENTER,
+  NOTIFY_CONVERSION_WONDER,
+  NOTIFY_NO_ROOM_FOR_UNIT,
+  NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND,
+  NOTIFY_NOT_ENOUGH_UNLOAD_SPACE,
+  NOTIFY_PLAYER_RESIGNED,
+  startingObjects, TOOL_AGE,
+  TOWN_CENTER,
+  unitType,
+  VILLAGER,
+  World,
+} from '@aoe/sim';
 import type { AssetProvider, UnitInfo } from '../assets';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ageName, attackRollover, civilizationName, commandMessage, objectName, shortMessage, statRows, techCost, techName, topButtonLabels } from './text';
+import { ageName, attackRollover, cantDoMessages, civilizationName, commandMessage, objectName, shortMessage, statRows, techCost, techName, topButtonLabels } from './text';
 
 // Name and creation ids, interface kind and displayed values of these masters in data2/empires.dat (npm run dat:dump).
 const UNITS: Record<number, Pick<UnitInfo, 'nameId' | 'creationId' | 'level' | 'displayed'>> = {
@@ -137,4 +156,33 @@ test('the HUD code holds no English text for the age, the top buttons or the ref
     .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
     .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').flatMap((line, i) => (literals.test(line) ? [`${f}:${i + 1}: ${line.trim()}`] : [])));
   expect(found).toEqual([]);
+});
+
+test('each can’t-do notification gives its original string to the player told and to no one else', () => {
+  // The ids `get_string2(RGE_STRING_TYPE_ATTRIBUTE)` / `get_string` map them to (src/tribegam.cpp:930-965, 1773-1817, 2090-2134).
+  const ids: Record<number, number> = {
+    [NOTIFY_NOT_CLOSE_ENOUGH_TO_LAND]: 0xbbf,
+    [NOTIFY_NOT_ENOUGH_UNLOAD_SPACE]: 0xbc0,
+    [NOTIFY_NO_ROOM_FOR_UNIT]: 0xbc2,
+    [NOTIFY_CANNOT_TRADE_WITH_ENEMY]: 0xbc3,
+    [NOTIFY_CANNOT_REPAIR]: 0xbca,
+    [NOTIFY_CONVERSION_NO_FAITH]: 0xbe7,
+    [NOTIFY_CONVERSION_PRIEST_NEEDS_MONOTHEISM]: 0xbe8,
+    [NOTIFY_CONVERSION_BUILDING_NEEDS_MONOTHEISM]: 0xbe9,
+    [NOTIFY_CONVERSION_TOWN_CENTER]: 0xbea,
+    [NOTIFY_CONVERSION_WONDER]: 0xbeb,
+  };
+  const p = { string: (id: number) => `string ${id.toString(16)}` } as AssetProvider;
+  const w = new World({ players: 3, units: startingObjects(3) });
+  const ctx = w.gameContext();
+  const types = Object.keys(ids).map(Number);
+  for (const type of types) ctx.notify(type, 1, 7);
+  ctx.notify(NOTIFY_CANNOT_REPAIR, 2);
+  ctx.notify(NOTIFY_PLAYER_RESIGNED, 1);
+  expect(cantDoMessages(w, 1, 0, p)).toEqual(types.map((t) => `string ${ids[t]!.toString(16)}`));
+  expect(cantDoMessages(w, 2, 0, p)).toEqual(['string bca']);
+  expect(cantDoMessages(w, 3, 0, p)).toEqual([]);
+  // Entries already read are not told again; a pack without the string says nothing.
+  expect(cantDoMessages(w, 1, w.log.notifications.length, p)).toEqual([]);
+  expect(cantDoMessages(w, 1, 0, provider({}))).toEqual([]);
 });
