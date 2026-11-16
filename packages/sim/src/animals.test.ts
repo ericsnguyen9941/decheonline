@@ -71,6 +71,23 @@ describe('unit-ai.md §5.2: a hunted elephant fights back', () => {
     expect(elephant.state).toBe(ObjectState.Active);
   });
 
+  test('an Elephant charging a hunter who walks away a few tiles and stops follows it there and hits it', () => {
+    const w = world({ owner: 1, type: VILLAGER, x: 12.5, y: 10.5 }, { owner: 0, type: ELEPHANT, x: 16.5, y: 12.5 });
+    const [hunter, elephant] = [w.entities.get(1)!, w.entities.get(2)!];
+    order(w, 1, { type: 'work', units: [1], target: 2, x: elephant.x, y: elephant.y });
+    runUntil(w, () => elephant.attack?.target === 1);
+    order(w, 1, { type: 'move', units: [1], x: hunter.x - 6, y: hunter.y });
+    const seen = { x: hunter.x, y: hunter.y };
+    const hp = hunter.hp;
+    // The charge re-paths to the hunter as it walks, never to where it stood when the charge began.
+    runUntil(w, () => {
+      expect(elephant.attack?.target).toBe(1);
+      return hunter.hp < hp;
+    }, 300);
+    expect(distance(hunter, seen)).toBeGreaterThan(4);
+    expect(distance(elephant, hunter)).toBeLessThan(2);
+  });
+
   test('an idle Elephant ignores a Villager in view and stands still', () => {
     const w = world({ owner: 1, type: VILLAGER, x: 12.5, y: 10.5 }, { owner: 0, type: ELEPHANT, x: 14.5, y: 10.5 });
     const [villager, elephant] = [w.entities.get(1)!, w.entities.get(2)!];

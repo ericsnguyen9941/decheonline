@@ -595,8 +595,9 @@ export class World {
     // A unit's first move pushes its goal as the final user waypoint, and every later search of that move heads there
     // first (movement.md §5): a chase would end where the target stood when it began. The original's alligator spends
     // that first move on its wander (action 6), which the captain dropped (unit-ai.md §5.5); the lion, which has no
-    // wander, is given the same start so that it too follows what it attacks (unit-ai.md §5.3, §5.4).
-    if (e.mover && (e.ai?.kind === AiClass.Predator || e.ai?.kind === AiClass.Lion)) e.mover.finalUserWaypoint = true;
+    // wander, and the elephant are given the same start so that they too follow what they attack (unit-ai.md §5.2-§5.4).
+    const chaser = e.ai?.kind === AiClass.Predator || e.ai?.kind === AiClass.Lion || e.ai?.kind === AiClass.Elephant;
+    if (e.mover && chaser) e.mover.finalUserWaypoint = true;
     countPopulation(this.attributes[owner]!, t, 1);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));

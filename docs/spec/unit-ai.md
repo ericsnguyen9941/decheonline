@@ -721,13 +721,17 @@ a walking Villager (1.1) after a few tiles unless it stops.
 A unit's first move pushes its goal as the final user waypoint and every
 later search of that move goes there first (movement.md §5): the chase would
 end where the target stood when it began. In the original the alligator
-spends that first move on its wander (§5.5); the lion has no wander and does
-chase to the stale point the first time. **Port**: `world.ts`
-`createObject` starts every predator and lion with `finalUserWaypoint` set,
-as if a first move had run (the captain dropped the wander, and the lion is
-given the same start so that it follows what it attacks; not the original's
-lion). Tests: `animals.test.ts` "follows a Villager walking past", "gives up
-once it is out of its sight".
+and the elephant spend that first move on their wander (§5.5); the lion has
+no wander and does chase to the stale point the first time. **Port**:
+`world.ts` `createObject` starts every predator, lion and elephant with
+`finalUserWaypoint` set, as if a first move had run (the captain dropped the
+wander, and the lion is given the same start so that it follows what it
+attacks; not the original's lion). The elephant has no `0x1FC` branch of its
+own and the base one (`src/aiuaimod.cpp:3181`) is not ported, so its charge
+has no sight limit. The gazelle needs none: its flee is a move to a point,
+which never re-paths to an object, and each new flee's destructor clears the
+old waypoints. Tests: `animals.test.ts` "follows a Villager walking past",
+"gives up once it is out of its sight", "walks away a few tiles and stops".
 
 ## 6. Random draws in order
 
