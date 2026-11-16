@@ -1,0 +1,26 @@
+# The production server on deche (docs/deploy.md). Installed to /etc/systemd/system by tools/deploy/vm-install.sh.
+[Unit]
+Description=aoe1web production server (client, pack, relay)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=aoe1web
+Group=aoe1web
+WorkingDirectory=/opt/aoe1web/current
+Environment=NODE_ENV=production
+Environment=PORT=8790
+Environment=ASSETS_DIR=/opt/aoe1web/pack
+ExecStart=/opt/aoe1web/node/bin/node apps/server/dist/main.js
+Restart=always
+RestartSec=3
+# The server listens on every interface; only the tunnel on this host may reach it.
+IPAddressAllow=localhost
+IPAddressDeny=any
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

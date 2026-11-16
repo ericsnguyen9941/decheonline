@@ -1,0 +1,20 @@
+# The Cloudflare tunnel aoe1web's connector on deche (docs/deploy.md): aoe.signalsradar.space -> http://localhost:8790.
+# The token lives in /etc/aoe1web/tunnel.token (root:aoe1web 640), never in git.
+[Unit]
+Description=cloudflared connector for tunnel aoe1web
+After=network-online.target aoe1web.service
+Wants=network-online.target
+
+[Service]
+User=aoe1web
+Group=aoe1web
+ExecStart=/opt/aoe1web/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/aoe1web/tunnel.token
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
