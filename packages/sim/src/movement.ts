@@ -151,6 +151,8 @@ export interface MoveContext extends PlayerMasters, VisibilityContext {
   deltaSeconds: number;
   /** Path searches the owner has started this step (reset per player update). */
   attempts: number;
+  /** `obj->notify(id, id, 0x1FC)`: the object's move target moved (unit-ai.ts `NOTIFY_TARGET_MOVED`); none in bare tests. */
+  targetMoved?(e: Entity): void;
 }
 
 /**
@@ -823,8 +825,9 @@ function updateMoveTo(ctx: MoveContext, e: Entity, m: Mover, action: MoveAction)
   }
 }
 
-/** The target moved: back to state 3 and update twice more in the same step (src/act_move.cpp:223-228). */
+/** The target moved: tell the object, back to state 3 and update twice more in the same step (src/act_move.cpp:223-228). */
 function retarget(ctx: MoveContext, e: Entity, m: Mover, action: MoveAction): ActionResult {
+  ctx.targetMoved?.(e);
   action.state = MOVE_NEED_PATH;
   updateMoveTo(ctx, e, m, action);
   updateMoveTo(ctx, e, m, action);

@@ -100,6 +100,20 @@ describe('unit-ai.md §5.3: a lion hunts what comes into its view', () => {
     expect(lion.ai!.adjustedIdleTimeout).toBeLessThan(31250);
   });
 
+  test('an idle Lion follows a Villager walking past and bites it', () => {
+    const w = world({ owner: 1, type: VILLAGER, x: 10.5, y: 6.5 }, { owner: 0, type: LION, x: 13.5, y: 12.5 });
+    const [villager, lion] = [w.entities.get(1)!, w.entities.get(2)!];
+    order(w, 1, { type: 'move', units: [1], x: 10.5, y: 30.5 });
+    runUntil(w, () => lion.attack?.target === 1);
+    const seen = { x: villager.x, y: villager.y };
+    runUntil(w, () => {
+      expect(lion.attack?.target).toBe(1);
+      return villager.hp < 25;
+    }, 300);
+    expect(distance(lion, villager)).toBeLessThan(1.5);
+    expect(distance(lion, seen)).toBeGreaterThan(6);
+  });
+
   test('a Villager outside the Lion sight (3 tiles) is left alone', () => {
     const w = world({ owner: 1, type: VILLAGER, x: 10.5, y: 10.5 }, { owner: 0, type: LION, x: 16.5, y: 10.5 });
     const lion = w.entities.get(2)!;
@@ -123,6 +137,35 @@ describe('unit-ai.md §5.4: an alligator attacks on sight', () => {
     expect(alligator.ai!.kind).toBe(AiClass.Predator);
     runUntil(w, () => alligator.attack?.target === 1);
     expect(alligator.ai!.target).toBe(1);
+  });
+
+  test('an idle Alligator follows a Villager walking past to where it stops and bites it', () => {
+    const w = world({ owner: 1, type: VILLAGER, x: 8.5, y: 10.5 }, { owner: 0, type: ALLIGATOR, x: 13.5, y: 12.5 });
+    const [villager, alligator] = [w.entities.get(1)!, w.entities.get(2)!];
+    order(w, 1, { type: 'move', units: [1], x: 19.5, y: 10.5 });
+    runUntil(w, () => alligator.attack?.target === 1);
+    const seen = { x: villager.x, y: villager.y };
+    expect(seen.x).toBeLessThan(15);
+    // The walk re-paths to the Villager as it moves, never to where it was seen, and the attack holds until the bite.
+    runUntil(w, () => {
+      expect(alligator.attack?.target).toBe(1);
+      return villager.hp < 25;
+    }, 300);
+    expect(villager.x).toBeGreaterThan(18.5);
+    expect(distance(alligator, villager)).toBeLessThan(1.5);
+    expect(alligator.x - seen.x).toBeGreaterThan(4);
+  });
+
+  test('an Alligator chasing a Villager gives up once it is out of its sight (5 tiles) and stands', () => {
+    const w = world({ owner: 1, type: VILLAGER, x: 6.5, y: 10.5 }, { owner: 0, type: ALLIGATOR, x: 13.5, y: 12.5 });
+    const [villager, alligator] = [w.entities.get(1)!, w.entities.get(2)!];
+    order(w, 1, { type: 'move', units: [1], x: 30.5, y: 10.5 });
+    runUntil(w, () => alligator.attack?.target === 1);
+    runUntil(w, () => alligator.ai!.target === -1, 100);
+    expect(distance(alligator, villager)).toBeGreaterThan(5);
+    const stop = [alligator.x, alligator.y];
+    for (let i = 0; i < 100; i++) w.runTurn();
+    expect([alligator.x, alligator.y, alligator.attack ?? null, villager.hp]).toEqual([...stop, null, 25]);
   });
 });
 

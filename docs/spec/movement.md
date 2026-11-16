@@ -175,9 +175,10 @@ current action:
    continue. Any other result stays in state 3 and retries next step
    (`src/act_move.cpp:175-179`).
 3. **State 4 (moving)**: if the target has moved more than 1 tile on either
-   axis from the stored goal, notify and re-run state 3 twice in the same
-   step (`src/act_move.cpp:182-188`, `:223-228`; the label is
-   `reached_target` but it means "target moved"). Else `doMove()`:
+   axis from the stored goal, notify its own object `0x1FC` and re-run
+   state 3 twice in the same step (`src/act_move.cpp:182-188`, `:223-228`;
+   the label is `reached_target` but it means "target moved"; the port's
+   `MoveContext.targetMoved`, the unit AI's reaction unit-ai.md §5.6). Else `doMove()`:
    0 → failed; 2 → completed (after the same moved-target check); 1 →
    continue (`src/act_move.cpp:191-210`).
 4. A negative goal coordinate wraps to 255 when truncated to a byte (decomp

@@ -72,7 +72,7 @@ import {
   type VictorySettings,
   type VictoryState,
 } from './victory';
-import { AI_ACTION_MOVE, AI_ORDER_MOVE, createUnitAI, NOTIFY_OWNER_CHANGED, notifyObject, orderUnload, purgeNotes, setAiState, standGround } from './unit-ai';
+import { AI_ACTION_MOVE, AI_ORDER_MOVE, AiClass, createUnitAI, NOTIFY_OWNER_CHANGED, NOTIFY_TARGET_MOVED, notifyObject, orderUnload, purgeNotes, setAiState, standGround } from './unit-ai';
 import { FAITH_MAX, GROUP_PRIEST, martyrdom, RESOURCE_FAITH } from './priest';
 import { exploreObject, forgetSighting, stateChanged, unexploreObject, Visibility, type VisibilitySnapshot } from './visibility';
 import { CIV_EGYPTIAN, CIV_GAIA, CIVS, copyUnitType, ELEPHANT, FORAGE, GAZELLE, MINE_GOLD, MINE_STONE, TECHS, TOWN_CENTER, TREES, VILLAGER, type UnitType } from './units';
@@ -592,6 +592,11 @@ export class World {
     this.rng.srand(this.rng.rand());
     if (e.mover) initialFacing(e, t, e.mover, this.rng);
     if (t.masterType === 70 || t.masterType === 80) e.ai = createUnitAI(this.gameContext(), t);
+    // A unit's first move pushes its goal as the final user waypoint, and every later search of that move heads there
+    // first (movement.md §5): a chase would end where the target stood when it began. The original's alligator spends
+    // that first move on its wander (action 6), which the captain dropped (unit-ai.md §5.5); the lion, which has no
+    // wander, is given the same start so that it too follows what it attacks (unit-ai.md §5.3, §5.4).
+    if (e.mover && (e.ai?.kind === AiClass.Predator || e.ai?.kind === AiClass.Lion)) e.mover.finalUserWaypoint = true;
     countPopulation(this.attributes[owner]!, t, 1);
     if (isAnimated(t) || e.hp <= 0) this.awake[owner]!.unshift(e.id);
     if (isBuilding(t)) setupBuilding(this.gameContext(), e, t, (o) => this.destroyObject(o));
@@ -709,6 +714,7 @@ export class World {
       objectsOf: (owner) => this.awake[owner]!.map((id) => this.entities.get(id)!),
       changeOwnership: (e, owner) => this.changeOwnership(e, owner),
       connectWall: (e) => connectWall(this.gameContext(), e),
+      targetMoved: (e) => notifyObject(this.gameContext(), e, e.id, NOTIFY_TARGET_MOVED, 0),
       mastersChanged: (player) => {
         this.mastersDigest[player] = undefined;
       },

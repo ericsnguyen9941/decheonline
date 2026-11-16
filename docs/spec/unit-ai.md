@@ -606,12 +606,12 @@ were not checked: **unverified**.
 
 **Port** (`packages/sim/src/unit-ai.ts`): `huntedIdle`, `lionIdle`,
 `animalNotify` (hunted and elephant), `lionNotify`, `closestObject`,
-`closestAttacker`; vectors in `packages/sim/src/animals.test.ts`. The sim
-tables carry Gazelle 65, Elephant 48, Lion 126 and Alligator 1 (ROOTS in
-`tools/gen-sim-tables.mjs`). Not ported: the predator and lion `0x1FC`
-branches (`src/taiuaimd.cpp:147-172`, `:265-287`), because the sim's move
-action never sends `0x1FC` (the base `:3181` branch is not ported either);
-the `0x20F` early return of the hunted and elephant modules (nothing sends
+`closestAttacker`, `predatorTargetMoved` (§5.6); vectors in
+`packages/sim/src/animals.test.ts`. The sim tables carry Gazelle 65, Elephant
+48, Lion 126 and Alligator 1 (ROOTS in `tools/gen-sim-tables.mjs`). Not
+ported: the base `0x1FC` branch (`src/aiuaimod.cpp:3181`; every class but the
+predator and the lion takes it as a no-op, which it is in the original for a
+Gaia target or one on a fully visible tile); the `0x20F` early return of the hunted and elephant modules (nothing sends
 it). **Captain's decision 2026-11-16**: with nothing acting on them, the
 animals stand still. Besides the wander (§5.5), the gazelle's run (§5.1) and
 the lion's attack (§5.3) look only at players' objects (`closestPlayerObject`):
@@ -704,6 +704,30 @@ stands where it is until a player's unit comes near or hits it (§5.1-§5.4),
 and draws none of the rand() below. The port was `bird.ts` (commit 7d8bbd3,
 removed); test `animals.test.ts` "keep their exact position for 2 game
 minutes".
+
+### 5.6 Chasing a moving target (`0x1FC`)
+
+The move under an attack re-paths whenever its target has moved more than a
+tile from the goal, and first notifies its own object `0x1FC`
+(`src/act_move.cpp:182-188`, `:223`; movement.md §5 step 3). The predator
+and the lion (`src/taiuaimd.cpp:147-172`, `:265-287`): when the current
+target still exists and `distance_to_object(target) <= los` (Alligator 5,
+Lion 3), `attackObject(target, 1)`, which keeps the running attack, and
+return 3; else clear the target, `stopObject(1)`, `notifyCommander`, and the
+base branch, now without a target, does the same again. So a chase ends
+once the target is out of the animal's sight; an Alligator (speed 0.5) loses
+a walking Villager (1.1) after a few tiles unless it stops.
+
+A unit's first move pushes its goal as the final user waypoint and every
+later search of that move goes there first (movement.md §5): the chase would
+end where the target stood when it began. In the original the alligator
+spends that first move on its wander (§5.5); the lion has no wander and does
+chase to the stale point the first time. **Port**: `world.ts`
+`createObject` starts every predator and lion with `finalUserWaypoint` set,
+as if a first move had run (the captain dropped the wander, and the lion is
+given the same start so that it follows what it attacks; not the original's
+lion). Tests: `animals.test.ts` "follows a Villager walking past", "gives up
+once it is out of its sight".
 
 ## 6. Random draws in order
 

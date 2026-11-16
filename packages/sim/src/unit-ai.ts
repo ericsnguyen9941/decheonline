@@ -73,6 +73,8 @@ export const NOTIFY_ATTACKED = 0x1f4;
 export const NOTIFY_ACTION_FAILED = 0x1f9;
 export const NOTIFY_ACTION_COMPLETED = 0x1fa;
 export const NOTIFY_TARGET_INVALID = 0x1fb;
+/** The target of a move moved more than a tile from its goal (`src/act_move.cpp:223`; movement.ts `retarget`). */
+export const NOTIFY_TARGET_MOVED = 0x1fc;
 const NOTIFY_UNDER_ATTACK = 0x201;
 export const NOTIFY_REQUEST_TASK = 0x202;
 const NOTIFY_KILLED = 0x209;
@@ -1039,8 +1041,9 @@ function processNotify(ctx: GameContext, e: Entity, note: Note): number {
   switch (e.ai!.kind) {
     case AiClass.Soldier:
     case AiClass.Tower:
-    case AiClass.Predator:
       return baseNotify(ctx, e, note);
+    case AiClass.Predator:
+      return note.type === NOTIFY_TARGET_MOVED ? predatorTargetMoved(ctx, e, note) : baseNotify(ctx, e, note);
     case AiClass.Priest:
       return priestNotify(ctx, e, note);
     case AiClass.Civilian:
@@ -1157,12 +1160,13 @@ function animalNotify(ctx: GameContext, e: Entity, note: Note): number {
 }
 
 /**
- * `TribeLionUnitAIModule::processNotify` (src/taiuaimd.cpp:263, unit-ai.md §5.3): after its own attack completes, rest 25 s
- * (the multiplayer timeout, one draw) and stop; then, as for every note, the base reaction. The 0x1FC branch is not
- * ported: the sim's move action never sends 0x1FC.
+ * `TribeLionUnitAIModule::processNotify` (src/taiuaimd.cpp:263, unit-ai.md §5.3): its target moved (0x1FC) as the
+ * predator's; after its own attack completes, rest 25 s (the multiplayer timeout, one draw) and stop; then, as for every
+ * note, the base reaction.
  */
 function lionNotify(ctx: GameContext, e: Entity, note: Note): number {
   const ai = e.ai!;
+  if (note.type === NOTIFY_TARGET_MOVED) return predatorTargetMoved(ctx, e, note);
   if (note.type === NOTIFY_ACTION_COMPLETED && note.p1 === AI_ACTION_ATTACK) {
     ai.idleTimeout = 25000;
     adjustIdleTimeout(ctx, ai);
@@ -1170,6 +1174,27 @@ function lionNotify(ctx: GameContext, e: Entity, note: Note): number {
     stopObject(ctx, e, true);
   }
   return baseNotify(ctx, e, note);
+}
+
+/**
+ * The predator's and the lion's 0x1FC branch (src/taiuaimd.cpp:147-172, :265-287; unit-ai.md §5.3, §5.4): the walk of its
+ * attack saw the target move. Within its sight (`los`) it attacks it again, which keeps the running attack; farther away
+ * it drops the target, stops and tells its owner, and the base 0x1FC branch (src/aiuaimod.cpp:3181), finding no current
+ * target, does the same again.
+ */
+function predatorTargetMoved(ctx: GameContext, e: Entity, note: Note): number {
+  const ai = e.ai!;
+  const target = ai.target === -1 ? undefined : ctx.entities.get(ai.target);
+  if (target && !(distanceToObject(ctx, e, target) > typeOf(ctx, e).los)) {
+    attackObject(ctx, e, ai.target, true);
+    return NOTE_STOP;
+  }
+  for (let i = 0; i < 2; i++) {
+    removeCurrentTarget(ai);
+    stopObject(ctx, e, true);
+    playerNotify(ctx, e.owner, note.type, note.p1);
+  }
+  return NOTE_DONE;
 }
 
 /** `UnitAIModule::processNotify` (src/aiuaimod.cpp:2754, unit-ai.md §4.2, §4.6). */
