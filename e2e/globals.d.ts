@@ -56,6 +56,7 @@ interface Window {
     techState(tech: number, player?: number): number;
     objectName(id: number): string | null;
     commandMode(): string | null;
+    markers(): { x: number; y: number; frame: number; shown: boolean }[];
     drawnOwner(id: number): number | null;
     cursor(): string;
     tileVisibility(col: number, row: number, player?: number): number;

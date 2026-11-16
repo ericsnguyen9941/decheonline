@@ -78,6 +78,8 @@ export interface NetDebug {
   objectName(id: number): string | null;
   /** The order mode waiting for its click on the map (move, repair, attack-ground, heal, convert), or null. */
   commandMode(): string | null;
+  /** The red X markers an order on open ground left, in canvas pixels, with the frame of moveto.shp each shows (units/move-marker.ts). */
+  markers(): { x: number; y: number; frame: number; shown: boolean }[];
   /** The player whose colour object `id` is drawn in now; null when it is not drawn. */
   drawnOwner(id: number): number | null;
   /** The game canvas's CSS cursor now (a `url(...)` of the original's art, or a browser cursor). */
@@ -604,6 +606,7 @@ function debugPanel(
     techState: (tech, p = player) => game.world.techs[p]![tech]!,
     objectName: (id) => hud()?.nameOf(id) ?? null,
     commandMode: () => layer()?.commandMode ?? null,
+    markers: () => layer()?.markers ?? [],
     drawnOwner: (id) => layer()?.drawnOwner(id) ?? null,
     cursor: () => {
       const canvas = document.querySelector<HTMLCanvasElement>('[data-testid=game-canvas]');

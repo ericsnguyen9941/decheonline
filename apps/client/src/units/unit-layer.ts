@@ -37,6 +37,7 @@ import { facingFrame } from './facing';
 import { Doppelgangers, fogDraw, TERRAIN_LAYER, type Doppelganger } from './fog-objects';
 import { FIRST_GROUP, GroupIds } from './group-ids';
 import { groupKey } from './group-keys';
+import { GROUND_INTERVAL_MS, MOVE_INTERVAL_MS, MoveMarkers } from './move-marker';
 import { SELECT_BUILDING_MASTERS, selectKey, tabTarget, type SelectLetters } from './select-keys';
 import { ATTACK_CURSOR_FRAME, boardCursor, canAttack, canBoard, isAttackable, priestCursor, type PriestSelection, type Stance } from './mouse-actions';
 import { partConfidence, pickWeight, PICK_MAX_LEVEL, PICK_MIN_LEVEL } from './pick';
@@ -236,6 +237,8 @@ export class UnitLayer {
   private readonly groupDigits: (Texture | null)[] = [];
   private readonly groupMarks = new Container();
   private readonly groupSprites = new Map<number, Sprite>();
+  /** The red X an order on open ground leaves (moveto.shp overlay sprites). */
+  private readonly moveMarkers: MoveMarkers;
   /** Ordered targets flashing (`DispSel_List`, select type 2): when each started. */
   private readonly flashes = new Map<number, number>();
   /** The canvas point of the last click that selected something, to pick the next object under it on a second click. */
@@ -299,6 +302,9 @@ export class UnitLayer {
     this.groupMarks.zIndex = Number.MAX_SAFE_INTEGER;
     o.view.layer.addChild(this.groupMarks);
     this.loadGroupDigits();
+    this.moveMarkers = new MoveMarkers(o.provider);
+    this.moveMarkers.container.zIndex = o.world.map.width * o.world.map.height - 0.2;
+    o.view.layer.addChild(this.moveMarkers.container);
     this.ghostSprite.zIndex = Number.MAX_SAFE_INTEGER - 1;
     this.ghostSprite.visible = false;
     o.view.layer.addChild(this.ghostSprite);
@@ -504,6 +510,7 @@ export class UnitLayer {
     }
     for (const s of this.copySprites.values()) s.destroy();
     for (const s of this.copyUnder.values()) s.destroy();
+    this.moveMarkers.container.destroy({ children: true });
     this.outlines.destroy();
     this.highlight.destroy();
     this.ghostSprite.destroy();
@@ -536,6 +543,7 @@ export class UnitLayer {
   private draw(): void {
     const { world, view } = this.o;
     const now = performance.now();
+    this.moveMarkers.update(now);
     const step = stepOf(world);
     const newStep = step !== this.seenStep;
     const duration = newStep ? this.o.stepMs() : 0;
@@ -1223,6 +1231,7 @@ export class UnitLayer {
     }
     // `reset_display_object_selection(2)`: the flashing targets stop.
     this.flashes.clear();
+    this.markAt(x, y, GROUND_INTERVAL_MS);
     this.o.issue({ type: 'attack-ground', units, x: col, y: row });
   }
 
@@ -1241,6 +1250,7 @@ export class UnitLayer {
       return;
     }
     this.flashes.clear();
+    this.markAt(x, y, GROUND_INTERVAL_MS);
     this.o.issue({ type: 'unload', units, x: col, y: row });
   }
 
@@ -1593,9 +1603,24 @@ export class UnitLayer {
     // A priest's heal or convert target is a `work` order on it (support-actions.md §4.7), and so is a transport to board
     // or a Dock to trade with.
     const target = enemy ?? this.workTarget(x, y) ?? this.priestOrderTarget(x, y) ?? this.taskTarget(x, y);
-    if (target) this.flashes.set(target.id, performance.now());
+    if (target) {
+      this.flashes.set(target.id, performance.now());
+      this.moveMarkers.clear();
+    } else this.markAt(x, y, MOVE_INTERVAL_MS);
     if (enemy) return this.o.issue({ type: 'attack', units, target: enemy.id });
     if (target) this.o.issue({ type: 'work', units, target: target.id, x: col, y: row });
     else this.o.issue({ type: 'move', units, x: col, y: row });
+  }
+
+  /** `add_overlay_sprite(shapes[2], ...)` at canvas point (x, y): the red X of an order on open ground. */
+  private markAt(x: number, y: number, interval: number): void {
+    const { camera } = this.o.view;
+    this.moveMarkers.add(x + camera.x, y + camera.y, interval, performance.now());
+  }
+
+  /** The red X markers showing, in canvas pixels with their frame, for the tests. */
+  get markers(): { x: number; y: number; frame: number; shown: boolean }[] {
+    const { camera } = this.o.view;
+    return this.moveMarkers.list(performance.now()).map((m) => ({ ...m, x: m.x - camera.x, y: m.y - camera.y }));
   }
 }
