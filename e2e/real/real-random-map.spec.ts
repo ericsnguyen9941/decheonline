@@ -10,6 +10,8 @@ const shots = join(import.meta.dirname, '..', '..', 'assets-local', 'screenshots
 test.skip(!dir, 'set AOE1_DIR (and run npm run assets:import first)');
 
 const TOWN_CENTER = 109;
+// A fixed random-map seed whose plateau a Villager reaches on foot (the server's seed is random, and some maps have none).
+const HILL_SEED = 1;
 
 async function open(browser: Browser, query = ''): Promise<Page> {
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
@@ -78,7 +80,7 @@ test('two random map games: each player starts on its own Town Center, different
 test('hills: slopes and heights drawn from the terrain art, a Villager walked up one by a right click and selected there', async ({ browser }) => {
   test.setTimeout(480_000);
   mkdirSync(shots, { recursive: true });
-  const [host, guest] = await playGame(browser);
+  const [host, guest] = await playGame(browser, `&seed=${HILL_SEED}`);
   const walk = await walkOntoHill(host);
   console.log(`hill walk: ${JSON.stringify(walk)}`);
   expect(walk.lift).toBeCloseTo(16 * walk.hill.height, 0);
