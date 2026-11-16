@@ -9,7 +9,7 @@ const port = Number(process.env.PROD_PORT ?? 8987);
 export default defineConfig({
   ...shared,
   workers: 1,
-  testMatch: /(lobby|smoke)\.spec\.ts/,
+  testMatch: /(lobby|smoke|analytics)\.spec\.ts/,
   use: { baseURL: `http://localhost:${port}` },
   webServer: {
     command: 'npm run build && npm run start',

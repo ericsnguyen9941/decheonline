@@ -1,5 +1,6 @@
 // The slice of the client's `window.__assetsDebug` (apps/client/src/assets/debug-view.ts) that tests read.
 interface Window {
+  dataLayer?: Record<string, unknown>[];
   __assetsDebug?: {
     source: 'pack' | 'debug';
     terrainFrames: number;

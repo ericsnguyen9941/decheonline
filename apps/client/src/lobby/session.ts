@@ -1,5 +1,6 @@
 import type { ErrorCode, GameSettings, PlayerInfo, ServerMessage, Slot } from '@aoe/protocol';
 import { DEFAULT_GAME_SETTINGS, MAX_CHAT_LENGTH, normalizeCode } from '@aoe/protocol';
+import { track } from '../analytics';
 import type { Link } from '../net/link';
 
 export type StartMessage = Extract<ServerMessage, { t: 'start' }>;
@@ -44,6 +45,7 @@ export class Session {
 
   create(name: string): void {
     this.set({ error: null });
+    track('room_create');
     this.link.send({ t: 'create', name });
   }
 
@@ -109,6 +111,7 @@ export class Session {
         return;
       }
       case 'start':
+        track('game_start', { map_type: m.settings.mapType, player_count: m.players.length });
         this.set({ phase: 'playing', players: m.players, settings: m.settings });
         this.onStart(m, this.state.you);
         return;
