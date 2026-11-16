@@ -60,6 +60,8 @@ export class MapView {
     this.refresh();
   };
   private drawnAt: { x: number; y: number } | null = null;
+  /** The point `lookAt` centred on and the camera position it gave: the view's point until the camera moves. */
+  private looked: { col: number; row: number; x: number; y: number } | null = null;
   private fog: FogSource | null = null;
   private flags: () => MapFlags = () => NO_FLAGS;
   private fogDrawn: { version: number; parity: number } | null = null;
@@ -81,9 +83,11 @@ export class MapView {
     readonly borders: TileBorders,
     /** The map's terrains drawn with debug art: the provider has no art for them or their `terrain_to_draw`. */
     readonly debugTerrains: readonly number[],
+    /** The terrains `hit_tile` hits anywhere in a tile's box: those with no SLP of their own. */
+    boxTerrains: ReadonlySet<number>,
   ) {
     this.camera = new Camera(map.width, map.height, app.screen.width, app.screen.height);
-    this.ground = new Ground(map);
+    this.ground = new Ground(map, boxTerrains);
     this.layer.sortableChildren = true;
     this.terrainLayer.sortableChildren = true;
     this.terrainLayer.zIndex = map.width * map.height - 0.75;
@@ -118,11 +122,14 @@ export class MapView {
     const fallback = new DebugProvider();
     const art = new Map<number, TerrainArt>();
     const debugTerrains: number[] = [];
+    const boxTerrains = new Set<number>();
     for (const id of new Set(map.terrain)) {
       const draw = provider.terrainRules(id)?.draw ?? -1;
       const drawn = draw >= 0 ? draw : id;
       let frames = await provider.terrainFrames(drawn);
       let layout = provider.terrainLayout(drawn);
+      // `hit_tile` tests a terrain's own shape: one drawn as another terrain's has none (the debug art stands for an SLP).
+      if (provider.kind === 'pack' && (draw >= 0 || frames.length === 0)) boxTerrains.add(id);
       if (frames.length === 0) {
         frames = await fallback.terrainFrames(id);
         layout = fallback.terrainLayout();
@@ -136,7 +143,7 @@ export class MapView {
       const layout = id === 0 ? null : provider.border(id);
       if (layout) borderArt.set(id, { ...layout, frames: await provider.borderFrames(id) });
     }
-    return new MapView(app, map, art, provider.kind, provider.mapArt()?.tileEdges ?? PLAIN_EDGES, borderArt, borders, debugTerrains);
+    return new MapView(app, map, art, provider.kind, provider.mapArt()?.tileEdges ?? PLAIN_EDGES, borderArt, borders, debugTerrains, boxTerrains);
   }
 
   /** Map pixel rectangle the camera shows. */
@@ -194,10 +201,20 @@ export class MapView {
     this.refresh();
   }
 
-  /** Centre the view on map point (x, y) as the original does (`Ground.viewPixel`: its flat place, not its height). */
+  /** Centre the view on map point (x, y) as the original does (`Ground.viewPixel`: its flat place, not its height; `Camera.point`). */
   lookAt(x: number, y: number): void {
     const p = this.ground.viewPixel(x, y);
     this.centerOn(p.x, p.y);
+    this.looked = { col: Math.min(Math.max(x, 0), this.map.width - 1), row: Math.min(Math.max(y, 0), this.map.height - 1), x: this.camera.x, y: this.camera.y };
+  }
+
+  /**
+   * The view's centre point (`RGE_Player::view_x`, `view_y`): the point `lookAt` last centred on while the camera has not moved
+   * since, else (scrolled) the point whose flat place the camera's centre is (`Ground.viewPoint`).
+   */
+  viewPoint(): { col: number; row: number } {
+    const { looked, camera } = this;
+    return looked && looked.x === camera.x && looked.y === camera.y ? looked : this.ground.viewPoint(camera.point.x, camera.point.y);
   }
 
   /** Make the sprites match the camera and the fog; no-op when neither has changed since the last call. */

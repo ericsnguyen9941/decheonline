@@ -109,6 +109,40 @@ test('hills: slopes and heights drawn from the terrain art, a Villager walked up
   await guest.context().close();
 });
 
+test('hills: the minimap\'s view frame is centred on the view\'s centre tile, also on a raised-top tile', async ({ browser }) => {
+  test.setTimeout(480_000);
+  const [host, guest] = await playGame(browser, `&seed=${HILL_SEED}`);
+  // The view's centre point is the tile `lookAt` centred on, whose raised top (types 2, 6, 8, 10, 14-16) moves the picture 16 px
+  // up: read back as a flat pixel (what the frame did) it lands on the tile one row on.
+  const frames = await host.evaluate(() => {
+    const m = window.__map!;
+    const g = window.__game!;
+    const found: Record<number, { col: number; row: number }> = {};
+    for (let row = 4; row < m.height - 4; row++) {
+      for (let col = 4; col < m.width - 4; col++) {
+        const type = m.tileInfo(col, row).type;
+        if ([2, 6, 8, 10, 14, 15, 16].includes(type) && !found[type]) found[type] = { col, row };
+      }
+    }
+    const tiles = Object.entries(found).map(([type, t]) => ({ type: Number(type), ...t }));
+    return tiles.map((t) => {
+      m.centerOnTile(t.col, t.row);
+      return { ...t, frame: g.minimapFrame(), point: g.minimapPoint(t.col, t.row) };
+    });
+  });
+  console.log(`frames: ${JSON.stringify(frames)}`);
+  expect(frames.length).toBeGreaterThanOrEqual(3);
+  for (const f of frames) {
+    expect(f.frame, `type ${f.type}`).not.toBeNull();
+    expect([f.frame!.col, f.frame!.row]).toEqual([f.col, f.row]);
+    // The frame is drawn round the centre tile's minimap point (src/diam_map.cpp:826).
+    expect(f.frame!.left).toBeLessThan(f.point!.x);
+    expect(f.frame!.right).toBeGreaterThan(f.point!.x);
+  }
+  await host.context().close();
+  await guest.context().close();
+});
+
 test('terrain art: beach, shallows and forest drawn with their terrain_to_draw art, borders between terrains', async ({ browser }) => {
   mkdirSync(shots, { recursive: true });
   // Seed 6's map has a coast with grass, water, beach, shallows and forest round tile (40, 84).

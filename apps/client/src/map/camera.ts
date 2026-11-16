@@ -1,4 +1,4 @@
-import { pixelToTileCoords, tileCoordsToPixel } from './iso';
+import { pixelToTileCoords, TILE_H, TILE_W, tileCoordsToPixel } from './iso';
 
 /** Scroll speed of keys and screen edges, in map pixels per second. */
 const SCROLL_SPEED = 800;
@@ -8,7 +8,18 @@ const EDGE = 12;
 /** How far inside the map edge (in tiles) the view centre stays, so it is always over a tile. */
 const EDGE_INSET = 0.1;
 
-/** Top-left of the viewport in map pixels. Its centre is kept over the map, so the view never leaves it entirely. */
+/**
+ * Where the view's centre point lands, from the middle of the viewport: `RGE_View::update` (src/view.cpp:1061) puts the centre
+ * tile's box at `pnl_wid / 2 - tile_half_wid` and `pnl_hgt / 2 - tile_half_hgt - tile_half_hgt` (less the point's fraction in the
+ * tile), which is the point itself `tile_half_wid` left of and `tile_half_hgt` above the middle.
+ */
+const POINT_DX = -TILE_W / 2;
+const POINT_DY = -TILE_H / 2;
+
+/**
+ * Top-left of the viewport in map pixels. The view's centre point (`RGE_Player::view_x`, `view_y`; `point`) is kept over the
+ * map, so the view never leaves it entirely.
+ */
 export class Camera {
   x = 0;
   y = 0;
@@ -20,33 +31,38 @@ export class Camera {
     public viewH: number,
   ) {}
 
-  /** The viewport changed size; keeps the view centre where it was, then clamps. */
+  /** Map pixel of the view's centre point, where `centerOn` puts a point. */
+  get point(): { x: number; y: number } {
+    return { x: this.x + this.viewW / 2 + POINT_DX, y: this.y + this.viewH / 2 + POINT_DY };
+  }
+
+  /** The viewport changed size; keeps the view's point where it was, then clamps. */
   resize(viewW: number, viewH: number): void {
-    const cx = this.x + this.viewW / 2;
-    const cy = this.y + this.viewH / 2;
+    const { x, y } = this.point;
     this.viewW = viewW;
     this.viewH = viewH;
-    this.centerOn(cx, cy);
+    this.centerOn(x, y);
   }
 
   /** Move so the viewport's top-left is `(x, y)`, clamped; returns whether the camera moved. */
   moveTo(x: number, y: number): boolean {
-    const t = pixelToTileCoords(x + this.viewW / 2, y + this.viewH / 2, this.mapWidth);
+    const t = pixelToTileCoords(x + this.viewW / 2 + POINT_DX, y + this.viewH / 2 + POINT_DY, this.mapWidth);
     const c = tileCoordsToPixel(
       Math.min(Math.max(t.col, 0), this.mapWidth - EDGE_INSET),
       Math.min(Math.max(t.row, 0), this.mapHeight - EDGE_INSET),
       this.mapWidth,
     );
-    const nx = Math.round(c.x - this.viewW / 2);
-    const ny = Math.round(c.y - this.viewH / 2);
+    const nx = Math.round(c.x - this.viewW / 2 - POINT_DX);
+    const ny = Math.round(c.y - this.viewH / 2 - POINT_DY);
     const moved = nx !== this.x || ny !== this.y;
     this.x = nx;
     this.y = ny;
     return moved;
   }
 
+  /** Move so map pixel (mapX, mapY) is the view's centre point. */
   centerOn(mapX: number, mapY: number): boolean {
-    return this.moveTo(mapX - this.viewW / 2, mapY - this.viewH / 2);
+    return this.moveTo(mapX - this.viewW / 2 - POINT_DX, mapY - this.viewH / 2 - POINT_DY);
   }
 }
 

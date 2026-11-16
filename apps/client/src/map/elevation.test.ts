@@ -1,6 +1,6 @@
 import { TileMap } from '@aoe/sim';
 import { expect, test } from 'vitest';
-import { ELEV_H, Ground, raisedTop, tileBoxHeight, tilePicture, tileShade, tileType } from './elevation';
+import { ELEV_H, Ground, raisedTop, tileBoxHeight, tileCorners, tileMapCoords, tilePicture, tileShade, tileType } from './elevation';
 import { pixelToTileCoords, tileCoordsToPixel } from './iso';
 
 /** A 16x16 map with a square plateau of `level` over columns and rows 6-9 and a one-level ring round it. */
@@ -188,4 +188,100 @@ test('the view centres on a point at its flat place, 16 px higher on a raised-to
   // set_view_loc keeps the point on the map; the fraction is truncated to whole pixels.
   expect(ground.viewPixel(-3, 20)).toEqual(ground.viewPixel(0, 15));
   expect(ground.viewPixel(2.01, 3)).toEqual({ x: flat(2, 3).x, y: flat(2, 3).y });
+});
+
+test('viewPoint reads a centre point back from its view pixel, also on a raised-top tile', () => {
+  const map = hill(3);
+  const ground = new Ground(map);
+  let raised = 0;
+  for (let row = 1; row < 15; row++) {
+    for (let col = 1; col < 15; col++) {
+      const p = ground.viewPixel(col + 0.5, row + 0.5);
+      const back = ground.viewPoint(p.x, p.y);
+      if (raisedTop(ground.type(col, row))) {
+        raised++;
+        expect([Math.floor(back.col), Math.floor(back.row)]).toEqual([col, row]);
+        // Read as flat, as the minimap did, the same pixel is the tile one row further.
+        const flat = pixelToTileCoords(p.x, p.y, map.width);
+        expect([Math.floor(flat.col), Math.floor(flat.row)]).not.toEqual([col, row]);
+      }
+    }
+  }
+  expect(raised).toBeGreaterThan(10);
+  const flatMap = new Ground(new TileMap(10, 10));
+  expect(flatMap.viewPoint(320, 100)).toEqual(pixelToTileCoords(320, 100, 10));
+});
+
+/**
+ * `view_function` mode 0x28 over every tile in draw order (src/view.cpp:1781): the last tile `hit_tile` hits, with where the
+ * pixel is in its box and whether on the surface (the drawn shape).
+ */
+function lastHit(ground: Ground, px: number, py: number, boxTerrains: ReadonlySet<number>) {
+  const { map } = ground;
+  let best: { col: number; row: number; rank: number; type: number; x: number; y: number; onSurface: boolean } | null = null;
+  for (let row = 0; row < map.height; row++) {
+    for (let col = 0; col < map.width; col++) {
+      const box = ground.tileBox(col, row);
+      const [x, y] = [px - box.x, py - box.y];
+      if (x < 0 || x >= 64 || y < 0 || y >= box.h) continue;
+      const type = ground.type(col, row);
+      const c = tileCorners(type);
+      const halves = [3, 4, 9, 10, 15, 16].includes(type) ? [[0, 2, 3], [0, 1, 3]] : [[0, 1, 2], [1, 2, 3]];
+      const onSurface = halves.some(([a, b, d]) => {
+        const [p0, p1, p2] = [c[a!]!, c[b!]!, c[d!]!];
+        const det = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
+        const u = ((x - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (y - p0[1])) / det;
+        const v = ((p1[0] - p0[0]) * (y - p0[1]) - (x - p0[0]) * (p1[1] - p0[1])) / det;
+        return u >= 0 && v >= 0 && u + v <= 1;
+      });
+      if (!onSurface && !boxTerrains.has(map.terrainAt(col, row))) continue;
+      const rank = ground.rank[row * map.width + col]!;
+      if (!best || rank > best.rank) best = { col, row, rank, type, x, y, onSurface };
+    }
+  }
+  return best;
+}
+
+test('a click picks the last tile in draw order that hit_tile hits: the drawn shape, or the whole box for a terrain with no SLP', () => {
+  const map = hill(3);
+  // Terrain 2 (Beach) has no SLP of its own in the dat: the tiles of the south-east flank are beach.
+  for (let row = 0; row < 16; row++) for (let col = 0; col < 16; col++) if (col + row > 17) map.setTile(col, row, 2, map.elevationAt(col, row));
+  const boxTerrains = new Set([2]);
+  const shaped = new Ground(map);
+  const boxed = new Ground(map, boxTerrains);
+  let differs = 0;
+  let offSurface = 0;
+  for (let py = 100.37; py < 700; py += 3) {
+    for (let px = 150.61; px < 1000; px += 3) {
+      for (const [ground, box] of [[shaped, new Set<number>()], [boxed, boxTerrains]] as const) {
+        const want = lastHit(ground, px, py, box);
+        const got = ground.pointAt(px, py);
+        if (!want) continue;
+        if (want.onSurface) {
+          expect([px, py, Math.floor(got.col), Math.floor(got.row)]).toEqual([px, py, want.col, want.row]);
+        } else {
+          // Off the surface, in a beach tile's box: `tile_map_coords`' point in that tile.
+          offSurface++;
+          const [rx, ry] = tileMapCoords(want.type, want.x, want.y);
+          expect(got.col).toBeCloseTo(want.col + rx, 9);
+          expect(got.row).toBeCloseTo(want.row + ry, 9);
+        }
+      }
+      const a = shaped.pointAt(px, py);
+      const b = boxed.pointAt(px, py);
+      if (Math.floor(a.col) !== Math.floor(b.col) || Math.floor(a.row) !== Math.floor(b.row)) differs++;
+    }
+  }
+  // Somewhere in the beach's boxes, the box picks a tile the drawn shape does not.
+  expect(offSurface).toBeGreaterThan(100);
+  expect(differs).toBeGreaterThan(0);
+});
+
+test('tile_map_coords: exact on flat tiles, the box corner of a flat tile is the flat projection', () => {
+  expect(tileMapCoords(0, 32, 0)).toEqual([1, 0]);
+  expect(tileMapCoords(0, 0, 16)).toEqual([0, 0]);
+  expect(tileMapCoords(0, 32, 32)).toEqual([0, 1]);
+  expect(tileMapCoords(0, 64, 16)).toEqual([1, 1]);
+  const [rx, ry] = tileMapCoords(0, 2, 1);
+  expect([rx, ry]).toEqual([2 / 64 - 1 / 32 + 0.5, 2 / 64 + 1 / 32 - 0.5]);
 });

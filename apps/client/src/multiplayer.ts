@@ -99,6 +99,8 @@ export interface NetDebug {
   alliedVictory(player: number): boolean;
   /** Pixel of the minimap canvas where tile (col, row)'s objects are drawn, or null before the HUD is up. */
   minimapPoint(col: number, row: number): { x: number; y: number } | null;
+  /** The minimap's view frame: the tile it is centred on (the view's centre point's) and its rectangle on the canvas; null before the HUD is up. */
+  minimapFrame(): { col: number; row: number; left: number; top: number; right: number; bottom: number } | null;
   /** Every sound triggered so far, oldest first (whether or not audio has started); empty before the HUD is up. */
   sounds(): SoundTrigger[];
   /**
@@ -681,6 +683,7 @@ function debugPanel(
     relation: (p, q) => game.world.relation(p, q),
     alliedVictory: (p) => game.world.diplomacy.alliedVictory[p] ?? false,
     minimapPoint: (col, row) => hud()?.minimapView?.tilePoint(col, row) ?? null,
+    minimapFrame: () => hud()?.minimapView?.viewFrame() ?? null,
     sounds: () => [...(sounds()?.log ?? [])],
     audioLevels: () => audio.levels(),
     music: () => audio.music(),

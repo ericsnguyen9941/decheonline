@@ -68,6 +68,7 @@ interface Window {
     relation(player: number, other: number): number;
     alliedVictory(player: number): boolean;
     minimapPoint(col: number, row: number): { x: number; y: number } | null;
+    minimapFrame(): { col: number; row: number; left: number; top: number; right: number; bottom: number } | null;
     sounds(): { event: string; sound: number; game: number; wav: number | null; source: number; file?: string }[];
     audioLevels(): { running: boolean; sound: number; music: number };
     music(): { playing: string | null; on: boolean; volume: number; tracks: number };

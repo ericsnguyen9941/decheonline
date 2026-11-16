@@ -3,7 +3,6 @@
 import { TILE_BLACK, TILE_FOGGED, TILE_VISIBLE, typeOf, type Entity, type World } from '@aoe/sim';
 import type { AssetProvider, MapArt } from '../assets';
 import { tileShade, tileType } from '../map/elevation';
-import { pixelToTileCoords } from '../map/iso';
 import type { MapView } from '../map/map-view';
 import type { Doppelganger } from '../units/fog-objects';
 import { minimapGeometry, objectPoint, pickTile, plainMinimapShape, tileRect, viewRect, type MinimapGeometry } from './minimap-geometry';
@@ -298,12 +297,18 @@ export class Minimap {
     }
   }
 
+  /** The main view's frame (`view_rect`) and the tile it is centred on: the view's centre point's, `view_x` and `view_y`. */
+  viewFrame(): { col: number; row: number; left: number; top: number; right: number; bottom: number } | null {
+    const { camera } = this.o.view;
+    const centre = this.o.view.viewPoint();
+    const [col, row] = [Math.trunc(centre.col), Math.trunc(centre.row)];
+    const r = viewRect(this.geometry, col, row, Math.trunc(camera.viewW / TILE_W), Math.trunc(camera.viewH / TILE_H));
+    return r && { col, row, ...r };
+  }
+
   /** `draw_view_rect` (src/diam_map.cpp:826): the main view's frame, clipped to the lines, in white. */
   private drawViewRect(): void {
-    const { view, world } = this.o;
-    const { camera } = view;
-    const centre = pixelToTileCoords(camera.x + camera.viewW / 2, camera.y + camera.viewH / 2, world.map.width);
-    const r = viewRect(this.geometry, Math.trunc(centre.col), Math.trunc(centre.row), Math.trunc(camera.viewW / TILE_W), Math.trunc(camera.viewH / TILE_H));
+    const r = this.viewFrame();
     if (!r) return;
     const { shape } = this.geometry;
     const white = this.rgba(this.index(WHITE));

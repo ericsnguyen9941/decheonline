@@ -117,7 +117,14 @@ export class Ground {
   /** Draw order of each tile (`RGE_View::draw` scans the screen top to bottom, then left to right). */
   readonly rank: Uint32Array;
 
-  constructor(readonly map: TileMap) {
+  /**
+   * `boxTerrains`: the terrains with no SLP of their own (`terrain_types[t].shape` is null: Beach, Forest, Shallows, ...), which
+   * `hit_tile` hits anywhere in the tile's box; every other terrain is hit where its drawn shape is.
+   */
+  constructor(
+    readonly map: TileMap,
+    private readonly boxTerrains: ReadonlySet<number> = new Set(),
+  ) {
     const { width, height } = map;
     this.types = new Uint8Array(width * height);
     let max = 0;
@@ -187,6 +194,22 @@ export class Ground {
   }
 
   /**
+   * The point `viewPixel` puts at map pixel (px, py): the view's centre point (`RGE_Player::view_x`, `view_y`, which the
+   * minimap's frame is drawn from, `RGE_Diamond_Map::draw_view_rect`, src/diam_map.cpp:826). On a flat map that is the flat
+   * projection; the centre tile's raised top moves the pixel 16 higher, so a pixel that is the shifted flat place of a
+   * raised-top tile belongs to that tile.
+   */
+  viewPoint(px: number, py: number): { col: number; row: number } {
+    const flat = pixelToTileCoords(px, py, this.map.width);
+    if (this.flat) return flat;
+    const shifted = pixelToTileCoords(px, py + ELEV_H, this.map.width);
+    const { width, height } = this.map;
+    const col = Math.trunc(shifted.col);
+    const row = Math.trunc(shifted.row);
+    return col >= 0 && row >= 0 && col < width && row < height && raisedTop(this.type(col, row)) ? shifted : flat;
+  }
+
+  /**
    * Map pixel where the building being placed is drawn when aligned at map point (x, y) (`draw_place_object`, src/
    * view.cpp:1160): the tile's box (`get_tile_screen_coords` with `drop`, view.cpp:1430: plus its type's `y_delta`, 8
    * lower on any slope and `ELEV_H` higher on types 3, 5, 6 and 11) and the middle of `alignment_box`'s corners (src/
@@ -214,8 +237,8 @@ export class Ground {
   }
 
   /**
-   * The map point drawn at map pixel (px, py): on the front-most tile whose surface covers the pixel (`view_function`
-   * mode 0x28 keeps the last tile `hit_tile` hits in draw order, then `tile_map_coords`). Off the drawn map, the flat
+   * The map point drawn at map pixel (px, py): the last tile in draw order that `hit_tile` hits (`view_function` mode 0x28,
+   * src/view.cpp:1781), at the fraction `tile_map_coords` gives for the pixel in its box. Off the drawn map, the flat
    * projection's point, which may lie off the map.
    */
   pointAt(px: number, py: number): { col: number; row: number } {
@@ -223,8 +246,10 @@ export class Ground {
     const { width, height } = this.map;
     let best: { col: number; row: number; rank: number } | null = null;
     const seen = new Set<number>();
-    const reach = (this.maxHeight + 2) * ELEV_H;
-    for (let dy = 0; dy <= reach; dy += ELEV_H / 2) {
+    const reach = (this.maxHeight + 1) * ELEV_H;
+    // A tile's box is its flat box raised by its height (and 16 for a raised top): the tiles that can hold the pixel are those
+    // around the flat tile at the pixel lowered by each of those.
+    for (let dy = 0; dy <= reach; dy += ELEV_H) {
       const t = pixelToTileCoords(px, py + dy, width);
       const c0 = Math.floor(t.col);
       const r0 = Math.floor(t.row);
@@ -236,29 +261,100 @@ export class Ground {
           seen.add(index);
           if (best && this.rank[index]! < best.rank) continue;
           const hit = this.hitTile(col, row, px, py);
-          if (hit) best = { col: col + hit.rx, row: row + hit.ry, rank: this.rank[index]! };
+          if (hit) best = { col: col + hit[0], row: row + hit[1], rank: this.rank[index]! };
         }
       }
     }
     return best ? { col: best.col, row: best.row } : pixelToTileCoords(px, py, width);
   }
 
-  /** Where map pixel (px, py) lies on tile (col, row)'s drawn surface, as (rx, ry) within the tile; null off it. */
-  private hitTile(col: number, row: number, px: number, py: number): { rx: number; ry: number } | null {
+  /**
+   * `RGE_View::hit_tile` (src/view.cpp:3624): the pixel must lie in the tile's box (its type's `tilesizes` width and height),
+   * and, when the terrain has an SLP of its own, on its drawn shape (`shape_check`: an opaque pixel of the frame, which the
+   * two planar halves of the surface stand for); a terrain without one is hit anywhere in the box. Returns the offset (rx, ry)
+   * within the tile: on the surface, where the pixel lies on the planar halves; off it (only a box-hit terrain), the offset
+   * `tile_map_coords` gives for the pixel, which may lie outside the tile. Null when not hit.
+   */
+  private hitTile(col: number, row: number, px: number, py: number): [number, number] | null {
     const box = this.tileBox(col, row);
+    const x = px - box.x;
+    const y = py - box.y;
+    if (x < 0 || x >= TILE_W || y < 0 || y >= box.h) return null;
     const type = this.type(col, row);
-    const screen = tileCorners(type).map(([x, y]): Point => [x + box.x, y + box.y]);
+    const c = tileCorners(type);
     // The two planar halves, as corner indices (left, top, bottom, right).
     const halves = SHAPES[type]![1] ? [[0, 2, 3], [0, 1, 3]] : [[0, 1, 2], [1, 2, 3]];
     for (const [i0, i1, i2] of halves as [number, number, number][]) {
-      const [p0, p1, p2] = [screen[i0]!, screen[i1]!, screen[i2]!];
+      const [p0, p1, p2] = [c[i0]!, c[i1]!, c[i2]!];
       const det = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
-      const u = ((px - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (py - p0[1])) / det;
-      const v = ((p1[0] - p0[0]) * (py - p0[1]) - (px - p0[0]) * (p1[1] - p0[1])) / det;
+      const u = ((x - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (y - p0[1])) / det;
+      const v = ((p1[0] - p0[0]) * (y - p0[1]) - (x - p0[0]) * (p1[1] - p0[1])) / det;
       if (!(u >= 0 && v >= 0 && u + v <= 1)) continue;
       const [m0, m1, m2] = [CORNER_MAP[i0]!, CORNER_MAP[i1]!, CORNER_MAP[i2]!];
-      return { rx: m0[0] + (m1[0] - m0[0]) * u + (m2[0] - m0[0]) * v, ry: m0[1] + (m1[1] - m0[1]) * u + (m2[1] - m0[1]) * v };
+      return [m0[0] + (m1[0] - m0[0]) * u + (m2[0] - m0[0]) * v, m0[1] + (m1[1] - m0[1]) * u + (m2[1] - m0[1]) * v];
     }
-    return null;
+    return this.boxTerrains.has(this.map.terrainAt(col, row)) ? tileMapCoords(type, x, y) : null;
   }
+}
+
+/**
+ * `RGE_Map::tile_map_coords` (src/map.cpp:1880): the offset (rx, ry) within a tile of the pixel (x, y) in its box (top-left 0, 0,
+ * 64 wide, `tilesizes[type].height` tall), by the tile type's slope. A pixel off the surface gets the formula's extension, so
+ * its point may lie outside the tile. On the surface it is exact on flat, 1, 5, 7, 10-13 and within 0.13 of the surface on
+ * 2-4, 6, 8, 14 (the original's own approximation); the port uses it only off the surface. The decomp compares the pixel row `y` where the geometry wants the ratio (types 3, 4, 15,
+ * 16): the comparison here is on the ratio, which is the line each slope folds along.
+ */
+export function tileMapCoords(type: number, x: number, y: number): [number, number] {
+  const xr = x / TILE_W;
+  const yr = y / TILE_H;
+  let offset = 0;
+  switch (type) {
+    case 1:
+      offset = 2 * yr - 2 * Math.abs(0.5 - xr);
+      break;
+    case 2:
+      offset = xr > 0.5 ? -0.5 * xr - (yr - 0.5) : -0.5 * (1 - xr) - (yr - 0.5);
+      break;
+    case 3:
+      offset = xr * 0.5 < yr ? (1 - xr) * 0.5 - (yr - 0.5) : 2 * (1 - xr) - 1 + 2 * yr;
+      break;
+    case 4:
+      offset = (1 - xr) * 0.5 < yr ? xr * 0.5 - (yr - 0.5) : 2 * xr - 1 + 2 * yr;
+      break;
+    case 5:
+      offset = 2 * yr + 1 - 2 * xr;
+      break;
+    case 6:
+      offset = -0.5 * xr - (yr - 0.5);
+      break;
+    case 7:
+      offset = 2 * xr - 1 + 2 * yr;
+      break;
+    case 8:
+      offset = -0.5 * (1 - xr) - (yr - 0.5);
+      break;
+    case 10:
+      offset = yr >= 1 ? -1 : -yr;
+      break;
+    case 11:
+      offset = xr <= 0.5 ? 2 * (0.5 - xr) : 0;
+      break;
+    case 12:
+      offset = xr > 0.5 ? 2 * (xr - 0.5) : 0;
+      break;
+    case 13:
+      offset = 2 * (Math.abs(xr - 0.5) + yr);
+      break;
+    case 14:
+      offset = xr <= 0.5 ? -0.5 * xr - (yr - 0.5) : -0.5 * (1 - xr) - (yr - 0.5);
+      break;
+    case 15:
+      offset = yr <= 1 - xr * 0.5 ? 2 * xr - 1 + 2 * yr : -0.5 * (1 - xr) - (yr - 0.5);
+      break;
+    case 16:
+      offset = 1 - (1 - xr) * 0.5 < yr ? -0.5 * xr - (yr - 0.5) : 2 * yr + 1 - 2 * xr;
+      break;
+  }
+  const ry = (2 * xr - (1 - 2 * yr) + offset) * 0.5;
+  return [2 * xr - ry, ry];
 }
