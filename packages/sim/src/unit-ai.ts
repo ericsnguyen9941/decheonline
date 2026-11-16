@@ -59,6 +59,9 @@ export const AI_ORDER_HUNT = 0x2c9;
 export const AI_ORDER_REPAIR = 0x2ce;
 const AI_ORDER_MOVE_TO_TARGET = 0x2d4;
 export const AI_ORDER_STAND_GROUND = 0x2d5;
+/** `UNIT_AI_ORDER_DEFEND`, `UNIT_AI_ORDER_FOLLOW` (include/stat_obj.h): only a computer player gives them in 1.0a. */
+const AI_ORDER_DEFEND = 0x2bd;
+const AI_ORDER_FOLLOW = 0x2c8;
 /** `UNIT_AI_ORDER_TRANSPORT`, `UNIT_AI_ORDER_ENTER`, `UNIT_AI_ORDER_UNLOAD` (include/stat_obj.h). */
 const AI_ORDER_TRANSPORT = 0x2ca;
 const AI_ORDER_ENTER = 0x2cd;
@@ -220,6 +223,8 @@ export interface UnitAI {
   lastTargetType: number;
   /** `desiredTargetDistance`. */
   desiredDistance: number;
+  /** `defendTargetValue`: the object a DEFEND order guards, -1 for a position or none. */
+  defendTarget: number;
   attackers: number[];
   underAttack: boolean;
   stopAfterTargetKilled: boolean;
@@ -287,6 +292,7 @@ export function createUnitAI(ctx: Pick<GameContext, 'rng'>, t: UnitType): UnitAI
     targetType: -1,
     lastTargetType: -1,
     desiredDistance: f32(2),
+    defendTarget: -1,
     attackers: [],
     underAttack: false,
     stopAfterTargetKilled: false,
@@ -504,13 +510,15 @@ export function updateUnitAI(ctx: GameContext, e: Entity, uTime: number): void {
     for (let i = 0; i < ai.orders.length; i++) if (processOrder(ctx, e, i)) break;
   }
 
-  // `processMisc` (:563): the artifact's runs its idle check on every update (src/taiuaimd.cpp:2145-2162); the base
-  // one's DEFEND/FOLLOW upkeep is not ported.
-  if (ai.kind === AiClass.Artifact && artifactIdle(ctx, e) === IDLE_TASKED) {
-    removeCurrentTarget(ai);
-    stopObject(ctx, e, true);
-    ai.idleTimer = 0;
-  }
+  // `processMisc` (:563): the artifact's runs its idle check on every update (src/taiuaimd.cpp:2145-2162); the civilian's
+  // and the priest's do nothing for a human player (src/taiuaimd.cpp:875, :1176); every other class runs the base one.
+  if (ai.kind === AiClass.Artifact) {
+    if (artifactIdle(ctx, e) === IDLE_TASKED) {
+      removeCurrentTarget(ai);
+      stopObject(ctx, e, true);
+      ai.idleTimer = 0;
+    }
+  } else if (ai.kind !== AiClass.Civilian && ai.kind !== AiClass.Priest) processMisc(ctx, e);
 
   if (ai.idleTimer > ai.adjustedIdleTimeout) {
     ai.idleTimer = 0;
@@ -550,16 +558,19 @@ function inAttackRange(ctx: PlayerMasters, e: Entity, target: Entity): boolean {
  * towards the target's tile.
  */
 function canPath(ctx: GameContext, e: Entity, target: Entity, range: number): boolean {
+  return canPathTo(ctx, e, toInt(target.x), toInt(target.y), range, target.id);
+}
+
+/** `canPath(point, range)` (src/move_obj.cpp): the same towards tile (gx, gy), `targetId` -1 for a point. */
+function canPathTo(ctx: GameContext, e: Entity, gx: number, gy: number, range: number, targetId: number): boolean {
   if (!e.mover) return false;
   const t = typeOf(ctx, e);
   const sx = toInt(e.x);
   const sy = toInt(e.y);
-  const gx = toInt(target.x);
-  const gy = toInt(target.y);
   const zones = ctx.pathing.zones.of(t);
   const w = ctx.map.width;
   if (zones.at(w, gx, gy) !== zones.at(w, sx, sy) && !zones.withinRange(sx, sy, gx, gy, range)) return false;
-  return ctx.pathing.findTilePath(e, t, sx, sy, gx, gy, range, target.id).found;
+  return ctx.pathing.findTilePath(e, t, sx, sy, gx, gy, range, targetId).found;
 }
 
 /** `canAttackUnit`: a priest's is `canConvert`. */
@@ -698,17 +709,22 @@ interface Seen {
  */
 function search(ctx: GameContext, e: Entity): Seen[][] {
   const buckets: Seen[][] = [[], [], [], [], []];
-  const groups = IMPORTANT[e.ai!.kind];
+  const ai = e.ai!;
+  const groups = IMPORTANT[ai.kind];
   const v = ctx.visibility;
   if (!groups || !v || e.owner >= v.players) return buckets;
-  const t = typeOf(ctx, e);
+  // A unit on a DEFEND order of an object with a unit AI looks from that object, with its sight and its owner's records
+  // (src/aiuaimod.cpp:1127-1138).
+  const guarded = ai.order === AI_ORDER_DEFEND && ai.defendTarget !== -1 ? ctx.entities.get(ai.defendTarget) : undefined;
+  const from = guarded?.ai && guarded.owner < v.players ? guarded : e;
+  const t = typeOf(ctx, from);
   let radius = toInt(t.los);
-  if (t.id === 118) radius += radius;
+  if (from === e && t.id === 118) radius += radius;
   if (radius > 15) radius = 15;
-  const cx = toInt(e.x);
-  const cy = toInt(e.y);
+  const cx = toInt(from.x);
+  const cy = toInt(from.y);
   for (const group of groups) {
-    for (const r of v.recordsOf(e.owner, group)) {
+    for (const r of v.recordsOf(from.owner, group)) {
       if (r.x > cx + radius || r.x < cx - radius || r.y > cy + radius || r.y < cy - radius) continue;
       const d = VISIBLE_DISTANCE[Math.abs(r.y - cy) & 15]![Math.abs(r.x - cx) & 15]!;
       if (d > radius) continue;
@@ -1566,6 +1582,12 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
     case AI_ORDER_CONVERT:
       ok = priestObject(ctx, e, o.target, ACTION_CONVERT, true);
       break;
+    case AI_ORDER_DEFEND:
+      ok = o.target === -1 ? defendPosition(e, o.x, o.y, o.range) : defendObject(ctx, e, o.target, o.range);
+      break;
+    case AI_ORDER_FOLLOW:
+      ok = followObject(ctx, e, o.target, o.range);
+      break;
     case AI_ORDER_ENTER:
       ok = enterObject(ctx, e, o.target);
       break;
@@ -1589,6 +1611,148 @@ function processOrder(ctx: GameContext, e: Entity, index: number): boolean {
   for (let i = index; i < q.length - 1; i++) q[i] = { ...q[i + 1]!, range: q[i]!.range };
   q.pop();
   return ok;
+}
+
+/** `defendObject(target, range, 1)` (src/aiuaimod.cpp:2259): the DEFEND action (0x259) on an existing object. */
+function defendObject(ctx: GameContext, e: Entity, targetId: number, range: number): boolean {
+  const target = ctx.entities.get(targetId);
+  if (!target) return false;
+  const ai = e.ai!;
+  setAction(ai, AI_ACTION_DEFEND);
+  setTarget(ai, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
+  ai.defendTarget = targetId;
+  ai.desiredDistance = f32(range);
+  return true;
+}
+
+/** `defendPosition(x, y, range, 1)` (src/aiuaimod.cpp:2280): the DEFEND action on a point, at the unit's own z. */
+function defendPosition(e: Entity, x: number, y: number, range: number): boolean {
+  const ai = e.ai!;
+  setAction(ai, AI_ACTION_DEFEND);
+  setTarget(ai, -1, ai.targetType, x, y, e.z);
+  ai.defendTarget = -1;
+  ai.desiredDistance = f32(range);
+  return true;
+}
+
+/** `followObject(target, range, 1)` (src/aiuaimod.cpp:2240): the FOLLOW action (0x264) on an existing object. */
+function followObject(ctx: GameContext, e: Entity, targetId: number, range: number): boolean {
+  const target = ctx.entities.get(targetId);
+  if (!target) return false;
+  const ai = e.ai!;
+  setAction(ai, AI_ACTION_FOLLOW);
+  setTarget(ai, targetId, typeOf(ctx, target).group, target.x, target.y, target.z);
+  ai.desiredDistance = f32(range);
+  return true;
+}
+
+/**
+ * `UnitAIModule::moveTo(target, range, 1)` (src/aiuaimod.cpp:2017) over `RGE_Combat_Object::moveTo` (src/com_obj.cpp:605):
+ * a move to the object replaces every action, then the MOVE action and the target recorded. The original walks with
+ * the master's run sprite when it has one; the sim table has only the move sprite.
+ */
+function aiMoveToObject(ctx: GameContext, e: Entity, target: Entity, range: number): boolean {
+  if (!e.mover) return false;
+  deleteActions(ctx, e);
+  startMoveTo(e, target, target.x, target.y, target.z, range, null, false, ctx);
+  setAction(e.ai!, AI_ACTION_MOVE);
+  setTarget(e.ai!, target.id, typeOf(ctx, target).group, target.x, target.y, target.z);
+  return true;
+}
+
+/** `distance_to_position` (src/stat_obj.cpp:2323): per axis the gap less the object's radius, at least 0, then the length. */
+function distanceToPosition(ctx: GameContext, e: Entity, x: number, y: number): number {
+  const t = typeOf(ctx, e);
+  let dx = sub32(Math.abs(sub32(e.x, x)), t.radiusX);
+  let dy = sub32(Math.abs(sub32(e.y, y)), t.radiusY);
+  if (dx < 0) dx = 0;
+  if (dy < 0) dy = 0;
+  return sqrt32(add32(mul32(dx, dx), mul32(dy, dy)));
+}
+
+/** The object id the unit's top action aims at (`currentTargetID`), -1 none. */
+function topActionTarget(e: Entity): number {
+  if (e.attack) return e.attack.target;
+  if (e.work) return e.work.target;
+  return e.mover?.action?.target ?? -1;
+}
+
+/** The DEFEND or FOLLOW order ends: no defended object, no target, a stop and no order (src/aiuaimod.cpp:3530-3546). */
+function endGuard(ctx: GameContext, e: Entity): void {
+  const ai = e.ai!;
+  ai.defendTarget = -1;
+  removeCurrentTarget(ai);
+  stopObject(ctx, e, true);
+  ai.order = -1;
+}
+
+/**
+ * The base `processMisc` (src/aiuaimod.cpp:3477-3690, unit-ai.md §4.6) for the order in force (the current order, else
+ * the current action + 100). The ATTACK case is the computer player's and is not ported. DEFEND: a defended object that
+ * is gone, or below active and not Gaia's, ends the order; unless attacking, or walking to the defended object, the unit
+ * walks back when farther than the desired distance + 1 and it can path there; within it, it attacks the defended
+ * object's closest attacker, else looks for a target (`processIdle`). FOLLOW: a followed object gone or below active
+ * ends the order; once it has moved more than 1 tile on an axis from the recorded point, the point follows it and the
+ * unit walks there when farther than the desired distance.
+ */
+function processMisc(ctx: GameContext, e: Entity): void {
+  const ai = e.ai!;
+  const order = ai.order !== -1 ? ai.order : ai.action !== -1 ? ai.action + 100 : -1;
+  if (order === AI_ORDER_DEFEND) {
+    let target: Entity | undefined;
+    if (ai.defendTarget !== -1) {
+      target = ctx.entities.get(ai.defendTarget);
+      if (!target) return endGuard(ctx, e);
+      if (ai.targetX === -1) {
+        ai.targetX = target.x;
+        ai.targetY = target.y;
+      }
+      if (target.state > ObjectState.Active && target.owner !== 0) return endGuard(ctx, e);
+    }
+    if (ai.action === AI_ACTION_ATTACK || (ai.action === AI_ACTION_MOVE && topActionTarget(e) === ai.defendTarget)) return;
+    let distance: number;
+    if (target) {
+      ai.targetX = target.x;
+      ai.targetY = target.y;
+      ai.targetZ = target.z;
+      distance = distanceToObject(ctx, e, target);
+    } else distance = distanceToPosition(ctx, e, ai.targetX, ai.targetY);
+    if (distance > add32(ai.desiredDistance, 1)) {
+      if (target) {
+        if (canPath(ctx, e, target, ai.desiredDistance)) aiMoveToObject(ctx, e, target, ai.desiredDistance);
+      } else if (canPathTo(ctx, e, toInt(ai.targetX), toInt(ai.targetY), ai.desiredDistance, -1)) {
+        aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, ai.desiredDistance, true);
+      }
+      return;
+    }
+    if (target?.ai) {
+      const attacker = closestAttacker(ctx, target);
+      if (attacker !== -1) {
+        attackObject(ctx, e, attacker, true);
+        return;
+      }
+      processIdle(ctx, e, false);
+    }
+  } else if (order === AI_ORDER_FOLLOW) {
+    let target: Entity | undefined;
+    if (ai.target !== -1) {
+      target = ctx.entities.get(ai.target);
+      if (!target || target.state > ObjectState.Active) return endGuard(ctx, e);
+    }
+    const xDiff = target ? sub32(target.x, ai.targetX) : -10;
+    const yDiff = target ? sub32(target.y, ai.targetY) : -10;
+    if (xDiff >= -1 && xDiff <= 1 && yDiff >= -1 && yDiff <= 1) return;
+    let distance: number;
+    if (target) {
+      ai.targetX = target.x;
+      ai.targetY = target.y;
+      ai.targetZ = target.z;
+      distance = distanceToObject(ctx, e, target);
+    } else distance = distanceToPosition(ctx, e, ai.targetX, ai.targetY);
+    if (distance <= ai.desiredDistance) return;
+    if (target) aiMoveToObject(ctx, e, target, ai.desiredDistance);
+    else aiMoveTo(ctx, e, ai.targetX, ai.targetY, ai.targetZ, ai.desiredDistance, true);
+  }
 }
 
 /** `repairObject` (src/aiuaimod.cpp:1884): the unit's `repair`, then the action and target recorded. */
